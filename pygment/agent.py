@@ -1,14 +1,12 @@
 import torch
 from torch import nn
-import torch.functional as F
 import numpy as np
 import random
 import time
 from copy import deepcopy
-from actions import GreedyEpsilonSelector, calc_loss_prios, calc_loss
-from common import wrap_env
+from .actions import GreedyEpsilonSelector, calc_loss
+from .common import wrap_env
 from collections import deque
-import gymnasium as gym
 
 
 class DQN(nn.Module):
@@ -54,6 +52,10 @@ class DualNet:
                                 'sigmoid': nn.Sigmoid(),
                                 'leaky': nn.LeakyReLU()}
 
+        self.__output_activations__ = {'sigmoid': nn.Sigmoid(),
+                                       'softmax': nn.Softmax(),
+                                       'linear': None}
+
     def sync(self):
         self.target_net.load_state_dict(self.main_net.state_dict())
 
@@ -69,34 +71,25 @@ class BaseAgent:
 
 class DQNAgent(BaseAgent):
     """
-    DQNAgent is a memoryless DQN agent which calculates Q values
+    DQNAgent is a DQN agent which calculates Q values
     from the observations and  converts them into the actions using action_selector
     """
-
-    '''
-    def __init__(self, net, optimizer=torch.optim.Adam, epsilon=1, gamma=0.999999, lr=0.001, device="mps"):
-        self.net = net
-        self.device = device
-        self.net.main_net.to(self.device)
-        self.net.target_net.to(self.device)
-        self.epsilon = epsilon
-        self.gamma = gamma
-        self.learning_rate = lr
-        self.optimizer = optimizer(self.net.main_net.parameters(), lr=self.learning_rate)
-        self.replay_buffer = deque([], maxlen=10000)
-        # self.replay_buffer_priorities = deque([], maxlen=10000)'''
 
     def __init__(self):
         super().__init__()
         self.net = DualNet(nn.Sequential())
         self.device = 'mps'
-        self.epsilon = 1
-        self.gamma = 0.999
-        self.learning_rate = 0.001
         self.optimizer = None
         self.env = None
         self.__compiled__ = False
         self.replay_buffer = None
+        self.__epsilon__ = None
+        self.__eps_decay_rate__ = None
+        self.__gamma__ = None
+        self.__min_epsilon__ = None
+        self.__batch_size__ = None
+        self.__target_update__ = None
+        self.__max_steps__ = None
         self.__optimizers__ = {'adam': torch.optim.Adam,
                                'sgd': torch.optim.SGD,
                                'rmsprop': torch.optim.RMSprop}
@@ -113,13 +106,17 @@ class DQNAgent(BaseAgent):
             super().__init__()
             self.net = DualNet(nn.Sequential())
             self.device = 'mps'
-            self.epsilon = 1
-            self.gamma = 0.999
-            self.learning_rate = 0.001
             self.optimizer = None
             self.env = None
             self.__compiled__ = False
             self.replay_buffer = None
+            self.__epsilon__ = None
+            self.__eps_decay_rate__ = None
+            self.__gamma__ = None
+            self.__min_epsilon__ = None
+            self.__batch_size__ = None
+            self.__target_update__ = None
+            self.__max_steps__ = None
 
     def load_env(self, env, stack_frames=1, reward_clipping=False):
         self.env = wrap_env(env, stack_frames, reward_clipping)
@@ -149,45 +146,44 @@ class DQNAgent(BaseAgent):
             self.net.main_net.append(activation)
 
     def compile(self, optimizer, learning_rate=0.001, output_activation='linear'):
-        if self.__compiled__:
-            raise AttributeError('Model is already compiled!')
-
-        if not self.net.main_net:
-            raise AttributeError('Please add a hidden layer before compiling.')
-
-        if optimizer not in self.__optimizers__.keys():
-            raise KeyError('Invalid optimizer key -> select one of "adam", "sgd", "rmsprop"')
-
+        self.compile_check(optimizer, output_activation)
         self.optimizer = self.__optimizers__[optimizer](self.net.main_net.parameters(),
                                                         lr=learning_rate)
+        self.output_activation = output_activation
+
         self.net.main_net.append(nn.Linear(self.net.main_net[-2].out_features,
                                            self.net.action_space))
-        self.net.target_net = deepcopy(self.net.main_net)
+        if self.net.__output_activations__[output_activation] is not None:
+            self.net.main_net.append(self.net.__output_activations__[output_activation])
 
+        self.net.main_net.to(self.device)
+        self.net.target_net = deepcopy(self.net.main_net)
         self.__compiled__ = True
 
-    def train(self, target_reward, episodes=10000, buffer=10000, target_update=1000):
-        if self.env is None:
-            raise AttributeError('Please load environment first')
-        if not self.net.main_net:
-            raise AttributeError('Please add a hidden layer first')
-        if not self.__compiled__:
-            raise AttributeError('Model must be compiled first')
-
+    def train(self, target_reward, episodes=10000, batch_size=64, buffer=10000, target_update=500, gamma=0.999999,
+              epsilon=1, decay_rate=0.999, min_epsilon=0.02, max_steps=500):
+        self.method_check()
         self.replay_buffer = deque([], maxlen=buffer)
+        self.__gamma__ = gamma
+        self.__epsilon__ = epsilon
+        self.__eps_decay_rate__ = decay_rate
+        self.__min_epsilon__ = min_epsilon
+        self.__batch_size__ = batch_size
+        self.__target_update__ = target_update
+        self.__max_steps__ = max_steps
+
         self.fill_buffer()
 
         if not self.full_buffer():
             raise AttributeError('Error with buffer filling')
 
         total_steps = 0
-        max_steps = 500
         total_rewards = []
         total_loss = []
         current_reward = []
-        last_reward = []
         current_loss = deque([], maxlen=100)
-        start = time.time()
+        total_start = time.time()
+        local_start = time.time()
 
         for episode in range(episodes):
             episode += 1
@@ -200,48 +196,55 @@ class DQNAgent(BaseAgent):
 
             prem_done = False
             done = False
-            state = env.reset()[0]
+            state = self.env.reset()[0]
 
-            while (not done) and (not prem_done) and (num_steps < max_steps):
+            while (not done) and (not prem_done) and (num_steps < self.__max_steps__):
                 total_steps += 1
                 num_steps += 1
-                agent.epsilon *= 0.99
-                agent.epsilon = max(0.02, agent.epsilon)
-                action = agent.action_selector(state)
-                next_state, reward, done, prem_done, info = env.step(action)
+                self.__epsilon__ *= self.__eps_decay_rate__
+                self.__epsilon__ = max(self.__min_epsilon__, self.__epsilon__)
+                action = self.action_selector(state)
+                next_state, reward, done, prem_done, info = self.env.step(action)
 
-                loss = agent.process_batch(32)
+                loss = self.process_batch(self.__batch_size__)
 
-                agent.buffer_update(Experience(state, action, reward, next_state, done, prem_done))
+                self.buffer_update(Experience(state, action, reward, next_state, done, prem_done))
 
                 state = next_state
 
                 current_loss.append(loss)
                 current_reward.append(reward)
 
-                if total_steps % 500 == 0:
-                    print('Updating target network...')
-                    agent.net.sync()
+                if total_steps % self.__target_update__ == 0:
+                    self.net.sync()
 
-            if prem_done:
-                raise ValueError('Prematurely truncated')
+                if (time.time() - local_start >= 2) & (len(last_reward) > 0):
+                    print(f'Reward: {np.array(last_reward).sum()}, Loss: {np.array(current_loss).mean()}')
+                    local_start = time.time()
 
             if np.array(current_reward).sum() >= target_reward:
-                end = time.time()
-                print(f'Solved in {round((end - start) / 60, 1)} minutes!')
+                total_end = time.time()
+                duration = total_end - total_start
+                if duration < 300:
+                    print(f'Solved in {round((total_end - total_start), 0)} seconds!')
+                elif duration < 3600:
+                    print(f'Solved in {round((total_end - total_start) / 60, 1)} minutes!')
+                else:
+                    print(f'Solved in {round((total_end - total_start) / 3600, 1)} hours!')
+
                 print(f'Final reward: {np.array(current_reward).sum()}')
                 break
 
     def fill_buffer(self):
+        self.method_check()
         print('Filling buffer...')
         while True:
             state = self.env.reset()[0]
             done = False
             prem_done = False
-            max_steps = 1000
             num_steps = 0
 
-            while (not done) and (not prem_done) and (num_steps < max_steps) and (not self.full_buffer()):
+            while (not done) and (not prem_done) and (num_steps < self.__max_steps__) and (not self.full_buffer()):
                 num_steps += 1
                 action = np.random.randint(self.env.action_space.n)
                 next_state, reward, done, prem_done, info = self.env.step(action)
@@ -256,39 +259,38 @@ class DQNAgent(BaseAgent):
         print('Buffer full.')
 
     def full_buffer(self):
+        self.method_check()
         return self.replay_buffer.__len__() == self.replay_buffer.maxlen
 
-    def buffer_update(self, sample):  # , sample_weight=None):
+    def buffer_update(self, sample):
+        self.method_check()
         self.replay_buffer.append(sample)
 
-    def action_selector(self, obs):
-        return GreedyEpsilonSelector(torch.tensor(obs).to(self.device), self.epsilon, self.net.main_net)
+    def action_selector(self, obs, no_epsilon=False):
+        self.method_check()
+        if no_epsilon:
+          return GreedyEpsilonSelector(torch.tensor(obs).to(self.device), 0, self.net.main_net)
+
+        return GreedyEpsilonSelector(torch.tensor(obs).to(self.device), self.__epsilon__, self.net.main_net)
 
     def process_batch(self, batch_size: int, top_percentile: float = 1.0) -> object:
+        self.method_check()
         batch = self.buffer_sample(batch_size, top_percentile)
-
-
-        #loss_v, batch_prios = calc_loss_prios(batch, batch_weights, self.device, self.net, self.gamma)
-        loss_v = calc_loss(batch, self.device, self.net, self.gamma)
+        loss_v = calc_loss(batch, self.device, self.net, self.__gamma__)
 
         self.optimizer.zero_grad()
         loss_v.backward()
-
         self.optimizer.step()
-        #self.buffer_update_priorities(batch_indices, batch_prios)
 
         return loss_v.item()
 
     def buffer_sample(self, batch_size, top_percentile):
-        #normalized_weights = np.array(self.replay_buffer_priorities) ** 0.6
-        #normalized_weights = normalized_weights / normalized_weights.sum()
-
+        self.method_check()
         batch_size = round(batch_size / top_percentile)
 
         batch_indices = np.random.choice([i for i in range(len(self.replay_buffer))],
                                          size=batch_size,
                                          replace=False)
-                                         #p=normalized_weights)
         batch = []
         rewards = []
         for index in batch_indices:
@@ -300,13 +302,31 @@ class DQNAgent(BaseAgent):
             new_batch = []
             for new_index in filtered_batch_indices:
                 new_batch.append(batch[new_index])
-
         else:
             new_batch = batch
 
-        # new_batch_indices = batch_indices[filtered_batch_indices]
-        # batch_weights = np.array(self.replay_buffer_priorities)[batch_indices]
-        return new_batch  # , new_batch_indices , batch_weights
+        return new_batch
+
+    def method_check(self):
+        if self.env is None:
+            raise AttributeError('Please load environment first')
+        if not self.net.main_net:
+            raise AttributeError('Please add a hidden layer first')
+        if not self.__compiled__:
+            raise AttributeError('Model must be compiled first')
+
+    def compile_check(self, optimizer, output_activation):
+      if self.__compiled__:
+        raise AttributeError('Model is already compiled!')
+
+      if not self.net.main_net:
+        raise AttributeError('Please add a hidden layer before compiling.')
+
+      if optimizer not in self.__optimizers__.keys():
+        raise KeyError('Invalid optimizer key -> select one of "adam", "sgd", "rmsprop"')
+
+      if output_activation not in self.net.__output_activations__.keys():
+        raise KeyError('Invalid output_activation key -> select one of "linear", "sigmoid", "softmax"')
 
 
 class Experience:

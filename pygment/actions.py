@@ -4,7 +4,7 @@ import torch.nn.functional as F
 
 
 def GreedyEpsilonSelector(obs, epsilon, net):
-    action_space = net.net[-1].out_features
+    action_space = net[-1].out_features
     if np.random.random() <= epsilon:
         action = np.random.randint(action_space)
 

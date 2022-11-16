@@ -1,4 +1,4 @@
-from agent import DQNAgent
+from .agent import DQNAgent
 
 
 def create_agent():
