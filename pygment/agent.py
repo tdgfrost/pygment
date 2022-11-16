@@ -222,7 +222,7 @@ class DQNAgent(BaseAgent):
                     print(f'Reward: {np.array(last_reward).sum()}, Loss: {np.array(current_loss).mean()}')
                     local_start = time.time()
 
-            if np.array(current_reward).sum() >= target_reward:
+            if (np.array(total_rewards[-10:]) >= target_reward).all():
                 total_end = time.time()
                 duration = total_end - total_start
                 if duration < 300:
