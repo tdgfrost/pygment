@@ -6,6 +6,7 @@ The initial scope of the project will aim to create an agent, which can then loa
 
 A demonstration of the use of this module is shown below:
 
+```
 import pygment as pm
 import gymnasium as gym
 
@@ -16,8 +17,10 @@ agent.add_layer(64, 'relu')
 agent.add_layer(256, 'relu')
 agent.compile(optimizer='adam', learning_rate=0.001)
 agent.train()
-
+```
 A print-out of the training will be provided.
-The trained network can then be invoked by calling:
 
+The trained network can then be invoked by calling:
+```
 agent.net.main_net(obs)
+```
