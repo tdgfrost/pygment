@@ -49,8 +49,6 @@ def calc_loss(batch, device, model, gamma):
 
     with torch.no_grad():
         next_states_v = torch.tensor(next_states).to(device)
-        #new_state_actions = torch.max(model.main_net(next_states_v).detach(), 1)[1]
-        #next_state_values = model.target_net(next_states_v).gather(1, new_state_actions.unsqueeze(-1)).squeeze(-1)
         next_state_values = model.target_net(next_states_v).max(1)[0]
         next_state_values[done_mask] = 0.0
         expected_state_action_values = next_state_values.detach() * gamma + rewards_v
