@@ -4,8 +4,8 @@ import numpy as np
 import random
 import time
 from copy import deepcopy
-from .actions import GreedyEpsilonSelector, calc_loss
-from .net import DualNet
+from .actions import GreedyEpsilonSelector, calc_loss_batch
+from .net import DualNet, ActorCriticNet
 from .common import wrap_env
 from collections import deque
 
@@ -22,7 +22,10 @@ class BaseAgent:
         self.action_space = None
         self.observation_space = None
         self.output_activation = None
+        self.__optimizer = None
+        self.__output_activation = None
         self._compiled = False
+        self._gamma = None
         self._epsilon = None
         self._eps_decay_rate = None
         self._min_epsilon = None
@@ -48,7 +51,10 @@ class BaseAgent:
             self.action_space = None
             self.observation_space = None
             self.output_activation = None
+            self.__optimizer = None
+            self.__output_activation = None
             self._compiled = False
+            self._gamma = None
             self._epsilon = None
             self._eps_decay_rate = None
             self._min_epsilon = None
@@ -62,6 +68,7 @@ class BaseAgent:
 
         return reset_done
 
+
     def load_env(self, env, stack_frames=1, reward_clipping=False):
         self.env = wrap_env(env, stack_frames, reward_clipping)
         self.action_space = self.env.action_space.n
@@ -72,6 +79,24 @@ class BaseAgent:
             pass
 
 
+    def compile_check(self):
+        if self._compiled:
+            raise AttributeError('Model is already compiled!')
+        if self.__optimizer not in self._optimizers.keys():
+            raise KeyError('Invalid optimizer key -> select one of "adam", "sgd", "rmsprop"')
+        if not self.net.has_net:
+            raise AttributeError('Please add a neural network before compiling.')
+
+
+    def method_check(self, env_loaded, net_exists, compiled):
+        if (self.env is None) and env_loaded:
+            raise AttributeError('Please load environment first')
+        if (not self.net.has_net) and net_exists:
+            raise AttributeError('Please add a hidden layer first')
+        if (not self._compiled) and compiled:
+            raise AttributeError('Model must be compiled first')
+
+
 class ActorCritic(BaseAgent):
     """
     ActorCritic uses the actor-critic neural network to solve environments
@@ -79,6 +104,55 @@ class ActorCritic(BaseAgent):
 
     def __init__(self):
         super().__init__()
+        self.net = ActorCriticNet()
+
+
+    def add_network(self, layers=1, nodes=None):
+        if nodes is None:
+            nodes = [128]
+
+        if (not isinstance(layers, int)) or (layers == 0):
+            raise ValueError('Layers must be a non-zero integer')
+        if (not isinstance(nodes, list)) or (not np.issubdtype(np.array(nodes).dtype, np.integer)):
+            raise TypeError('Node values must be entered as integers within a list')
+        if len(nodes) != layers:
+            raise AttributeError('Layers and nodes must match')
+
+        self.net.add_layers(layers, nodes, self.observation_space, self.action_space)
+        self.net.has_net = True
+
+
+    def compile(self, optimizer, learning_rate=0.001):
+        self.__optimizer = optimizer
+        super().compile_check()
+
+        self.optimizer = self._optimizers[optimizer](self.net.parameters(),
+                                                     lr=learning_rate)
+
+        self._compiled = True
+
+
+    def train(self, episodes=10000, gamma=0.999, max_steps=None):
+        self.method_check(env_loaded=True, net_exists=True, compiled=True)
+        self._gamma = gamma
+        if max_steps is None:
+            max_steps = self._max_steps if self.max_steps is not None else 10000
+
+        for episode in range(episodes):
+            state = self.env.reset()[0]
+            for num_step in range(max_steps):
+
+
+
+    def action_selector(self):
+        pass
+
+
+    def reset(self):
+        reset_done = super().reset()
+
+        if reset_done:
+            self.net = ActorCriticNet()
 
 
 
@@ -92,7 +166,6 @@ class DQNAgent(BaseAgent):
         super().__init__()
         self.net = DualNet(nn.Sequential())
         self.replay_buffer = None
-        self._gamma = None
         self._tau = None
         self._batch_size = None
 
@@ -103,7 +176,6 @@ class DQNAgent(BaseAgent):
         if reset_done:
             self.net = DualNet(nn.Sequential())
             self.replay_buffer = None
-            self._gamma = None
             self._tau = None
             self._batch_size = None
 
@@ -118,7 +190,7 @@ class DQNAgent(BaseAgent):
         if activation not in self.net.activations.keys():
             raise KeyError('Please enter a valid activation type: ["relu", "sigmoid", "leaky"]')
 
-        activation = self.net.activations[activation]
+        activation = self.net.activations[activation]()
 
         if self.net.main_net:
             self.net.main_net.append(nn.Linear(self.net.main_net[-2].out_features,
@@ -126,13 +198,19 @@ class DQNAgent(BaseAgent):
             self.net.main_net.append(activation)
 
         else:
+            self.net.observation_space = self.observation_space
+            self.net.action_space = self.action_space
             self.net.main_net.append(nn.Linear(self.net.observation_space,
                                                neurons))
             self.net.main_net.append(activation)
 
+        self.net.has_net = True
+
 
     def compile(self, optimizer, learning_rate=0.001, output_activation='linear'):
-        self.compile_check(optimizer, output_activation)
+        self.__optimizer = optimizer
+        self.__output_activation = output_activation
+        self.compile_check()
         self.optimizer = self._optimizers[optimizer](self.net.main_net.parameters(),
                                                         lr=learning_rate)
         self.output_activation = output_activation
@@ -140,7 +218,7 @@ class DQNAgent(BaseAgent):
         self.net.main_net.append(nn.Linear(self.net.main_net[-2].out_features,
                                            self.net.action_space))
         if self.net.output_activations[output_activation] is not None:
-            self.net.main_net.append(self.net.output_activations[output_activation])
+            self.net.main_net.append(self.net.output_activations[output_activation]())
 
         self.net.main_net.to(self.device)
         self.net.target_net = deepcopy(self.net.main_net)
@@ -149,7 +227,7 @@ class DQNAgent(BaseAgent):
 
     def train(self, target_reward, episodes=10000, batch_size=64, buffer=10000, gamma=0.999999,
               epsilon=1, tau=0.001, decay_rate=0.999, min_epsilon=0.02, max_steps=None):
-        self.method_check()
+        self.method_check(env_loaded=True, net_exists=True, compiled=True)
         self.replay_buffer = deque([], maxlen=buffer)
         self._gamma = gamma
         self._epsilon = epsilon
@@ -158,9 +236,9 @@ class DQNAgent(BaseAgent):
         self._min_epsilon = min_epsilon
         self._batch_size = batch_size
         if max_steps is None:
-            max_steps = self._max_steps
+            max_steps = self._max_steps if self.max_steps is not None else 10000
 
-        self.fill_buffer()
+        self.fill_buffer(max_steps)
 
         if not self.full_buffer():
             raise AttributeError('Error with buffer filling')
@@ -187,9 +265,8 @@ class DQNAgent(BaseAgent):
             done = False
             state = self.env.reset()[0]
 
-            while (not done) and (not prem_done) and (num_steps < max_steps):
+            for num_steps in range(max_steps):
                 total_steps += 1
-                num_steps += 1
                 self._epsilon *= self._eps_decay_rate
                 self._epsilon = max(self._min_epsilon, self._epsilon)
                 action = self.action_selector(state)
@@ -211,6 +288,9 @@ class DQNAgent(BaseAgent):
                     last_reward = []
                     local_start = time.time()
 
+                if done or prem_done:
+                    break
+
             if len(total_rewards) >= 100:
                 if np.array(total_rewards[-100:]).mean() >= target_reward:
                     total_end = time.time()
@@ -226,8 +306,8 @@ class DQNAgent(BaseAgent):
                     break
 
 
-    def fill_buffer(self):
-        self.method_check()
+    def fill_buffer(self, max_steps):
+        self.method_check(env_loaded=True, net_exists=True, compiled=True)
         print('Filling buffer...')
         while True:
             state = self.env.reset()[0]
@@ -250,18 +330,8 @@ class DQNAgent(BaseAgent):
         print('Buffer full.')
 
 
-    def full_buffer(self):
-        self.method_check()
-        return self.replay_buffer.__len__() == self.replay_buffer.maxlen
-
-
-    def buffer_update(self, sample):
-        self.method_check()
-        self.replay_buffer.append(sample)
-
-
     def action_selector(self, obs, no_epsilon=False):
-        self.method_check()
+        self.method_check(env_loaded=True, net_exists=True, compiled=True)
         if no_epsilon:
           return GreedyEpsilonSelector(torch.tensor(obs).to(self.device), 0, self.net.main_net)
 
@@ -269,9 +339,9 @@ class DQNAgent(BaseAgent):
 
 
     def process_batch(self, batch_size: int, top_percentile: float = 1.0) -> object:
-        self.method_check()
+        self.method_check(env_loaded=True, net_exists=True, compiled=True)
         batch = self.buffer_sample(batch_size, top_percentile)
-        loss_v = calc_loss(batch, self.device, self.net, self._gamma)
+        loss_v = calc_loss_batch(batch, self.device, self.net, self._gamma)
 
         self.optimizer.zero_grad()
         loss_v.backward()
@@ -280,8 +350,18 @@ class DQNAgent(BaseAgent):
         return loss_v.item()
 
 
+    def full_buffer(self):
+        self.method_check(env_loaded=True, net_exists=True, compiled=True)
+        return self.replay_buffer.__len__() == self.replay_buffer.maxlen
+
+
+    def buffer_update(self, sample):
+        self.method_check(env_loaded=True, net_exists=True, compiled=True)
+        self.replay_buffer.append(sample)
+
+
     def buffer_sample(self, batch_size, top_percentile):
-        self.method_check()
+        self.method_check(env_loaded=True, net_exists=True, compiled=True)
         batch_size = round(batch_size / top_percentile)
 
         batch_indices = np.random.choice([i for i in range(len(self.replay_buffer))],
@@ -304,27 +384,11 @@ class DQNAgent(BaseAgent):
         return new_batch
 
 
-    def method_check(self):
-        if self.env is None:
-            raise AttributeError('Please load environment first')
-        if not self.net.main_net:
-            raise AttributeError('Please add a hidden layer first')
-        if not self._compiled:
-            raise AttributeError('Model must be compiled first')
+    def compile_check(self):
+        super().compile_check()
 
-
-    def compile_check(self, optimizer, output_activation):
-      if self._compiled:
-        raise AttributeError('Model is already compiled!')
-
-      if not self.net.main_net:
-        raise AttributeError('Please add a hidden layer before compiling.')
-
-      if optimizer not in self._optimizers.keys():
-        raise KeyError('Invalid optimizer key -> select one of "adam", "sgd", "rmsprop"')
-
-      if output_activation not in self.net.output_activations.keys():
-        raise KeyError('Invalid output_activation key -> select one of "linear", "sigmoid", "softmax"')
+        if self.__output_activation not in self.net.output_activations.keys():
+            raise KeyError('Invalid output_activation key -> select one of "linear", "sigmoid", "softmax"')
 
 
 class Experience:

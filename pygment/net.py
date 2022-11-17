@@ -9,12 +9,15 @@ class BaseNet:
     Base neural network
     """
     def __init__(self):
-        self.activations = {'relu': nn.ReLU(),
-                            'sigmoid': nn.Sigmoid(),
-                            'leaky': nn.LeakyReLU()}
+        super().__init__()
+        self.has_net = False
 
-        self.output_activations = {'sigmoid': nn.Sigmoid(),
-                                   'softmax': nn.Softmax(),
+        self.activations = {'relu': nn.ReLU,
+                            'sigmoid': nn.Sigmoid,
+                            'leaky': nn.LeakyReLU}
+
+        self.output_activations = {'sigmoid': nn.Sigmoid,
+                                   'softmax': nn.Softmax,
                                    'linear': None}
 
 
@@ -45,16 +48,32 @@ class ActorCriticNet(BaseNet, nn.Module):
 
     def __init__(self):
         super().__init__()
+        self.input_layers = nn.ModuleList([])
+        self.observation_space = None
+        self.action_space = None
+        self.action_layer = None
+        self.value_layer = None
 
-        self.input_layer = nn.Linear(8, 128)
 
-        self.action_layer = nn.Linear(128, 4)
-        self.value_layer = nn.Linear(128, 1)
+    def add_layers(self, layers, nodes, observation_space, action_space):
+        self.observation_space = observation_space
+        self.action_space = action_space
+
+        for layer in range(layers):
+            if layer == 0:
+                self.input_layers.append(nn.Linear(self.observation_space, nodes[layer]))
+            else:
+                self.input_layers.append(nn.Linear(nodes[layer-1], nodes[layer]))
+
+        self.action_layer = nn.Linear(nodes[-1], self.action_space)
+        self.value_layer = nn.Linear(nodes[-1], 1)
 
 
     def forward(self, state):
         state = torch.tensor(state)
-        state = F.relu(self.input_layer(state))
+
+        for layer in self.input_layers:
+            state = F.relu(layer(state))
 
         state_value = self.value_layer(state)
 
@@ -62,7 +81,5 @@ class ActorCriticNet(BaseNet, nn.Module):
         action_distribution = Categorical(action_probs)
         action = action_distribution.sample()
 
-        return action.item()
+        return action.item(), state_value
 
-
-    def calc

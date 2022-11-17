@@ -5,10 +5,10 @@ from time import sleep
 env = gym.make('LunarLander-v2')
 agent = pm.create_agent()
 agent.load_env(env)
-agent.add_layer(64, 'relu')
-agent.add_layer(64, 'relu')
-agent.add_layer(64, 'relu')
-agent.compile('adam', learning_rate=0.1)
+agent.add_layer(256, 'relu')
+agent.add_layer(256, 'relu')
+agent.add_layer(256, 'relu')
+agent.compile('adam', learning_rate=0.001)
 agent.train(200, decay_rate=0.995, gamma=0.99, min_epsilon=0.02, batch_size=512,
             tau=0.001)
 
