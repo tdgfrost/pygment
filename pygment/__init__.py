@@ -1,4 +1,4 @@
-from .agent import DQNAgent
+from agent import DQNAgent
 
 
 def create_agent(type='doubleDQN'):
@@ -6,4 +6,6 @@ def create_agent(type='doubleDQN'):
                     'actorcritic']:
         raise KeyError('type must be one of: "doubleDQN", "actorcritic"')
 
-    return DQNAgent(type)
+    # Eventually, will need an if-else statement related to type above
+
+    return DQNAgent()

@@ -36,6 +36,7 @@ def unpack_batch(batch: list):
            np.array(next_states, copy=False), \
            np.array(dones, dtype=np.uint8)
 
+
 def calc_loss(batch, device, model, gamma):
     # Function for returning both the losses and the prioritised samples
     states, actions, rewards, next_states, dones = unpack_batch(batch)
@@ -55,6 +56,7 @@ def calc_loss(batch, device, model, gamma):
 
     loss_v = F.mse_loss(state_action_values, expected_state_action_values)
     return loss_v
+
 
 def calc_loss_prios(batch, batch_weights, device, model, gamma):
     # Function for returning both the losses and the prioritised samples

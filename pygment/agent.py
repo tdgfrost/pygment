@@ -5,33 +5,9 @@ import random
 import time
 from copy import deepcopy
 from .actions import GreedyEpsilonSelector, calc_loss
+from .net import DualNet
 from .common import wrap_env
 from collections import deque
-
-
-class DualNet:
-    """
-    Wrapper around model to create both a main_net and a target_net
-    """
-
-    def __init__(self, model=nn.Sequential()):
-        self.main_net = model
-        self.target_net = None
-        self.action_space = None
-        self.observation_space = None
-        self.activations = {'relu': nn.ReLU(),
-                                'sigmoid': nn.Sigmoid(),
-                                'leaky': nn.LeakyReLU()}
-
-        self.output_activations = {'sigmoid': nn.Sigmoid(),
-                                       'softmax': nn.Softmax(),
-                                       'linear': None}
-
-    def sync(self, tau):
-        for target_param, main_param in zip(self.target_net.parameters(), self.main_net.parameters()):
-            target_param.data.copy_(tau * main_param.data + (1.0 - tau) * target_param.data)
-
-        #self.target_net.load_state_dict(self.main_net.state_dict())
 
 
 class BaseAgent:
@@ -55,6 +31,7 @@ class BaseAgent:
                                'sgd': torch.optim.SGD,
                                'rmsprop': torch.optim.RMSprop}
         return
+
 
     def reset(self):
         while True:
@@ -89,7 +66,20 @@ class BaseAgent:
         self.env = wrap_env(env, stack_frames, reward_clipping)
         self.action_space = self.env.action_space.n
         self.observation_space = self.env.observation_space.shape[0]
-        self._max_steps = self.env._max_episode_steps
+        try:
+            self._max_steps = self.env._max_episode_steps
+        except:
+            pass
+
+
+class ActorCritic(BaseAgent):
+    """
+    ActorCritic uses the actor-critic neural network to solve environments
+    """
+
+    def __init__(self):
+        super().__init__()
+
 
 
 class DQNAgent(BaseAgent):
@@ -106,6 +96,7 @@ class DQNAgent(BaseAgent):
         self._tau = None
         self._batch_size = None
 
+
     def reset(self):
         reset_done = super().reset()
 
@@ -115,6 +106,7 @@ class DQNAgent(BaseAgent):
             self._gamma = None
             self._tau = None
             self._batch_size = None
+
 
     def add_layer(self, neurons, activation):
         if self.env is None:
@@ -138,6 +130,7 @@ class DQNAgent(BaseAgent):
                                                neurons))
             self.net.main_net.append(activation)
 
+
     def compile(self, optimizer, learning_rate=0.001, output_activation='linear'):
         self.compile_check(optimizer, output_activation)
         self.optimizer = self._optimizers[optimizer](self.net.main_net.parameters(),
@@ -152,6 +145,7 @@ class DQNAgent(BaseAgent):
         self.net.main_net.to(self.device)
         self.net.target_net = deepcopy(self.net.main_net)
         self._compiled = True
+
 
     def train(self, target_reward, episodes=10000, batch_size=64, buffer=10000, gamma=0.999999,
               epsilon=1, tau=0.001, decay_rate=0.999, min_epsilon=0.02, max_steps=None):
@@ -231,6 +225,7 @@ class DQNAgent(BaseAgent):
                     print(f'Final reward: {np.array(current_reward).sum()}')
                     break
 
+
     def fill_buffer(self):
         self.method_check()
         print('Filling buffer...')
@@ -254,13 +249,16 @@ class DQNAgent(BaseAgent):
 
         print('Buffer full.')
 
+
     def full_buffer(self):
         self.method_check()
         return self.replay_buffer.__len__() == self.replay_buffer.maxlen
 
+
     def buffer_update(self, sample):
         self.method_check()
         self.replay_buffer.append(sample)
+
 
     def action_selector(self, obs, no_epsilon=False):
         self.method_check()
@@ -268,6 +266,7 @@ class DQNAgent(BaseAgent):
           return GreedyEpsilonSelector(torch.tensor(obs).to(self.device), 0, self.net.main_net)
 
         return GreedyEpsilonSelector(torch.tensor(obs).to(self.device), self._epsilon, self.net.main_net)
+
 
     def process_batch(self, batch_size: int, top_percentile: float = 1.0) -> object:
         self.method_check()
@@ -279,6 +278,7 @@ class DQNAgent(BaseAgent):
         self.optimizer.step()
 
         return loss_v.item()
+
 
     def buffer_sample(self, batch_size, top_percentile):
         self.method_check()
@@ -303,6 +303,7 @@ class DQNAgent(BaseAgent):
 
         return new_batch
 
+
     def method_check(self):
         if self.env is None:
             raise AttributeError('Please load environment first')
@@ -310,6 +311,7 @@ class DQNAgent(BaseAgent):
             raise AttributeError('Please add a hidden layer first')
         if not self._compiled:
             raise AttributeError('Model must be compiled first')
+
 
     def compile_check(self, optimizer, output_activation):
       if self._compiled:
