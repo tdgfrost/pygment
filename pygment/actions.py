@@ -1,0 +1,82 @@
+import numpy as np
+import torch
+import torch.nn.functional as F
+
+
+def GreedyEpsilonSelector(obs, epsilon, net):
+    action_space = net[-1].out_features
+    if np.random.random() <= epsilon:
+        action = np.random.randint(action_space)
+
+    else:
+        with torch.no_grad():
+            q_values = net(obs)
+            action = torch.argmax(q_values).cpu().detach().item()
+            #action_p = F.softmax(q_values, dim=0).detach().cpu().numpy()
+            #action = np.random.choice([i for i in range(action_space)],
+                                      #p=action_p)
+
+    return action
+
+
+def unpack_batch(batch: list):
+    states, actions, rewards, next_states, dones = [], [], [], [], []
+    for exp in batch:
+        states.append(exp.state)
+        actions.append(exp.action)
+        rewards.append(exp.reward)
+        dones.append(exp.done)
+        #if exp.next_state is None:
+            #next_states.append(exp.)  # the result will be masked anyway
+        #else:
+            #lstate = np.array(exp.last_state)
+        next_states.append(exp.next_state)
+    return np.array(states, copy=False), np.array(actions), \
+           np.array(rewards, dtype=np.float32), \
+           np.array(next_states, copy=False), \
+           np.array(dones, dtype=np.uint8)
+
+def calc_loss(batch, device, model, gamma):
+    # Function for returning both the losses and the prioritised samples
+    states, actions, rewards, next_states, dones = unpack_batch(batch)
+
+    states_v = torch.tensor(states).to(device)
+    actions_v = torch.tensor(actions).to(device)
+    rewards_v = torch.tensor(rewards).to(device)
+    done_mask = torch.tensor(dones, dtype=torch.bool).to(device)
+
+    state_action_values = model.main_net(states_v).gather(1, actions_v.unsqueeze(-1)).squeeze(-1)
+
+    with torch.no_grad():
+        next_states_v = torch.tensor(next_states).to(device)
+        next_state_values = model.target_net(next_states_v).max(1)[0]
+        next_state_values[done_mask] = 0.0
+        expected_state_action_values = next_state_values.detach() * gamma + rewards_v
+
+    loss_v = F.mse_loss(state_action_values, expected_state_action_values)
+    return loss_v
+
+def calc_loss_prios(batch, batch_weights, device, model, gamma):
+    # Function for returning both the losses and the prioritised samples
+    states, actions, rewards, next_states, dones = unpack_batch(batch)
+
+    states_v = torch.tensor(states).to(device)
+    actions_v = torch.tensor(actions).to(device)
+    rewards_v = torch.tensor(rewards).to(device)
+    done_mask = torch.tensor(dones, dtype=torch.bool).to(device)
+    batch_weights_v = torch.tensor(batch_weights, dtype=torch.float32).to(device)
+
+    state_action_values = model.main_net(states_v).gather(1, actions_v.unsqueeze(-1)).squeeze(-1)
+
+    with torch.no_grad():
+        next_states_v = torch.tensor(next_states).to(device)
+        next_state_values = model.target_net(next_states_v).max(1)[0]
+        next_state_values[done_mask] = 0.0
+        expected_state_action_values = next_state_values.detach() * gamma + rewards_v
+
+    batch_weights = batch_weights ** 0.6
+    batch_weights = batch_weights / batch_weights.sum()
+
+    losses_v = batch_weights_v * (state_action_values - expected_state_action_values) ** 2
+    return losses_v.mean(), (losses_v + 1e-5).data.cpu().numpy()
+
