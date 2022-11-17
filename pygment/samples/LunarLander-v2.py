@@ -2,14 +2,16 @@ import pygment as pm
 import gymnasium as gym
 from time import sleep
 
-env = gym.make('CartPole-v1')
+env = gym.make('LunarLander-v2')
 agent = pm.create_agent()
 agent.load_env(env)
 agent.add_layer(64, 'relu')
-agent.compile('adam', learning_rate=0.01)
-agent.train(500, tau=0.05)
+agent.add_layer(64, 'relu')
+agent.compile('adam', learning_rate=0.0005)
+agent.train(500, target_update=4, decay_rate=0.995, gamma=0.99, min_epsilon=0.02, batch_size=64,
+            tau=0.05)
 
-env = gym.make('CartPole-v1', render_mode='human')
+env = gym.make('LunarLander-v2', render_mode='human')
 agent.load_env(env)
 done = False
 state = agent.env.reset()[0]

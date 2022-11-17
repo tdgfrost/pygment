@@ -9,35 +9,6 @@ from .common import wrap_env
 from collections import deque
 
 
-class DQN(nn.Module):
-    def __init__(self, input_shape, n_actions, layers: int, layer_sizes: "list of ints"):
-        super().__init__()
-
-        self.net = nn.Sequential()
-
-        for layer in range(layers + 1):
-            if layer == 0:
-                self.net.append(nn.Linear(input_shape, layer_sizes[layer]))
-                self.net.append(nn.ReLU())
-            elif layer == layers:
-                self.net.append(nn.Linear(layer_sizes[layer - 1], n_actions))
-            else:
-                self.net.append(nn.Linear(layer_sizes[layer - 1], layer_sizes[layer]))
-                self.net.append(nn.ReLU())
-
-    def forward(self, x):
-        return self.net(x)
-
-    def reset(self, seed=None):
-        if seed is not None:
-            random.seed(seed)
-            torch.manual_seed(seed)
-
-        for layer in range(len(self.net)):
-            if list(map(list, self.net[layer].parameters())):
-                self.net[layer].reset_parameters()
-
-
 class DualNet:
     """
     Wrapper around model to create both a main_net and a target_net
@@ -56,8 +27,11 @@ class DualNet:
                                        'softmax': nn.Softmax(),
                                        'linear': None}
 
-    def sync(self):
-        self.target_net.load_state_dict(self.main_net.state_dict())
+    def sync(self, tau):
+        for target_param, main_param in zip(self.target_net.parameters(), self.main_net.parameters()):
+            target_param.data.copy_(tau * main_param.data + (1.0 - tau) * target_param.data)
+
+        #self.target_net.load_state_dict(self.main_net.state_dict())
 
 
 class BaseAgent:
@@ -86,9 +60,9 @@ class DQNAgent(BaseAgent):
         self.__epsilon__ = None
         self.__eps_decay_rate__ = None
         self.__gamma__ = None
+        self.__tau__ = None
         self.__min_epsilon__ = None
         self.__batch_size__ = None
-        self.__target_update__ = None
         self.__max_steps__ = None
         self.__optimizers__ = {'adam': torch.optim.Adam,
                                'sgd': torch.optim.SGD,
@@ -113,9 +87,9 @@ class DQNAgent(BaseAgent):
             self.__epsilon__ = None
             self.__eps_decay_rate__ = None
             self.__gamma__ = None
+            self.__tau__ = None
             self.__min_epsilon__ = None
             self.__batch_size__ = None
-            self.__target_update__ = None
             self.__max_steps__ = None
 
     def load_env(self, env, stack_frames=1, reward_clipping=False):
@@ -136,7 +110,7 @@ class DQNAgent(BaseAgent):
         activation = self.net.__activations__[activation]
 
         if self.net.main_net:
-            self.net.main_net.append(nn.Linear(self.net.main_net.net[-1].out_features,
+            self.net.main_net.append(nn.Linear(self.net.main_net[-2].out_features,
                                                neurons))
             self.net.main_net.append(activation)
 
@@ -160,16 +134,16 @@ class DQNAgent(BaseAgent):
         self.net.target_net = deepcopy(self.net.main_net)
         self.__compiled__ = True
 
-    def train(self, target_reward, episodes=10000, batch_size=64, buffer=10000, target_update=500, gamma=0.999999,
-              epsilon=1, decay_rate=0.999, min_epsilon=0.02, max_steps=500):
+    def train(self, target_reward, episodes=10000, batch_size=64, buffer=10000, gamma=0.999999,
+              epsilon=1, tau=0.001, decay_rate=0.999, min_epsilon=0.02, max_steps=1000):
         self.method_check()
         self.replay_buffer = deque([], maxlen=buffer)
         self.__gamma__ = gamma
         self.__epsilon__ = epsilon
+        self.__tau__ = tau
         self.__eps_decay_rate__ = decay_rate
         self.__min_epsilon__ = min_epsilon
         self.__batch_size__ = batch_size
-        self.__target_update__ = target_update
         self.__max_steps__ = max_steps
 
         self.fill_buffer()
@@ -187,6 +161,8 @@ class DQNAgent(BaseAgent):
 
         for episode in range(episodes):
             episode += 1
+            if episode % 500 == 0:
+                print(f'Episodes completed: {episode}')
             num_steps = 0
             last_reward = deepcopy(current_reward)
             current_reward = []
@@ -215,14 +191,14 @@ class DQNAgent(BaseAgent):
                 current_loss.append(loss)
                 current_reward.append(reward)
 
-                if total_steps % self.__target_update__ == 0:
-                    self.net.sync()
+                self.net.sync(self.__tau__)
 
                 if (time.time() - local_start >= 2) & (len(last_reward) > 0):
                     print(f'Reward: {np.array(last_reward).sum()}, Loss: {np.array(current_loss).mean()}')
+                    last_reward = []
                     local_start = time.time()
 
-            if (np.array(total_rewards[-10:]) >= target_reward).all():
+            if (np.array(total_rewards[-5:]) >= target_reward).all():
                 total_end = time.time()
                 duration = total_end - total_start
                 if duration < 300:
