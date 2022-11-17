@@ -96,6 +96,7 @@ class DQNAgent(BaseAgent):
         self.env = wrap_env(env, stack_frames, reward_clipping)
         self.net.action_space = self.env.action_space.n
         self.net.observation_space = self.env.observation_space.shape[0]
+        self.__max_steps__ = self.env._max_episode_steps
 
     def add_layer(self, neurons, activation):
         if self.__compiled__:
@@ -135,7 +136,7 @@ class DQNAgent(BaseAgent):
         self.__compiled__ = True
 
     def train(self, target_reward, episodes=10000, batch_size=64, buffer=10000, gamma=0.999999,
-              epsilon=1, tau=0.001, decay_rate=0.999, min_epsilon=0.02, max_steps=1000):
+              epsilon=1, tau=0.001, decay_rate=0.999, min_epsilon=0.02, max_steps=self.__max_steps__):
         self.method_check()
         self.replay_buffer = deque([], maxlen=buffer)
         self.__gamma__ = gamma
@@ -160,8 +161,7 @@ class DQNAgent(BaseAgent):
         local_start = time.time()
 
         for episode in range(episodes):
-            episode += 1
-            if episode % 500 == 0:
+            if episode % 50 == 0:
                 print(f'Episodes completed: {episode}')
             num_steps = 0
             last_reward = deepcopy(current_reward)
@@ -198,18 +198,19 @@ class DQNAgent(BaseAgent):
                     last_reward = []
                     local_start = time.time()
 
-            if (np.array(total_rewards[-5:]) >= target_reward).all():
-                total_end = time.time()
-                duration = total_end - total_start
-                if duration < 300:
-                    print(f'Solved in {round((total_end - total_start), 0)} seconds!')
-                elif duration < 3600:
-                    print(f'Solved in {round((total_end - total_start) / 60, 1)} minutes!')
-                else:
-                    print(f'Solved in {round((total_end - total_start) / 3600, 1)} hours!')
+            if len(total_rewards) >= 100:
+                if np.array(total_rewards[-100:]).mean() >= target_reward:
+                    total_end = time.time()
+                    duration = total_end - total_start
+                    if duration < 300:
+                        print(f'Solved in {round((total_end - total_start), 0)} seconds!')
+                    elif duration < 3600:
+                        print(f'Solved in {round((total_end - total_start) / 60, 1)} minutes!')
+                    else:
+                        print(f'Solved in {round((total_end - total_start) / 3600, 1)} hours!')
 
-                print(f'Final reward: {np.array(current_reward).sum()}')
-                break
+                    print(f'Final reward: {np.array(current_reward).sum()}')
+                    break
 
     def fill_buffer(self):
         self.method_check()
