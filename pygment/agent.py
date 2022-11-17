@@ -40,7 +40,45 @@ class BaseAgent:
     """
 
     def __init__(self):
+        self.device = 'mps'
+        self.optimizer = None
+        self.env = None
+        self.__compiled__ = False
+        self.__epsilon__ = None
+        self.__eps_decay_rate__ = None
+        self.__min_epsilon__ = None
+        self.__max_steps__ = None
+        self.__optimizers__ = {'adam': torch.optim.Adam,
+                               'sgd': torch.optim.SGD,
+                               'rmsprop': torch.optim.RMSprop}
         return
+
+    def reset(self):
+        while True:
+            reset_input = input('Wipe agent history? Y/N: ')
+            if reset_input not in ['y', 'n', 'Y', 'N']:
+                print('Please enter a valid value (Y/N)')
+                continue
+            break
+
+        if reset_input in ['y', 'Y']:
+            self.net = DualNet(nn.Sequential())
+            self.device = 'mps'
+            self.optimizer = None
+            self.env = None
+            self.__compiled__ = False
+            self.__epsilon__ = None
+            self.__eps_decay_rate__ = None
+            self.__min_epsilon__ = None
+            self.__max_steps__ = None
+            self.__optimizers__ = {'adam': torch.optim.Adam,
+                                   'sgd': torch.optim.SGD,
+                                   'rmsprop': torch.optim.RMSprop}
+            resetted = True
+        else:
+            resetted = False
+
+        return resetted
 
 
 class DQNAgent(BaseAgent):
@@ -52,45 +90,20 @@ class DQNAgent(BaseAgent):
     def __init__(self):
         super().__init__()
         self.net = DualNet(nn.Sequential())
-        self.device = 'mps'
-        self.optimizer = None
-        self.env = None
-        self.__compiled__ = False
         self.replay_buffer = None
-        self.__epsilon__ = None
-        self.__eps_decay_rate__ = None
         self.__gamma__ = None
         self.__tau__ = None
-        self.__min_epsilon__ = None
         self.__batch_size__ = None
-        self.__max_steps__ = None
-        self.__optimizers__ = {'adam': torch.optim.Adam,
-                               'sgd': torch.optim.SGD,
-                               'rmsprop': torch.optim.RMSprop}
 
     def reset(self):
-        while True:
-            reset_input = input('Wipe agent history? Y/N: ')
-            if reset_input not in ['y', 'n', 'Y', 'N']:
-                print('Please enter a valid value (Y/N)')
-                continue
-            break
+        resetted = super().reset()
 
-        if reset_input in ['y', 'Y']:
-            super().__init__()
+        if resetted:
             self.net = DualNet(nn.Sequential())
-            self.device = 'mps'
-            self.optimizer = None
-            self.env = None
-            self.__compiled__ = False
             self.replay_buffer = None
-            self.__epsilon__ = None
-            self.__eps_decay_rate__ = None
             self.__gamma__ = None
             self.__tau__ = None
-            self.__min_epsilon__ = None
             self.__batch_size__ = None
-            self.__max_steps__ = None
 
     def load_env(self, env, stack_frames=1, reward_clipping=False):
         self.env = wrap_env(env, stack_frames, reward_clipping)
@@ -136,7 +149,7 @@ class DQNAgent(BaseAgent):
         self.__compiled__ = True
 
     def train(self, target_reward, episodes=10000, batch_size=64, buffer=10000, gamma=0.999999,
-              epsilon=1, tau=0.001, decay_rate=0.999, min_epsilon=0.02, max_steps=self.__max_steps__):
+              epsilon=1, tau=0.001, decay_rate=0.999, min_epsilon=0.02, max_steps=None):
         self.method_check()
         self.replay_buffer = deque([], maxlen=buffer)
         self.__gamma__ = gamma
@@ -145,7 +158,8 @@ class DQNAgent(BaseAgent):
         self.__eps_decay_rate__ = decay_rate
         self.__min_epsilon__ = min_epsilon
         self.__batch_size__ = batch_size
-        self.__max_steps__ = max_steps
+        if max_steps is None:
+            max_steps = self.__max_steps__
 
         self.fill_buffer()
 
