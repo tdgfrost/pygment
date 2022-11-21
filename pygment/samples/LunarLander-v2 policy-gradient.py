@@ -5,9 +5,9 @@ from time import sleep
 env = gym.make('LunarLander-v2')
 agent = pm.create_agent('policy')
 agent.load_env(env)
-agent.add_network(layers=2, nodes=[64, 64])
+agent.add_network(nodes=[128, 128])
 agent.compile('adam', learning_rate=0.01)
-agent.train(episodes=10000, ep_update=4, gamma=0.999)
+agent.train(target_reward=200, episodes=10000, ep_update=64, gamma=0.99)
 
 env = gym.make('LunarLander-v2', render_mode='human')
 agent.load_env(env)

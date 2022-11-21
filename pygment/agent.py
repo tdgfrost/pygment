@@ -106,18 +106,11 @@ class PolicyGradient(BaseAgent):
         super().__init__()
         self.net = PolicyGradientNet()
 
-    def add_network(self, layers=1, nodes=None):
-        if nodes is None:
-            nodes = [128]
-
-        if (not isinstance(layers, int)) or (layers == 0):
-            raise ValueError('Layers must be a non-zero integer')
+    def add_network(self, nodes: list):
         if (not isinstance(nodes, list)) or (not np.issubdtype(np.array(nodes).dtype, np.integer)):
             raise TypeError('Node values must be entered as integers within a list')
-        if len(nodes) != layers:
-            raise AttributeError('Layers and nodes must match')
 
-        self.net.add_layers(layers, nodes, self.observation_space, self.action_space)
+        self.net.add_layers(len(nodes), nodes, self.observation_space, self.action_space)
         self.net.has_net = True
 
 
@@ -132,7 +125,7 @@ class PolicyGradient(BaseAgent):
         self._compiled = True
 
 
-    def train(self, episodes=10000, ep_update=4, gamma=0.999, max_steps=None):
+    def train(self, target_reward=None, episodes=10000, ep_update=4, gamma=0.999, max_steps=None):
         self.method_check(env_loaded=True, net_exists=True, compiled=True)
         self._gamma = gamma
         if max_steps is None:
@@ -142,6 +135,9 @@ class PolicyGradient(BaseAgent):
         action_record = []
         action_logprobs_record = []
         cum_rewards = []
+
+        total_rewards = deque([], maxlen=100)
+        total_loss = deque([], maxlen=100)
 
         for episode in range(episodes):
 
@@ -169,11 +165,15 @@ class PolicyGradient(BaseAgent):
             if (episode+1) % ep_update == 0:
                 # calculate loss
                 self.optimizer.zero_grad()
-                loss = calc_loss_policy(cum_rewards, action_record, action_logprobs_record, self.action_space,
-                                        self.device)
+                loss = calc_loss_policy(cum_rewards, action_record, action_logprobs_record, self.device)
                 loss.backward()
                 # update the model
                 self.optimizer.step()
+
+                total_rewards.append(np.array(reward_record).sum())
+                total_loss.append(loss.item())
+
+                print(f'Episodes: {episode}, Loss {np.array(total_loss).mean()}, Mean Reward: {np.array(total_rewards).mean()}')
 
                 # reset the record
                 state_record = []
@@ -181,7 +181,11 @@ class PolicyGradient(BaseAgent):
                 action_logprobs_record = []
                 cum_rewards = []
 
-            # UNFINISHED
+            if target_reward is not None:
+                if (np.array(total_rewards).mean() > target_reward) & (len(total_rewards) == 100):
+                    print(f'Solved at target {target_reward}!')
+                    break
+
 
             # At some point, change all these lists to the Experience class
             # (complete with a .reset() or .clear() function)
