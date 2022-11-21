@@ -1,11 +1,16 @@
-from agent import DQNAgent
+from .agent import DQNAgent, PolicyGradient, ActorCritic
 
 
-def create_agent(type='doubleDQN'):
-    if type not in ['doubleDQN',
-                    'actorcritic']:
-        raise KeyError('type must be one of: "doubleDQN", "actorcritic"')
+def create_agent(agent_type='doubleDQN'):
+    agent_dict = {'doubleDQN': DQNAgent(),
+                  'actorcritic': ActorCritic(),
+                  'policy': PolicyGradient()}
 
-    # Eventually, will need an if-else statement related to type above
+    if agent_type not in agent_dict.keys():
+        error = 'type must be one of: '
+        for key in agent_dict.keys():
+            error += key + ', '
+        error = error[:-2]
+        raise KeyError(error)
 
-    return DQNAgent()
+    return agent_dict[agent_type]

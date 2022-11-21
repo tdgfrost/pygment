@@ -4,8 +4,8 @@ import numpy as np
 import random
 import time
 from copy import deepcopy
-from .actions import GreedyEpsilonSelector, calc_loss_batch
-from .net import DualNet, ActorCriticNet
+from .actions import GreedyEpsilonSelector, calc_loss_batch, calc_loss_policy, calc_cum_rewards
+from .net import DualNet, ActorCriticNet, PolicyGradientNet
 from .common import wrap_env
 from collections import deque
 
@@ -22,7 +22,7 @@ class BaseAgent:
         self.action_space = None
         self.observation_space = None
         self.output_activation = None
-        self.__optimizer = None
+        self._optimizer = None
         self.__output_activation = None
         self._compiled = False
         self._gamma = None
@@ -31,8 +31,8 @@ class BaseAgent:
         self._min_epsilon = None
         self._max_steps = None
         self._optimizers = {'adam': torch.optim.Adam,
-                               'sgd': torch.optim.SGD,
-                               'rmsprop': torch.optim.RMSprop}
+                            'sgd': torch.optim.SGD,
+                            'rmsprop': torch.optim.RMSprop}
         return
 
 
@@ -51,7 +51,7 @@ class BaseAgent:
             self.action_space = None
             self.observation_space = None
             self.output_activation = None
-            self.__optimizer = None
+            self._optimizer = None
             self.__output_activation = None
             self._compiled = False
             self._gamma = None
@@ -60,8 +60,8 @@ class BaseAgent:
             self._min_epsilon = None
             self._max_steps = None
             self._optimizers = {'adam': torch.optim.Adam,
-                                   'sgd': torch.optim.SGD,
-                                   'rmsprop': torch.optim.RMSprop}
+                                'sgd': torch.optim.SGD,
+                                'rmsprop': torch.optim.RMSprop}
             reset_done = True
         else:
             reset_done = False
@@ -82,7 +82,7 @@ class BaseAgent:
     def compile_check(self):
         if self._compiled:
             raise AttributeError('Model is already compiled!')
-        if self.__optimizer not in self._optimizers.keys():
+        if self._optimizer not in self._optimizers.keys():
             raise KeyError('Invalid optimizer key -> select one of "adam", "sgd", "rmsprop"')
         if not self.net.has_net:
             raise AttributeError('Please add a neural network before compiling.')
@@ -95,6 +95,96 @@ class BaseAgent:
             raise AttributeError('Please add a hidden layer first')
         if (not self._compiled) and compiled:
             raise AttributeError('Model must be compiled first')
+
+
+class PolicyGradient(BaseAgent):
+    """
+    PolicyGradient is a neural network based on REINFORCE
+    """
+
+    def __init__(self):
+        super().__init__()
+        self.net = PolicyGradientNet()
+
+    def add_network(self, layers=1, nodes=None):
+        if nodes is None:
+            nodes = [128]
+
+        if (not isinstance(layers, int)) or (layers == 0):
+            raise ValueError('Layers must be a non-zero integer')
+        if (not isinstance(nodes, list)) or (not np.issubdtype(np.array(nodes).dtype, np.integer)):
+            raise TypeError('Node values must be entered as integers within a list')
+        if len(nodes) != layers:
+            raise AttributeError('Layers and nodes must match')
+
+        self.net.add_layers(layers, nodes, self.observation_space, self.action_space)
+        self.net.has_net = True
+
+
+    def compile(self, optimizer, learning_rate=0.001):
+        self._optimizer = optimizer
+        super().compile_check()
+
+        self.net.to(self.device)
+        self.optimizer = self._optimizers[optimizer](self.net.parameters(),
+                                                     lr=learning_rate)
+
+        self._compiled = True
+
+
+    def train(self, episodes=10000, ep_update=4, gamma=0.999, max_steps=None):
+        self.method_check(env_loaded=True, net_exists=True, compiled=True)
+        self._gamma = gamma
+        if max_steps is None:
+            max_steps = self._max_steps if self._max_steps is not None else 10000
+
+        state_record = []
+        action_record = []
+        action_logprobs_record = []
+        cum_rewards = []
+
+        for episode in range(episodes):
+
+            reward_record = []
+            state = self.env.reset()[0]
+            state_record.append(state)
+
+            for num_step in range(max_steps):
+                action, action_logprobs = self.net(state)
+                state, reward, done, _, _ = self.env.step(action)
+
+                action_record.append(action)
+                action_logprobs_record.append(action_logprobs)
+                reward_record.append(reward)
+
+                if done:
+                    break
+                else:
+                    state_record.append(state)
+
+            cum_r = calc_cum_rewards(reward_record, self._gamma)
+            for r in cum_r:
+                cum_rewards.append(r)
+
+            if (episode+1) % ep_update == 0:
+                # calculate loss
+                self.optimizer.zero_grad()
+                loss = calc_loss_policy(cum_rewards, action_record, action_logprobs_record, self.action_space,
+                                        self.device)
+                loss.backward()
+                # update the model
+                self.optimizer.step()
+
+                # reset the record
+                state_record = []
+                action_record = []
+                action_logprobs_record = []
+                cum_rewards = []
+
+            # UNFINISHED
+
+            # At some point, change all these lists to the Experience class
+            # (complete with a .reset() or .clear() function)
 
 
 class ActorCritic(BaseAgent):
@@ -123,7 +213,7 @@ class ActorCritic(BaseAgent):
 
 
     def compile(self, optimizer, learning_rate=0.001):
-        self.__optimizer = optimizer
+        self._optimizer = optimizer
         super().compile_check()
 
         self.optimizer = self._optimizers[optimizer](self.net.parameters(),
@@ -143,7 +233,7 @@ class ActorCritic(BaseAgent):
             for num_step in range(max_steps):
                 action = self.net(state)
                 state, reward, done, _, _ = self.env.step(action)
-
+        # UNFINISHED
 
 
 
@@ -211,7 +301,7 @@ class DQNAgent(BaseAgent):
 
 
     def compile(self, optimizer, learning_rate=0.001, output_activation='linear'):
-        self.__optimizer = optimizer
+        self._optimizer = optimizer
         self.__output_activation = output_activation
         self.compile_check()
         self.optimizer = self._optimizers[optimizer](self.net.main_net.parameters(),

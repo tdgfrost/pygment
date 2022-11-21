@@ -58,6 +58,29 @@ def calc_loss_batch(batch, device, model, gamma):
     return loss_v
 
 
+def calc_loss_policy(cum_rewards, actions, action_logprobs, action_space, device):
+    cum_rewards = torch.tensor(cum_rewards, dtype=torch.float32).to(device)
+    actions = torch.tensor(actions, dtype=torch.int64).to(device)
+    action_logprobs = torch.tensor(action_logprobs, dtype=torch.float32).to(device)
+    action_space = torch.tensor(action_space, dtype=torch.int).to(device)
+
+    loss = cum_rewards * action_logprobs[:, actions]
+    loss = loss.mean()
+
+    return loss
+
+
+def calc_cum_rewards(rewards_record, gamma):
+    cum_rewards = []
+    cum_r = 0.0
+    for r in reversed(rewards_record):
+        cum_r *= gamma
+        cum_r += r
+        cum_rewards.append(cum_r)
+
+    return cum_rewards[::-1]
+
+
 def calc_loss_actor_critic(rewards, logprobs, state_values, gamma=0.99):
 
     # rewards as input should be self.rewards for the agent

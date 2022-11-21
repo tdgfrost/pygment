@@ -3,14 +3,11 @@ import gymnasium as gym
 from time import sleep
 
 env = gym.make('LunarLander-v2')
-agent = pm.create_agent('actorcritic')
+agent = pm.create_agent('policy')
 agent.load_env(env)
-agent.add_layer(64, 'relu')
-agent.add_layer(64, 'relu')
-agent.add_layer(64, 'relu')
-agent.compile('adam', learning_rate=0.1)
-agent.train(200, decay_rate=0.995, gamma=0.99, min_epsilon=0.02, batch_size=512,
-            tau=0.001)
+agent.add_network(layers=2, nodes=[64, 64])
+agent.compile('adam', learning_rate=0.01)
+agent.train(episodes=10000, ep_update=4, gamma=0.999)
 
 env = gym.make('LunarLander-v2', render_mode='human')
 agent.load_env(env)
