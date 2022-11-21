@@ -141,6 +141,9 @@ class ActorCritic(BaseAgent):
         for episode in range(episodes):
             state = self.env.reset()[0]
             for num_step in range(max_steps):
+                action = self.net(state)
+                state, reward, done, _, _ = self.env.step(action)
+
 
 
 
