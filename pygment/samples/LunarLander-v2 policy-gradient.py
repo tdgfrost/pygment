@@ -1,13 +1,15 @@
 import pygment as pm
 import gymnasium as gym
 from time import sleep
+import torch
 
 env = gym.make('LunarLander-v2')
 agent = pm.create_agent('policy')
 agent.load_env(env)
 agent.add_network(nodes=[128, 128])
 agent.compile('adam', learning_rate=0.01)
-agent.train(target_reward=200, episodes=10000, ep_update=64, gamma=0.99)
+agent.net = torch.load('/Users/thomasfrost/Documents/Github/pygment/pygment/pygment/samples/LunarLander-v2-policy-gradient/agent_checkpoint_200.pt')
+agent.train(target_reward=400, episodes=10000, ep_update=64, gamma=0.99, max_steps=1000)
 
 env = gym.make('LunarLander-v2', render_mode='human')
 agent.load_env(env)
@@ -24,3 +26,19 @@ if False:
     env = gym.make('CartPole-v1')
     agent.load_env(env)
     agent.train(500, target_update=500, epsilon=0.02)
+
+# Code for animation
+if False:
+    env = gym.make('LunarLander-v2', render_mode='rgb_array')
+    env = gym.wrappers.RecordVideo(env, '/Users/thomasfrost/Documents/Github/pygment/pygment/pygment/samples/LunarLander-v2-policy-gradient/videos')
+    agent.load_env(env)
+
+    done = False
+    state = agent.env.reset()[0]
+    while not done:
+        #action = agent.action_selector(state)
+        action = agent.net(state)[0]
+        next_state, reward, done, _, _ = agent.env.step(action)
+        state = next_state
+
+    agent.env.close()
