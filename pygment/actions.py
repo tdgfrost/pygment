@@ -36,7 +36,8 @@ def unpack_batch(batch: list):
            np.array(next_states, copy=False), \
            np.array(dones, dtype=np.uint8)
 
-def calc_loss(batch, device, model, gamma):
+
+def calc_loss_batch(batch, device, model, gamma):
     # Function for returning both the losses and the prioritised samples
     states, actions, rewards, next_states, dones = unpack_batch(batch)
 
@@ -55,6 +56,57 @@ def calc_loss(batch, device, model, gamma):
 
     loss_v = F.mse_loss(state_action_values, expected_state_action_values)
     return loss_v
+
+
+def calc_loss_policy(cum_rewards, mean_reward, actions, action_logprobs, device):
+    cum_rewards = torch.tensor(cum_rewards, dtype=torch.float32).to(device)
+    cum_rewards -= mean_reward
+    actions = torch.tensor(actions, dtype=torch.int64).to(device)
+    action_logprobs = torch.stack(action_logprobs).gather(1, actions.unsqueeze(-1)).squeeze(-1).to(device)
+
+    loss = cum_rewards * action_logprobs
+    loss = -loss.mean()
+
+    return loss
+
+
+def calc_cum_rewards(rewards_record, gamma):
+    cum_rewards = []
+    cum_r = 0.0
+    for r in reversed(rewards_record):
+        cum_r *= gamma
+        cum_r += r
+        cum_rewards.append(cum_r)
+
+    return cum_rewards[::-1]
+
+
+def calc_loss_actor_critic(rewards, logprobs, state_values, gamma=0.99):
+
+    # rewards as input should be self.rewards for the agent
+    # logprobs should be self.logprobs
+    # state_values should be self.state_values
+    # gamma should be self.gamma -> maybe won't need a default if self.gamma has a default value?
+
+    disc_rewards = []
+    disc_reward = 0
+    for reward in rewards:
+        disc_reward = reward + gamma * disc_reward
+        rewards.insert(0, disc_reward)
+
+
+    rewards = torch.tensor(rewards)
+    rewards = (rewards - rewards.mean()) / (rewards.std())
+
+    loss = 0
+    for logprob, value, reward in zip(logprobs, state_values, rewards):
+        advantage = reward - value.item()
+        action_loss = -logprob * advantage
+        value_loss = F.smooth_l1_loss(value, reward)
+        loss += action_loss + value_loss
+
+    return loss
+
 
 def calc_loss_prios(batch, batch_weights, device, model, gamma):
     # Function for returning both the losses and the prioritised samples
