@@ -58,8 +58,9 @@ def calc_loss_batch(batch, device, model, gamma):
     return loss_v
 
 
-def calc_loss_policy(cum_rewards, actions, action_logprobs, device):
+def calc_loss_policy(cum_rewards, mean_reward, actions, action_logprobs, device):
     cum_rewards = torch.tensor(cum_rewards, dtype=torch.float32).to(device)
+    cum_rewards -= mean_reward
     actions = torch.tensor(actions, dtype=torch.int64).to(device)
     action_logprobs = torch.stack(action_logprobs).gather(1, actions.unsqueeze(-1)).squeeze(-1).to(device)
 

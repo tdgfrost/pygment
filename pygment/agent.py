@@ -162,15 +162,16 @@ class PolicyGradient(BaseAgent):
             for r in cum_r:
                 cum_rewards.append(r)
 
+            total_rewards.append(np.array(reward_record).sum())
+
             if (episode+1) % ep_update == 0:
                 # calculate loss
                 self.optimizer.zero_grad()
-                loss = calc_loss_policy(cum_rewards, action_record, action_logprobs_record, self.device)
+                loss = calc_loss_policy(cum_rewards, np.array(total_rewards).mean(), action_record, action_logprobs_record, self.device)
                 loss.backward()
                 # update the model
                 self.optimizer.step()
 
-                total_rewards.append(np.array(reward_record).sum())
                 total_loss.append(loss.item())
 
                 print(f'Episodes: {episode}, Loss {np.array(total_loss).mean()}, Mean Reward: {np.array(total_rewards).mean()}')
@@ -181,14 +182,19 @@ class PolicyGradient(BaseAgent):
                 action_logprobs_record = []
                 cum_rewards = []
 
-            if target_reward is not None:
-                if (np.array(total_rewards).mean() > target_reward) & (len(total_rewards) == 100):
+            if (target_reward is not None) & (len(total_rewards) == 100):
+                if np.array(total_rewards).mean() > target_reward:
                     print(f'Solved at target {target_reward}!')
                     break
 
 
             # At some point, change all these lists to the Experience class
             # (complete with a .reset() or .clear() function)
+
+    def action_selector(self, obs):
+        self.method_check(env_loaded=True, net_exists=True, compiled=True)
+
+        return self.net(obs)[0]
 
 
 class ActorCritic(BaseAgent):
