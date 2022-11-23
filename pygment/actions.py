@@ -58,16 +58,26 @@ def calc_loss_batch(batch, device, model, gamma):
     return loss_v
 
 
-def calc_loss_policy(cum_rewards, mean_reward, actions, action_logprobs, device):
+def calc_loss_policy(cum_rewards, actions, action_logprobs, device):
     cum_rewards = torch.tensor(cum_rewards, dtype=torch.float32).to(device)
-    cum_rewards -= mean_reward
     actions = torch.tensor(actions, dtype=torch.int64).to(device)
-    action_logprobs = torch.stack(action_logprobs).gather(1, actions.unsqueeze(-1)).squeeze(-1).to(device)
+    action_logprobs = torch.stack(action_logprobs).to(device)
+    action_logprobs = action_logprobs.gather(1, actions.unsqueeze(-1)).squeeze(-1)
 
     loss = cum_rewards * action_logprobs
     loss = -loss.mean()
 
     return loss
+
+
+def calc_entropy_loss_policy(action_probs, action_logprobs, entropy_beta=0.01, device='mps'):
+  action_probs = torch.stack(action_probs).to(device)
+  action_logprobs = torch.stack(action_logprobs).to(device)
+
+  entropy_loss = -(action_probs * action_logprobs).sum(1).mean()
+  entropy_loss *= -entropy_beta
+
+  return entropy_loss
 
 
 def calc_cum_rewards(rewards_record, gamma):

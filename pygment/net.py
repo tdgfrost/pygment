@@ -66,7 +66,7 @@ class PolicyGradientNet(BaseNet, nn.Module):
         self.input_layers.append(nn.Linear(nodes[-1], self.action_space))
 
 
-    def forward(self, state, device='mps'):
+    def forward(self, state, device='cpu'):
         state = torch.tensor(state).to(device)
 
         for layer in self.input_layers[:-1]:
@@ -78,7 +78,7 @@ class PolicyGradientNet(BaseNet, nn.Module):
         action_distribution = Categorical(action_probs)
         action = action_distribution.sample()
 
-        return action.item(), action_logprobs
+        return action.item(), action_probs, action_logprobs
 
 
 class ActorCriticNet(BaseNet, nn.Module):
