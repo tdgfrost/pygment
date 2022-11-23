@@ -19,13 +19,14 @@ class BaseAgent:
     """
 
     def __init__(self):
-        self.device = 'cpu'
+        self.device = 'mps'
         self.optimizer = None
         self.env = None
         self.action_space = None
         self.observation_space = None
         self.output_activation = None
         self._optimizer = None
+        self._learning_rate = None
         self.__output_activation = None
         self._compiled = False
         self._gamma = None
@@ -48,13 +49,14 @@ class BaseAgent:
             break
 
         if reset_input in ['y', 'Y']:
-            self.device = 'cpu'
+            self.device = 'mps'
             self.optimizer = None
             self.env = None
             self.action_space = None
             self.observation_space = None
             self.output_activation = None
             self._optimizer = None
+            self._learning_rate = None
             self.__output_activation = None
             self._compiled = False
             self._gamma = None
@@ -108,22 +110,26 @@ class PolicyGradient(BaseAgent):
     def __init__(self):
         super().__init__()
         self.net = PolicyGradientNet()
+        self.predict_net = None
 
     def add_network(self, nodes: list):
         if (not isinstance(nodes, list)) or (not np.issubdtype(np.array(nodes).dtype, np.integer)):
             raise TypeError('Node values must be entered as integers within a list')
 
         self.net.add_layers(len(nodes), nodes, self.observation_space, self.action_space)
+        self.predict_net = self.net.cpu()
         self.net.has_net = True
 
 
     def compile(self, optimizer, learning_rate=0.001):
         self._optimizer = optimizer
+        self._learning_rate = learning_rate
         super().compile_check()
 
         self.net.to(self.device)
-        self.optimizer = self._optimizers[optimizer](self.net.parameters(),
-                                                     lr=learning_rate)
+        self.predict_net.to('cpu')
+        self.optimizer = self._optimizers[self._optimizer](self.net.parameters(),
+                                                           lr=self._learning_rate)
 
         self._compiled = True
 
@@ -150,7 +156,7 @@ class PolicyGradient(BaseAgent):
                 state_record.append(state)
                 for _ in range(max_steps):
                   with torch.no_grad():
-                      action, _, _ = self.net(state)
+                      action, _, _ = self.predict_net.forward(state, device='cpu')
                       action_record.append(action)
                   state, reward, done, _, _ = self.env.step(action)
 
@@ -183,20 +189,22 @@ class PolicyGradient(BaseAgent):
             action_probs_records = []
             action_logprobs_records = []
             for state in state_records:
-                _, action_probs, action_logprobs = self.net(state)
+                _, action_probs, action_logprobs = self.net.cpu().forward(state, device='cpu')
                 action_probs_records.append(action_probs)
                 action_logprobs_records.append(action_logprobs)
 
             # calculate loss
             self.optimizer.zero_grad()
-            loss = calc_loss_policy(cum_rewards, action_records, action_logprobs_records, device='cpu')
+            loss = calc_loss_policy(cum_rewards, action_records, action_logprobs_records, device='mps')
             loss.backward(retain_graph=True)
             # Now calculate the entropy loss
 
-            entropy_loss = calc_entropy_loss_policy(action_probs_records, action_logprobs_records, device='cpu')
+            entropy_loss = calc_entropy_loss_policy(action_probs_records, action_logprobs_records, device='mps')
             entropy_loss.backward()
-            # update the model
+            # update the model and predict_model
             self.optimizer.step()
+            self.predict_net.load_state_dict(self.net.state_dict())
+
             total_loss.append(loss.item())
 
             print(f'Episodes: {episode * ep_update}, Loss {np.array(total_loss).mean()}, Mean Reward: {np.array(total_rewards).mean()}')

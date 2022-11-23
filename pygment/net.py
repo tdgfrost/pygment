@@ -66,7 +66,7 @@ class PolicyGradientNet(BaseNet, nn.Module):
         self.input_layers.append(nn.Linear(nodes[-1], self.action_space))
 
 
-    def forward(self, state, device='cpu'):
+    def forward(self, state, device='mps'):
         state = torch.tensor(state).to(device)
 
         for layer in self.input_layers[:-1]:
