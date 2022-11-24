@@ -1,4 +1,6 @@
 from .agent import DQNAgent, PolicyGradient, ActorCritic
+import gymnasium as gym
+import os
 
 
 def create_agent(agent_type='doubleDQN'):
@@ -14,3 +16,22 @@ def create_agent(agent_type='doubleDQN'):
         raise KeyError(error)
 
     return agent_dict[agent_type]
+
+
+def animate(agent, env_name, max_steps=500, directory='./videos'):
+    if not os.path.isdir(directory):
+        os.mkdir(directory)
+
+    env = gym.make(env_name, render_mode='rgb_array', max_episode_steps=max_steps)
+    env = gym.wrappers.RecordVideo(env, directory)
+    agent.load_env(env)
+    agent.net.to('mps')
+
+    done = False
+    state = agent.env.reset()[0]
+    while not done:
+        action = agent.net(state)[0].item()
+        next_state, reward, done, _, _ = agent.env.step(action)
+        state = next_state
+
+    agent.env.close()
