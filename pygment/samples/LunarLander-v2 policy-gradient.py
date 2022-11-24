@@ -7,7 +7,7 @@ env = gym.make('LunarLander-v2')
 agent = pm.create_agent('policy')
 agent.load_env(env)
 agent.add_network(nodes=[128, 128])
-agent.compile('adam', learning_rate=0.01)
+agent.compile('adam', learning_rate=0.001)
 agent.train(target_reward=200, episodes=10000, ep_update=64, gamma=0.99, max_steps=1000)
 
 env = gym.make('LunarLander-v2', render_mode='human')
