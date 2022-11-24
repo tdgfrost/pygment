@@ -4,17 +4,13 @@ import torch.nn.functional as F
 
 
 def GreedyEpsilonSelector(obs, epsilon, net):
-    action_space = net[-1].out_features
     if np.random.random() <= epsilon:
-        action = np.random.randint(action_space)
+        action = np.random.randint(net.action_space)
 
     else:
         with torch.no_grad():
-            q_values = net(obs)
-            action = torch.argmax(q_values).cpu().detach().item()
-            #action_p = F.softmax(q_values, dim=0).detach().cpu().numpy()
-            #action = np.random.choice([i for i in range(action_space)],
-                                      #p=action_p)
+            q_values = net.forward(obs, target=False)
+            action = torch.argmax(q_values).item()
 
     return action
 
@@ -26,10 +22,6 @@ def unpack_batch(batch: list):
         actions.append(exp.action)
         rewards.append(exp.reward)
         dones.append(exp.done)
-        #if exp.next_state is None:
-            #next_states.append(exp.)  # the result will be masked anyway
-        #else:
-            #lstate = np.array(exp.last_state)
         next_states.append(exp.next_state)
     return np.array(states, copy=False), np.array(actions), \
            np.array(rewards, dtype=np.float32), \
@@ -46,11 +38,11 @@ def calc_loss_batch(batch, device, model, gamma):
     rewards_v = torch.tensor(rewards).to(device)
     done_mask = torch.tensor(dones, dtype=torch.bool).to(device)
 
-    state_action_values = model.main_net(states_v).gather(1, actions_v.unsqueeze(-1)).squeeze(-1)
+    state_action_values = model.forward(states_v).gather(1, actions_v.unsqueeze(-1)).squeeze(-1)
 
     with torch.no_grad():
         next_states_v = torch.tensor(next_states).to(device)
-        next_state_values = model.target_net(next_states_v).max(1)[0]
+        next_state_values = model.forward(next_states_v, target=True).max(1)[0]
         next_state_values[done_mask] = 0.0
         expected_state_action_values = next_state_values.detach() * gamma + rewards_v
 
