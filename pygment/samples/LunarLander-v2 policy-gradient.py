@@ -6,9 +6,9 @@ import torch
 env = gym.make('LunarLander-v2')
 agent = pm.create_agent('policy')
 agent.load_env(env)
-agent.add_network(nodes=[128, 128])
+agent.add_network(nodes=[32, 32, 32])
 agent.compile('adam', learning_rate=0.001)
-agent.train(target_reward=200, episodes=10000, ep_update=64, gamma=0.99, max_steps=1000)
+agent.train(target_reward=200, episodes=100000, ep_update=32, gamma=0.99, max_steps=1000)
 
 env = gym.make('LunarLander-v2', render_mode='human')
 agent.load_env(env)

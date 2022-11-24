@@ -77,6 +77,11 @@ def calc_entropy_loss_policy(action_probs, action_logprobs, entropy_beta=0.01, d
   if type(action_logprobs) is list:
       action_logprobs = torch.stack(action_logprobs).to(device)
 
+  # This is necessary to avoid -inf loss (when p*log(p) is 0 * -inf)
+  action_logprobs = torch.where(torch.isinf(action_logprobs),
+                                -1000,
+                                action_logprobs)
+
   entropy_loss = -(action_probs * action_logprobs).sum(1).mean()
   entropy_loss *= -entropy_beta
 

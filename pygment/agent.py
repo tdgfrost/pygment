@@ -119,14 +119,21 @@ class PolicyGradient(BaseAgent):
         self.net.has_net = True
 
 
-    def compile(self, optimizer, learning_rate=0.001):
+    def compile(self, optimizer, learning_rate=0.001, weight_decay=1e-5, clip=1.0, lower_clip=None, upper_clip=None):
         self._optimizer = optimizer
         self._learning_rate = learning_rate
+        self._regularisation = weight_decay
         super().compile_check()
 
         self.net.to(self.device)
         self.optimizer = self._optimizers[self._optimizer](self.net.parameters(),
-                                                           lr=self._learning_rate)
+                                                           lr=self._learning_rate,
+                                                           weight_decay=self._regularisation)
+
+        for p in self.net.parameters():
+            p.register_hook(lambda grad: torch.clamp(grad,
+                                                     lower_clip if lower_clip is not None else -clip,
+                                                     upper_clip if upper_clip is not None else clip))
 
         self._compiled = True
 
@@ -152,17 +159,17 @@ class PolicyGradient(BaseAgent):
           state = self.env.reset()[0]
           state_record.append(torch.tensor(state))
           for _ in range(max_steps):
-            with torch.no_grad():
-              action, _, _ = predict_net.forward(state, device='cpu')
-              action_record.append(action.item())
-            state, reward, done, _, _ = self.env.step(action.item())
+              with torch.no_grad():
+                  action, _, _ = predict_net.forward(state, device='cpu')
+                  action_record.append(action.item())
+              state, reward, done, _, _ = self.env.step(action.item())
 
-            reward_record.append(reward)
+              reward_record.append(reward)
 
-            if done:
-              break
-            else:
-              state_record.append(torch.tensor(state))
+              if done:
+                  break
+              else:
+                  state_record.append(torch.tensor(state))
 
           total_reward = np.array(reward_record).sum()
 
