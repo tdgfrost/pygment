@@ -190,9 +190,6 @@ class DQNAgent(BaseAgent):
             if episode % 5 == 0:
                 print(f'Episodes completed: {episode}, Loss: {np.array(total_loss).mean()}, Reward: {np.array(total_rewards).mean()}')
 
-            #total_rewards.append(np.array(last_reward).sum())
-            #total_loss.append(np.array(current_loss).mean())
-
             prem_done = False
             done = False
             state = self.env.reset()[0]
