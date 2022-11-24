@@ -187,7 +187,7 @@ class DQNAgent(BaseAgent):
         total_loss = deque([], maxlen=100)
 
         for episode in range(1, episodes+1):
-            if episode % 50 == 0:
+            if episode % 5 == 0:
                 print(f'Episodes completed: {episode}, Loss: {np.array(total_loss).mean()}, Reward: {np.array(total_rewards).mean()}')
 
             #total_rewards.append(np.array(last_reward).sum())
@@ -207,7 +207,7 @@ class DQNAgent(BaseAgent):
 
                 loss = self.process_batch(self._batch_size)
 
-                self.buffer_update(Experience(state, action, reward, next_state, done))
+                self.buffer_update(Experience(state, action, reward, next_state, done or prem_done))
 
                 state = next_state
 
@@ -216,15 +216,12 @@ class DQNAgent(BaseAgent):
 
                 self.net.sync(self._tau)
 
-                if prem_done:
-                    raise ValueError('prem_done has been returned as True - debugging required')
-
-            total_rewards.append(np.array(current_reward).mean())
+            total_rewards.append(np.array(current_reward).sum())
             total_loss += deque(current_loss)
 
             if len(total_rewards) == 100:
                 if np.array(total_rewards).mean() >= target_reward:
-                    print(f'Final reward: {np.array(current_reward).sum()}')
+                    print(f'Final reward: {np.array(total_rewards).sum()}')
                     break
 
 
@@ -246,14 +243,11 @@ class DQNAgent(BaseAgent):
 
                 next_state, reward, done, prem_done, _ = env.step(action)
 
-                sample = Experience(state, action, reward, next_state, done)
+                sample = Experience(state, action, reward, next_state, done or prem_done)
 
                 sample_record.append(sample)
 
                 state = next_state
-
-                if prem_done:
-                    raise ValueError('prem_done has been returned as True - debugging required')
 
             return sample_record
 
@@ -393,9 +387,6 @@ class PolicyGradient(BaseAgent):
               state, reward, done, prem_done, _ = self.env.step(action.item())
 
               reward_record.append(reward)
-
-              if prem_done:
-                  raise ValueError('prem_done has been returned as True - debugging required')
 
           total_reward = np.array(reward_record).sum()
 
