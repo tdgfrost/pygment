@@ -110,14 +110,12 @@ class PolicyGradient(BaseAgent):
     def __init__(self):
         super().__init__()
         self.net = PolicyGradientNet()
-        self.predict_net = None
 
     def add_network(self, nodes: list):
         if (not isinstance(nodes, list)) or (not np.issubdtype(np.array(nodes).dtype, np.integer)):
             raise TypeError('Node values must be entered as integers within a list')
 
         self.net.add_layers(len(nodes), nodes, self.observation_space, self.action_space)
-        self.predict_net = self.net.cpu()
         self.net.has_net = True
 
 
@@ -127,7 +125,6 @@ class PolicyGradient(BaseAgent):
         super().compile_check()
 
         self.net.to(self.device)
-        self.predict_net.to('cpu')
         self.optimizer = self._optimizers[self._optimizer](self.net.parameters(),
                                                            lr=self._learning_rate)
 
@@ -137,45 +134,47 @@ class PolicyGradient(BaseAgent):
     def train(self, target_reward=None, episodes=10000, ep_update=4, gamma=0.999, max_steps=None):
         self.method_check(env_loaded=True, net_exists=True, compiled=True)
         self._gamma = gamma
+
         if max_steps is None:
             max_steps = self._max_steps if self._max_steps is not None else 10000
 
 
         total_rewards = deque([], maxlen=100)
         total_loss = deque([], maxlen=100)
+
+        @ray.remote
+        def env_run(predict_net):
+          state_record = []
+          reward_record = []
+          action_record = []
+          cum_reward = []
+
+          state = self.env.reset()[0]
+          state_record.append(torch.tensor(state))
+          for _ in range(max_steps):
+            with torch.no_grad():
+              action, _, _ = predict_net.forward(state, device='cpu')
+              action_record.append(action.item())
+            state, reward, done, _, _ = self.env.step(action.item())
+
+            reward_record.append(reward)
+
+            if done:
+              break
+            else:
+              state_record.append(torch.tensor(state))
+
+          total_reward = np.array(reward_record).sum()
+
+          cum_r = calc_cum_rewards(reward_record, self._gamma)
+          for r in cum_r:
+            cum_reward.append(r)
+
+          return state_record, action_record, cum_reward, total_reward
+
         for episode in range(episodes // ep_update):
 
-            @ray.remote
-            def env_run():
-                state_record = []
-                reward_record = []
-                action_record = []
-                cum_reward = []
-
-                state = self.env.reset()[0]
-                state_record.append(state)
-                for _ in range(max_steps):
-                  with torch.no_grad():
-                      action, _, _ = self.predict_net.forward(state, device='cpu')
-                      action_record.append(action)
-                  state, reward, done, _, _ = self.env.step(action)
-
-                  reward_record.append(reward)
-
-                  if done:
-                    break
-                  else:
-                    state_record.append(state)
-
-                total_reward = np.array(reward_record).sum()
-
-                cum_r = calc_cum_rewards(reward_record, self._gamma)
-                for r in cum_r:
-                  cum_reward.append(r)
-
-                return state_record, action_record, cum_reward, total_reward
-
-            state_record, action_record, cum_reward, total_reward = zip(*ray.get([env_run.remote() for _ in range(ep_update)]))
+            state_record, action_record, cum_reward, total_reward = zip(*ray.get([env_run.remote(self.net.cpu()) for _ in range(ep_update)]))
 
             [total_rewards.append(r) for r in total_reward]
             if (target_reward is not None) & (len(total_rewards) == 100):
@@ -183,15 +182,14 @@ class PolicyGradient(BaseAgent):
                     print(f'Solved at target {target_reward}!')
                     break
 
-            state_records = [state for record in state_record for state in record]
+            state_records = []
+            for record in state_record:
+                state_records += record
+            state_records = torch.stack(state_records).to('mps')
             cum_rewards = [cum_r for record in cum_reward for cum_r in record]
             action_records = [action for record in action_record for action in record]
-            action_probs_records = []
-            action_logprobs_records = []
-            for state in state_records:
-                _, action_probs, action_logprobs = self.net.cpu().forward(state, device='cpu')
-                action_probs_records.append(action_probs)
-                action_logprobs_records.append(action_logprobs)
+            self.net.to('mps')
+            _, action_probs_records, action_logprobs_records = self.net(state_records)
 
             # calculate loss
             self.optimizer.zero_grad()
@@ -203,8 +201,6 @@ class PolicyGradient(BaseAgent):
             entropy_loss.backward()
             # update the model and predict_model
             self.optimizer.step()
-            self.predict_net.load_state_dict(self.net.state_dict())
-
             total_loss.append(loss.item())
 
             print(f'Episodes: {episode * ep_update}, Loss {np.array(total_loss).mean()}, Mean Reward: {np.array(total_rewards).mean()}')

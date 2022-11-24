@@ -73,12 +73,12 @@ class PolicyGradientNet(BaseNet, nn.Module):
             state = F.relu(layer(state))
 
         action_logits = self.input_layers[-1](state)
-        action_probs = F.softmax(action_logits, dim=0)
-        action_logprobs = F.log_softmax(action_logits, dim=0)
+        action_probs = F.softmax(action_logits, dim=-1)
+        action_logprobs = F.log_softmax(action_logits, dim=-1)
         action_distribution = Categorical(action_probs)
         action = action_distribution.sample()
 
-        return action.item(), action_probs, action_logprobs
+        return action, action_probs, action_logprobs
 
 
 class ActorCriticNet(BaseNet, nn.Module):
