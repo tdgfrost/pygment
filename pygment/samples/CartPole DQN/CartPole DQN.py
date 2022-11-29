@@ -1,6 +1,5 @@
 import pygment as pm
 import gymnasium as gym
-from time import sleep
 
 env = gym.make('CartPole-v1', max_episode_steps=300)
 agent = pm.create_agent('doubleDQN')

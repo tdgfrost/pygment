@@ -227,7 +227,7 @@ class DQNAgent(BaseAgent):
 
         @ray.remote
         def distributed_buffer_fill(env):
-            sample_record = []
+            buffer_record = []
 
             state = env.reset()[0]
             done = False
@@ -241,11 +241,11 @@ class DQNAgent(BaseAgent):
 
                 sample = Experience(state, action, reward, next_state, done or prem_done)
 
-                sample_record.append(sample)
+                buffer_record.append(sample)
 
                 state = next_state
 
-            return sample_record
+            return buffer_record
 
 
         while True:
@@ -365,36 +365,47 @@ class PolicyGradient(BaseAgent):
 
         @ray.remote
         def env_run(predict_net):
-          state_record = []
-          reward_record = []
-          action_record = []
+          #state_record = []
+          #reward_record = []
+          #action_record = []
           cum_reward = []
+
+          buffer_record = []
 
           state = self.env.reset()[0]
           done = False
           prem_done = False
           while not done and not prem_done:
-              state_record.append(torch.tensor(state))
+              #state_record.append(torch.tensor(state))
 
               with torch.no_grad():
                   action, _, _ = predict_net.forward(state, device='cpu')
-                  action_record.append(action.item())
+                  #action_record.append(action.item())
 
-              state, reward, done, prem_done, _ = self.env.step(action.item())
+              next_state, reward, done, prem_done, _ = self.env.step(action.item())
 
-              reward_record.append(reward)
+              buffer_record.append(Experience(state, action.item(), reward, next_state, done))
 
+              state = next_state
+
+              #reward_record.append(reward)
+
+          reward_record = [exp.reward for exp in buffer_record]
           total_reward = np.array(reward_record).sum()
 
-          cum_r = calc_cum_rewards(reward_record, self._gamma)
-          for r in cum_r:
-            cum_reward.append(r)
+          #cum_r = calc_cum_rewards(reward_record, self._gamma)
+          cum_reward = calc_cum_rewards(reward_record, self._gamma)
+          #for r in cum_r:
+            #cum_reward.append(r)
 
-          return state_record, action_record, cum_reward, total_reward
+          #return state_record, action_record, cum_reward, total_reward
+          return buffer_record, cum_reward, total_reward
 
         for episode in range(episodes // ep_update):
 
-            state_record, action_record, cum_reward, total_reward = zip(*ray.get([env_run.remote(self.net.cpu()) for _ in range(ep_update)]))
+            #state_record, action_record, cum_reward, total_reward = zip(*ray.get([env_run.remote(self.net.cpu()) for _ in range(ep_update)]))
+            buffer_record, cum_reward, total_reward = zip(
+              *ray.get([env_run.remote(self.net.cpu()) for _ in range(ep_update)]))
 
             [total_rewards.append(r) for r in total_reward]
             if (target_reward is not None) & (len(total_rewards) == 100):
@@ -402,12 +413,14 @@ class PolicyGradient(BaseAgent):
                     print(f'Solved at target {target_reward}!')
                     break
 
-            state_records = []
+            '''state_records = []
             for record in state_record:
                 state_records += record
             state_records = torch.stack(state_records).to('mps')
             cum_rewards = [cum_r for record in cum_reward for cum_r in record]
-            action_records = [action for record in action_record for action in record]
+            action_records = [action for record in action_record for action in record]'''
+            state_records, action_records = zip(*[(exp.state, exp.action) for buffer in buffer_record for exp in buffer])
+            cum_rewards = [cum_r for record in cum_reward for cum_r in record]
             self.net.to('mps')
             _, action_probs_records, action_logprobs_records = self.net(state_records)
 
@@ -481,7 +494,7 @@ class ActorCritic(BaseAgent):
                                                      lower_clip if lower_clip is not None else -clip,
                                                      upper_clip if upper_clip is not None else clip))
 
-      self._compiled = True
+        self._compiled = True
 
 
     def train(self, episodes=10000, gamma=0.999):
