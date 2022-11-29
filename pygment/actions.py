@@ -16,27 +16,22 @@ def GreedyEpsilonSelector(obs, epsilon, net):
 
 
 def unpack_batch(batch: list):
-    states, actions, rewards, next_states, dones = [], [], [], [], []
-    for exp in batch:
-        states.append(exp.state)
-        actions.append(exp.action)
-        rewards.append(exp.reward)
-        dones.append(exp.done)
-        next_states.append(exp.next_state)
-    return np.array(states, copy=False), np.array(actions), \
+    states, actions, rewards, next_states, dones = zip(*[(exp.state, exp.action, exp.reward, exp.next_state, exp.done)
+                                                         for exp in batch])
+
+    '''return np.array(states, copy=False), np.array(actions), \
            np.array(rewards, dtype=np.float32), \
            np.array(next_states, copy=False), \
-           np.array(dones, dtype=np.uint8)
+           np.array(dones, dtype=np.uint8)'''
+    return states, actions, rewards, next_states, dones
 
 
 def calc_loss_batch(batch, device, model, gamma):
     # Function for returning both the losses and the prioritised samples
     states, actions, rewards, next_states, dones = unpack_batch(batch)
 
-    states_v = torch.tensor(states).to(device)
-    actions_v = torch.tensor(actions).to(device)
-    rewards_v = torch.tensor(rewards).to(device)
-    done_mask = torch.tensor(dones, dtype=torch.bool).to(device)
+    states_v, actions_v, rewards_v, done_mask = torch.tensor(states).to(device), torch.tensor(actions).to(device), \
+                                                torch.tensor(rewards, dtype=torch.float32).to(device), torch.tensor(dones, dtype=torch.bool).to(device)
 
     state_action_values = model.forward(states_v).gather(1, actions_v.unsqueeze(-1)).squeeze(-1)
 
