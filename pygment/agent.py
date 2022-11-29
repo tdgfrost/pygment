@@ -12,7 +12,6 @@ from .env import wrap_env
 from collections import deque
 import ray
 
-
 class Experience:
     def __init__(self, state, action, reward, next_state, done):
         self.state = state
@@ -446,51 +445,51 @@ class ActorCritic(BaseAgent):
         self.net = ActorCriticNet()
 
 
-    def add_network(self, layers=1, nodes=None):
-        if nodes is None:
-            nodes = [128]
+    def reset(self):
+        reset_done = super().reset()
 
-        if (not isinstance(layers, int)) or (layers == 0):
-            raise ValueError('Layers must be a non-zero integer')
+        if reset_done:
+            self.net = ActorCriticNet()
+
+
+    def add_network(self, nodes: list):
         if (not isinstance(nodes, list)) or (not np.issubdtype(np.array(nodes).dtype, np.integer)):
             raise TypeError('Node values must be entered as integers within a list')
-        if len(nodes) != layers:
-            raise AttributeError('Layers and nodes must match')
 
-        self.net.add_layers(layers, nodes, self.observation_space, self.action_space)
+        if self._compiled:
+            raise AttributeError('Model is already compiled!')
+
+        if self.env is None:
+            raise ImportError('Please load a gym environment first!')
+
+        self.net.add_layers(nodes, self.observation_space, self.action_space)
         self.net.has_net = True
 
-
-    def compile(self, optimizer, learning_rate=0.001):
+    def compile(self, optimizer, learning_rate=0.001, weight_decay=1e-5, clip=1.0, lower_clip=None, upper_clip=None):
         self._optimizer = optimizer
+        self._learning_rate = learning_rate
+        self._regularisation = weight_decay
         super().compile_check()
 
-        self.optimizer = self._optimizers[optimizer](self.net.parameters(),
-                                                     lr=learning_rate)
+        self.net.to(self.device)
+        self.optimizer = self._optimizers[self._optimizer](self.net.parameters(),
+                                                           lr=self._learning_rate,
+                                                           weight_decay=self._regularisation)
 
-        self._compiled = True
+        for p in self.net.parameters():
+            p.register_hook(lambda grad: torch.clamp(grad,
+                                                     lower_clip if lower_clip is not None else -clip,
+                                                     upper_clip if upper_clip is not None else clip))
+
+      self._compiled = True
 
 
     def train(self, episodes=10000, gamma=0.999):
         self.method_check(env_loaded=True, net_exists=True, compiled=True)
         self._gamma = gamma
 
-        for episode in range(episodes):
-            state = self.env.reset()[0]
-
-            action = self.net(state)
-            state, reward, done, _, _ = self.env.step(action)
-        # UNFINISHED
-
 
 
     def action_selector(self):
         pass
-
-
-    def reset(self):
-        reset_done = super().reset()
-
-        if reset_done:
-            self.net = ActorCriticNet()
 

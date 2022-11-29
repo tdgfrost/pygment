@@ -132,3 +132,39 @@ class ActorCriticNet(BaseNet, nn.Module):
         self.value_layer = None
 
 
+    def add_layers(self, nodes: list, observation_space, action_space):
+        self.net = super().add_layers(nodes, observation_space, action_space)
+
+        self.action_layer = self.net[-1]
+        self.value_layer = nn.Linear(self.net[-2].out_features, 1)
+        self.net = self.net[:-1]
+
+
+    def forward(self, state, device='mps'):
+        state = torch.tensor(state).to(device)
+
+        for layer in self.net[:-1]:
+          state = F.relu(layer(state))
+
+        # Value layer:
+        state_value = self.value_layer(state)
+
+        # Actor layer:
+        action_logits = self.action_layer(state)
+        action_probs = F.softmax(action_logits, dim=-1)
+        action_logprobs = F.log_softmax(action_logits, dim=-1)
+        action_distribution = Categorical(action_probs)
+        # Following is to avoid rare events where probability is represented as zero (and logprob = inf),
+        # but is in fact non-zero, and an action is sampled from this index.
+        while True:
+          action = action_distribution.sample()
+          if action.shape:
+            if ~torch.isinf(action_logprobs.gather(1, action.unsqueeze(-1)).squeeze(-1)).all():
+              break
+          else:
+            if ~torch.isinf(action_logprobs[action.item()]):
+              break
+
+        return action, action_probs, action_logprobs
+
+

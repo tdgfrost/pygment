@@ -1,7 +1,5 @@
 import pygment as pm
 import gymnasium as gym
-from time import sleep
-import torch
 
 env = gym.make('CartPole-v1', max_episode_steps=10000)
 agent = pm.create_agent('policy')
