@@ -6,7 +6,7 @@ import random
 import time
 from copy import deepcopy
 from .actions import GreedyEpsilonSelector, calc_loss_batch, calc_loss_policy, calc_cum_rewards, \
-  calc_entropy_loss_policy
+  calc_entropy_loss_policy, calc_loss_actor_critic
 from .net import DualNet, ActorCriticNet, PolicyGradientNet
 from .env import wrap_env
 from collections import deque
@@ -365,22 +365,15 @@ class PolicyGradient(BaseAgent):
 
         @ray.remote
         def env_run(predict_net):
-          #state_record = []
-          #reward_record = []
-          #action_record = []
           cum_reward = []
-
           buffer_record = []
 
           state = self.env.reset()[0]
           done = False
           prem_done = False
           while not done and not prem_done:
-              #state_record.append(torch.tensor(state))
-
               with torch.no_grad():
                   action, _, _ = predict_net.forward(state, device='cpu')
-                  #action_record.append(action.item())
 
               next_state, reward, done, prem_done, _ = self.env.step(action.item())
 
@@ -388,22 +381,14 @@ class PolicyGradient(BaseAgent):
 
               state = next_state
 
-              #reward_record.append(reward)
-
           reward_record = [exp.reward for exp in buffer_record]
           total_reward = np.array(reward_record).sum()
-
-          #cum_r = calc_cum_rewards(reward_record, self._gamma)
           cum_reward = calc_cum_rewards(reward_record, self._gamma)
-          #for r in cum_r:
-            #cum_reward.append(r)
 
-          #return state_record, action_record, cum_reward, total_reward
           return buffer_record, cum_reward, total_reward
 
         for episode in range(episodes // ep_update):
 
-            #state_record, action_record, cum_reward, total_reward = zip(*ray.get([env_run.remote(self.net.cpu()) for _ in range(ep_update)]))
             buffer_record, cum_reward, total_reward = zip(
               *ray.get([env_run.remote(self.net.cpu()) for _ in range(ep_update)]))
 
@@ -413,12 +398,6 @@ class PolicyGradient(BaseAgent):
                     print(f'Solved at target {target_reward}!')
                     break
 
-            '''state_records = []
-            for record in state_record:
-                state_records += record
-            state_records = torch.stack(state_records).to('mps')
-            cum_rewards = [cum_r for record in cum_reward for cum_r in record]
-            action_records = [action for record in action_record for action in record]'''
             state_records, action_records = zip(*[(exp.state, exp.action) for buffer in buffer_record for exp in buffer])
             cum_rewards = [cum_r for record in cum_reward for cum_r in record]
             self.net.to('mps')
@@ -438,9 +417,6 @@ class PolicyGradient(BaseAgent):
 
             print(f'Episodes: {episode * ep_update}, Loss {np.array(total_loss).mean()}, Mean Reward: {np.array(total_rewards).mean()}')
 
-
-                # At some point, change all these lists to the Experience class
-                # (complete with a .reset() or .clear() function)
 
     def action_selector(self, obs):
         self.method_check(env_loaded=True, net_exists=True, compiled=True)
@@ -497,12 +473,72 @@ class ActorCritic(BaseAgent):
         self._compiled = True
 
 
-    def train(self, episodes=10000, gamma=0.999):
+    def train(self, target_reward, episodes=10000, ep_update=64, gamma=0.999):
         self.method_check(env_loaded=True, net_exists=True, compiled=True)
         self._gamma = gamma
 
+        total_rewards = deque([], maxlen=100)
+        total_loss = deque([], maxlen=100)
 
+        @ray.remote
+        def env_run(predict_net):
+          cum_reward = []
+          buffer_record = []
 
-    def action_selector(self):
-        pass
+          state = self.env.reset()[0]
+          done = False
+          prem_done = False
+          while not done and not prem_done:
+            with torch.no_grad():
+              action, _, _, _ = predict_net.forward(state, device='cpu')
+
+            next_state, reward, done, prem_done, _ = self.env.step(action.item())
+
+            # To scale loss, we will shrink by a factor of 1000
+            reward /= 1000
+
+            buffer_record.append(Experience(state, action.item(), reward, next_state, done))
+
+            state = next_state
+
+          reward_record = [exp.reward for exp in buffer_record]
+          total_reward = np.array(reward_record).sum()
+          cum_reward = calc_cum_rewards(reward_record, self._gamma)
+
+          return buffer_record, cum_reward, total_reward
+
+        for episode in range(episodes // ep_update):
+
+          buffer_record, cum_reward, total_reward = zip(
+              *ray.get([env_run.remote(self.net.cpu()) for _ in range(ep_update)]))
+
+          [total_rewards.append(r) for r in total_reward]
+          if (target_reward is not None) & (len(total_rewards) == 100):
+            if np.array(total_rewards).mean() * 1000 > target_reward:
+              print(f'Solved at target {target_reward}!')
+              break
+
+          state_records, action_records = zip(*[(exp.state, exp.action) for buffer in buffer_record for exp in buffer])
+          cum_rewards = torch.tensor([cum_r for record in cum_reward for cum_r in record],
+                                     dtype=torch.float32).to(self.device).unsqueeze(-1)
+          action_records = torch.tensor(action_records).to(self.device)
+          self.net.to('mps')
+          _, action_probs_records, action_logprobs_records, state_value_records = self.net(state_records)
+
+          # calculate loss
+          self.optimizer.zero_grad()
+          loss = calc_loss_actor_critic(cum_rewards, action_records, action_probs_records, action_logprobs_records,
+                                        state_value_records, device='mps')
+          loss.backward()
+          #loss.backward(retain_graph=True)
+          # Now calculate the entropy loss
+
+          #entropy_loss = calc_entropy_loss_policy(action_probs_records, action_logprobs_records, device='mps')
+          #entropy_loss.backward()
+          # update the model and predict_model
+          self.optimizer.step()
+          total_loss.append(loss.item())
+
+          print(
+            f'Episodes: {episode * ep_update}, Loss {np.array(total_loss).mean()}, Mean Reward: {np.array(total_rewards).mean() * 1000}')
 

@@ -165,6 +165,6 @@ class ActorCriticNet(BaseNet, nn.Module):
             if ~torch.isinf(action_logprobs[action.item()]):
               break
 
-        return action, action_probs, action_logprobs
+        return action, action_probs, action_logprobs, state_value
 
 

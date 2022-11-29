@@ -19,10 +19,6 @@ def unpack_batch(batch: list):
     states, actions, rewards, next_states, dones = zip(*[(exp.state, exp.action, exp.reward, exp.next_state, exp.done)
                                                          for exp in batch])
 
-    '''return np.array(states, copy=False), np.array(actions), \
-           np.array(rewards, dtype=np.float32), \
-           np.array(next_states, copy=False), \
-           np.array(dones, dtype=np.uint8)'''
     return states, actions, rewards, next_states, dones
 
 
@@ -86,31 +82,25 @@ def calc_cum_rewards(rewards_record, gamma):
     return cum_rewards[::-1]
 
 
-def calc_loss_actor_critic(rewards, logprobs, state_values, gamma=0.99):
+def calc_loss_actor_critic(cum_rewards, action_records, action_probs_records, action_logprobs_records, state_value_records,
+                         device='mps'):
 
-    # rewards as input should be self.rewards for the agent
-    # logprobs should be self.logprobs
-    # state_values should be self.state_values
-    # gamma should be self.gamma -> maybe won't need a default if self.gamma has a default value?
+    advantage = cum_rewards - state_value_records
+    # start with value gradients
+    value_loss = (advantage**2).sum()
 
-    disc_rewards = []
-    disc_reward = 0
-    for reward in rewards:
-        disc_reward = reward + gamma * disc_reward
-        rewards.insert(0, disc_reward)
+    # and then the actor gradients
+    action_loss = action_logprobs_records.gather(1, action_records.unsqueeze(-1))
+    action_loss *= advantage
+    action_loss = -action_loss.sum()
 
+    beta = 0.01
+    entropy_loss = beta * (action_probs_records.gather(1, action_records.unsqueeze(-1)) *
+                           action_logprobs_records.gather(1, action_records.unsqueeze(-1))).sum()
 
-    rewards = torch.tensor(rewards)
-    rewards = (rewards - rewards.mean()) / (rewards.std())
+    total_loss = value_loss + action_loss + beta * entropy_loss
 
-    loss = 0
-    for logprob, value, reward in zip(logprobs, state_values, rewards):
-        advantage = reward - value.item()
-        action_loss = -logprob * advantage
-        value_loss = F.smooth_l1_loss(value, reward)
-        loss += action_loss + value_loss
-
-    return loss
+    return total_loss
 
 
 def calc_loss_prios(batch, batch_weights, device, model, gamma):
