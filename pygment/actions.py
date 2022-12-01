@@ -82,25 +82,26 @@ def calc_cum_rewards(rewards_record, gamma):
     return cum_rewards[::-1]
 
 
-def calc_loss_actor_critic(cum_rewards, action_records, action_probs_records, action_logprobs_records, state_value_records,
-                         device='mps'):
+def calc_loss_actor_critic(batch_Q_s, batch_actions, batch_action_probs, batch_action_logprobs,
+                           batch_state_values, device='mps'):
 
-    advantage = cum_rewards - state_value_records
     # start with value gradients
-    value_loss = (advantage**2).sum()
+    value_loss = F.mse_loss(batch_state_values, batch_Q_s)
 
     # and then the actor gradients
-    action_loss = action_logprobs_records.gather(1, action_records.unsqueeze(-1))
-    action_loss *= advantage
-    action_loss = -action_loss.sum()
+    advantage = batch_Q_s - batch_state_values.detach()
+
+    policy_loss = batch_action_logprobs.gather(1, batch_actions)
+    policy_loss *= advantage
+    policy_loss = -policy_loss.mean()
 
     beta = 0.01
-    entropy_loss = beta * (action_probs_records.gather(1, action_records.unsqueeze(-1)) *
-                           action_logprobs_records.gather(1, action_records.unsqueeze(-1))).sum()
+    entropy_loss = beta * (batch_action_probs * batch_action_logprobs).sum(1).mean()
 
-    total_loss = value_loss + action_loss + beta * entropy_loss
+    #loss = policy_loss + 0.5 * value_loss - entropy_loss
+    loss = policy_loss + value_loss - entropy_loss
 
-    return total_loss
+    return loss
 
 
 def calc_loss_prios(batch, batch_weights, device, model, gamma):

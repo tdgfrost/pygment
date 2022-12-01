@@ -7,7 +7,7 @@ env = gym.make('LunarLander-v2', max_episode_steps=500)
 agent = pm.create_agent('actorcritic')
 agent.load_env(env)
 agent.add_network(nodes=[64, 64])
-agent.compile('adam', learning_rate=0.001)
+agent.compile('adam', learning_rate=0.01)
 
 if train_model:
   agent.train(target_reward=200, episodes=100000, ep_update=64, gamma=0.99)

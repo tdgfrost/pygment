@@ -13,12 +13,16 @@ from collections import deque
 import ray
 
 class Experience:
-    def __init__(self, state, action, reward, next_state, done):
+    def __init__(self, state=None, action=None, reward=None, next_state=None, done=None,
+                 action_probs=None, action_logprobs=None, state_value=None):
         self.state = state
         self.action = action
         self.reward = reward
         self.next_state = next_state
         self.done = done
+        self.action_probs = action_probs
+        self.action_logprobs = action_logprobs
+        self.state_value = state_value
 
 
 class BaseAgent:
@@ -454,7 +458,7 @@ class ActorCritic(BaseAgent):
         self.net.add_layers(nodes, self.observation_space, self.action_space)
         self.net.has_net = True
 
-    def compile(self, optimizer, learning_rate=0.001, weight_decay=1e-5, clip=1.0, lower_clip=None, upper_clip=None):
+    def compile(self, optimizer, learning_rate=0.001, weight_decay=1e-5, clip=1, lower_clip=None, upper_clip=None):
         self._optimizer = optimizer
         self._learning_rate = learning_rate
         self._regularisation = weight_decay
@@ -473,72 +477,71 @@ class ActorCritic(BaseAgent):
         self._compiled = True
 
 
-    def train(self, target_reward, episodes=10000, ep_update=64, gamma=0.999):
+    def train(self, target_reward, episodes=10000, parallel_envs=32, gamma=0.999):
         self.method_check(env_loaded=True, net_exists=True, compiled=True)
         self._gamma = gamma
 
         total_rewards = deque([], maxlen=100)
+        #ep_loss = []
         total_loss = deque([], maxlen=100)
 
         @ray.remote
         def env_run(predict_net):
-          cum_reward = []
-          buffer_record = []
-
-          state = self.env.reset()[0]
           done = False
           prem_done = False
+          state = self.env.reset()[0]
+          ep_record = []
           while not done and not prem_done:
             with torch.no_grad():
-              action, _, _, _ = predict_net.forward(state, device='cpu')
+              action, _, _, state_value = predict_net.forward(state, device='cpu')
 
             next_state, reward, done, prem_done, _ = self.env.step(action.item())
 
-            # To scale loss, we will shrink by a factor of 1000
-            reward /= 1000
-
-            buffer_record.append(Experience(state, action.item(), reward, next_state, done))
+            ep_record.append(Experience(state=state,
+                                        action=action,
+                                        reward=reward))
 
             state = next_state
 
-          reward_record = [exp.reward for exp in buffer_record]
-          total_reward = np.array(reward_record).sum()
-          cum_reward = calc_cum_rewards(reward_record, self._gamma)
+          cum_rewards = calc_cum_rewards([exp.reward for exp in ep_record], self._gamma)
 
-          return buffer_record, cum_reward, total_reward
+          return ep_record, cum_rewards
 
-        for episode in range(episodes // ep_update):
+        for episode in range(episodes // parallel_envs):
 
-          buffer_record, cum_reward, total_reward = zip(
-              *ray.get([env_run.remote(self.net.cpu()) for _ in range(ep_update)]))
+          batch_records, batch_Q_s = zip(*ray.get([env_run.remote(self.net.cpu()) for _ in range(parallel_envs)]))
 
-          [total_rewards.append(r) for r in total_reward]
+          total_rewards += deque([np.sum([exp.reward for exp in episode]) for episode in batch_records])
+
           if (target_reward is not None) & (len(total_rewards) == 100):
-            if np.array(total_rewards).mean() * 1000 > target_reward:
+            if np.array(total_rewards).mean() > target_reward:
               print(f'Solved at target {target_reward}!')
               break
 
-          state_records, action_records = zip(*[(exp.state, exp.action) for buffer in buffer_record for exp in buffer])
-          cum_rewards = torch.tensor([cum_r for record in cum_reward for cum_r in record],
-                                     dtype=torch.float32).to(self.device).unsqueeze(-1)
-          action_records = torch.tensor(action_records).to(self.device)
-          self.net.to('mps')
-          _, action_probs_records, action_logprobs_records, state_value_records = self.net(state_records)
+          batch_Q_s = torch.tensor([Q_s for episode in batch_Q_s for Q_s in episode],
+                                   dtype=torch.float32).to(self.device).unsqueeze(-1)
+
+          zip(*[(exp.state, exp.action) for episode in batch_records for exp in episode])
+
+          batch_states, batch_actions= zip(*[(exp.state, exp.action) for episode in batch_records for exp in episode])
+
+          batch_states = np.array(batch_states)
+          batch_actions = torch.stack(batch_actions).to(self.device).unsqueeze(-1)
+
+          self.net.to(self.device)
+          _, batch_action_probs, batch_action_logprobs, batch_state_values = self.net(batch_states)
 
           # calculate loss
           self.optimizer.zero_grad()
-          loss = calc_loss_actor_critic(cum_rewards, action_records, action_probs_records, action_logprobs_records,
-                                        state_value_records, device='mps')
-          loss.backward()
-          #loss.backward(retain_graph=True)
-          # Now calculate the entropy loss
+          loss = calc_loss_actor_critic(batch_Q_s, batch_actions, batch_action_probs, batch_action_logprobs,
+                                        batch_state_values, device=self.device)
 
-          #entropy_loss = calc_entropy_loss_policy(action_probs_records, action_logprobs_records, device='mps')
-          #entropy_loss.backward()
+          loss.backward()
+
           # update the model and predict_model
           self.optimizer.step()
+
           total_loss.append(loss.item())
 
           print(
-            f'Episodes: {episode * ep_update}, Loss {np.array(total_loss).mean()}, Mean Reward: {np.array(total_rewards).mean() * 1000}')
-
+            f'Episodes: {episode * parallel_envs}, Loss {np.array(total_loss).mean()}, Mean Reward: {np.array(total_rewards).mean()}')
