@@ -482,7 +482,6 @@ class ActorCritic(BaseAgent):
         self._gamma = gamma
 
         total_rewards = deque([], maxlen=100)
-        #ep_loss = []
         total_loss = deque([], maxlen=100)
 
         @ray.remote

@@ -154,11 +154,7 @@ class ActorCriticNet(BaseNet, nn.Module):
 
         action_logits = self.actor_net[-1](action_logits)
 
-        # Value layer:
-        #state_value = self.value_layer(state)
-
         # Actor layer:
-        #action_logits = self.action_layer(state)
         action_probs = F.softmax(action_logits, dim=-1)
         action_logprobs = F.log_softmax(action_logits, dim=-1)
         action_distribution = Categorical(action_probs)
