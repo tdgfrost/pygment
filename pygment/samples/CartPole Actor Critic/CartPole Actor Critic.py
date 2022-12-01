@@ -10,7 +10,7 @@ agent.compile('adam', learning_rate=0.01)
 
 agent.train(target_reward=8000, episodes=100000, parallel_envs=50, gamma=1)
 
-pm.animate(agent, 'CartPole-v1', max_episode_steps=10000)
+pm.animate(agent, 'CartPole-v1', max_episode_steps=5000)
 
 
 
