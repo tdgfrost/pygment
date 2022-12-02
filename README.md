@@ -10,11 +10,21 @@ A demonstration of the use of this module is shown below:
 import pygment as pm
 import gymnasium as gym
 
-env = gym.make('CartPole-v1', max_episode_steps=500)
+
+# Create a pygment agent (with its method of learning)
 agent = pm.create_agent('DQN')
+
+# Define a gymnasium environment and load it into the agent.
+env = gym.make('CartPole-v1', 
+                max_episode_steps=500)
+
 agent.load_env(env)
+
+# Define the network architecture and method of learning.
 agent.add_network(nodes=[64, 64])
 agent.compile(optimizer='adam', learning_rate=0.01)
+
+# And get learning!
 agent.train(target_reward=300, 
             save_from=200, 
             save_interval=10,
