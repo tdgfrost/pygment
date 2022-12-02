@@ -10,17 +10,31 @@ A demonstration of the use of this module is shown below:
 import pygment as pm
 import gymnasium as gym
 
-agent = pm.create_agent()
-env = gym.make('CartPole-v1')
+env = gym.make('CartPole-v1', max_episode_steps=500)
+agent = pm.create_agent('DQN')
 agent.load_env(env)
-agent.add_layer(64, 'relu')
-agent.add_layer(256, 'relu')
-agent.compile(optimizer='adam', learning_rate=0.001)
-agent.train()
+agent.add_network(nodes=[64, 64])
+agent.compile(optimizer='adam', learning_rate=0.01)
+agent.train(target_reward=300, 
+            save_from=200, 
+            save_interval=10,
+            episodes=10000,
+            gamma=0.99)
 ```
 A print-out of the training will be provided.
 
-The trained network can then be invoked by calling:
+The trained network can also be directly invoked by calling:
 ```
-agent.net.main_net(obs)
+agent.net.forward(obs)
+```
+
+Animations can be saved to video, or displayed live, using the animate() or animate_live() methods:
+```
+pm.animate(agent,
+           'CartPole-v1',
+           max_episode_steps=500)
+
+pm.animate_live(agent,
+                'CartPole-v1',
+                max_episode_steps=500)
 ```
