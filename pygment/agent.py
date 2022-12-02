@@ -4,26 +4,36 @@ from torch.utils.data import DataLoader
 import numpy as np
 import random
 import time
+import datetime as dt
+import os
 from copy import deepcopy
 from .actions import GreedyEpsilonSelector, calc_loss_batch, calc_loss_policy, calc_cum_rewards, \
-  calc_entropy_loss_policy
+  calc_entropy_loss_policy, calc_loss_actor_critic
 from .net import DualNet, ActorCriticNet, PolicyGradientNet
 from .env import wrap_env
 from collections import deque
 import ray
 
 class Experience:
-    def __init__(self, state, action, reward, next_state, done):
+  '''
+  The Experience class stores values from a training episode (values from the environment
+  and values from the network).
+  '''
+  def __init__(self, state=None, action=None, reward=None, next_state=None, done=None,
+                 action_probs=None, action_logprobs=None, state_value=None):
         self.state = state
         self.action = action
         self.reward = reward
         self.next_state = next_state
         self.done = done
+        self.action_probs = action_probs
+        self.action_logprobs = action_logprobs
+        self.state_value = state_value
 
 
 class BaseAgent:
     """
-    Abstract Agent interface
+    Base Agent stores universal attributes and super() methods across the agents.
     """
 
     def __init__(self):
@@ -33,6 +43,9 @@ class BaseAgent:
         self.action_space = None
         self.observation_space = None
         self.output_activation = None
+        self.current_best_reward = -10**100
+        now = dt.datetime.now()
+        self._path = f'./{now.year}_{now.month}_{now.day:02}_{now.hour:02}_{now.minute:02}_{now.second:02}'
         self._optimizer = None
         self._learning_rate = None
         self.__output_activation = None
@@ -42,6 +55,7 @@ class BaseAgent:
         self._eps_decay_rate = None
         self._min_epsilon = None
         self._regularisation = None
+        self._screen_files = True
         self._optimizers = {'adam': torch.optim.Adam,
                             'sgd': torch.optim.SGD,
                             'rmsprop': torch.optim.RMSprop}
@@ -62,6 +76,9 @@ class BaseAgent:
             self.action_space = None
             self.observation_space = None
             self.output_activation = None
+            self.current_best_reward = -10**100
+            now = dt.datetime.now()
+            self._path = f'./{now.year}_{now.month}_{now.day:02}_{now.hour:02}_{now.minute:02}_{now.second:02}/'
             self._optimizer = None
             self._learning_rate = None
             self.__output_activation = None
@@ -71,6 +88,7 @@ class BaseAgent:
             self._eps_decay_rate = None
             self._min_epsilon = None
             self._regularisation = None
+            self._screen_files = True
             self._optimizers = {'adam': torch.optim.Adam,
                                 'sgd': torch.optim.SGD,
                                 'rmsprop': torch.optim.RMSprop}
@@ -80,7 +98,10 @@ class BaseAgent:
 
         return reset_done
 
-
+    '''
+    load_env stores the environment (and its action/observation space) within the agent, 
+    but also offers the option for frame stacking and reward clipping.
+    '''
     def load_env(self, env, stack_frames=1, reward_clipping=False):
         self.env = wrap_env(env, stack_frames, reward_clipping)
         self.action_space = self.env.action_space.n
@@ -95,6 +116,13 @@ class BaseAgent:
         if not self.net.has_net:
             raise AttributeError('Please add a neural network before compiling.')
 
+    def network_check(self, nodes):
+      if (not isinstance(nodes, list)) or (not np.issubdtype(np.array(nodes).dtype, np.integer)):
+        raise TypeError('Node values must be entered as integers within a list')
+      if self._compiled:
+        raise AttributeError('Model is already compiled!')
+      if self.env is None:
+        raise ImportError('Please load a gym environment first!')
 
     def method_check(self, env_loaded, net_exists, compiled):
         if (self.env is None) and env_loaded:
@@ -104,11 +132,86 @@ class BaseAgent:
         if (not self._compiled) and compiled:
             raise AttributeError('Model must be compiled first')
 
+    '''
+    The train super() method ensures that the optimizer is correctly synced to the model,
+    and creates a directory in which the model checkpoints and any animations can be saved.
+    '''
+    def train(self, gamma):
+      self.method_check(env_loaded=True, net_exists=True, compiled=True)
+      self._gamma = gamma
+
+      if not os.path.isdir(self._path):
+        os.mkdir(self._path)
+
+      self.optimizer = self._optimizers[self._optimizer](self.net.parameters(),
+                                                         lr=self._learning_rate,
+                                                         weight_decay=self._regularisation)
+
+    '''
+    save_model does several important steps/checks prior to model saving, which are detailed below.
+    '''
+    def save_model(self, average_reward, save_from, save_interval, best=False):
+
+      # Check that the current model performance exceeds the 'save_from' threshold,
+      # and that the current model is better than the previous 'best' model.
+      if (average_reward >= save_from) & ((average_reward // save_interval * save_interval) >
+                                          (self.current_best_reward // save_interval * save_interval)):
+
+        # It may be the case that a previous model was loaded and training was continued. If this hasn't been
+        # checked yet, screen the previous checkpoints to check whether any were saved as 'model_best_',
+        # and clarify the score of that checkpoint.
+        if self._screen_files:
+          no_best = True
+          for file in os.listdir(self._path):
+            if 'model_best_' in file:
+              no_best = False
+              prev_score = file.split('model_best_')[1].split('.pt')[0]
+
+              # If the score of this checkpoint is below the current model, remove the 'model_best_' from that
+              # checkpoint.
+              if int(float(prev_score)) < (average_reward // save_interval * save_interval):
+                os.rename(self._path+f'/{file}', self._path+f'/model_{int(float(prev_score))}.pt')
+                self._screen_files = False
+                break
+
+          if no_best:
+            self._screen_files = False
+
+        # Define the directory to save the model in, and the name of the file, which follows the template of
+        # 'model_(score)' initially, and 'model_best_(score)' at the terminus.
+        current_model_path = self._path + f'/model_best_{int(average_reward // save_interval * save_interval)}.pt' if best \
+          else self._path + f'/model_{int(average_reward // save_interval * save_interval)}.pt'
+
+        # For some reason there are issues with saving and re-training the model under mps, so (for the time being)
+        # we create a deepcopy of our model to get around this.
+        current_model = deepcopy(self.net)
+        torch.save(current_model, current_model_path)
+
+
+    def load_model(self):
+      invalid_path = ''
+      while True:
+        path = input(invalid_path + 'Please enter model path, or press Q/q to exist: ')
+        if path == 'Q' or path == 'q':
+          return
+        if os.path.isfile(path):
+          break
+        invalid_path = 'Invalid path - '
+      self.net = torch.load(path)
+      if self._compiled:
+        self._compiled = False
+        self._optimizer = None
+        self._learning_rate = None
+        self._regularisation = None
+        print('Model loaded - recompile agent please')
+
+      self._path = os.path.dirname(path)
+
 
 class DQNAgent(BaseAgent):
     """
-    DQNAgent is a DQN agent which calculates Q values
-    from the observations and  converts them into the actions using action_selector
+    DQNAgent is a Double DQN agent which learns from its environment using a deep Q network (with both a
+    current network and an intermittently synchronised target network).
     """
 
     def __init__(self):
@@ -128,16 +231,12 @@ class DQNAgent(BaseAgent):
             self._tau = None
             self._batch_size = None
 
-
+    '''
+    Feed the desired number of nodes and the associated input/output 
+    features to the DualNet network-generating method.
+    '''
     def add_network(self, nodes: list):
-        if (not isinstance(nodes, list)) or (not np.issubdtype(np.array(nodes).dtype, np.integer)):
-            raise TypeError('Node values must be entered as integers within a list')
-
-        if self._compiled:
-            raise AttributeError('Model is already compiled!')
-
-        if self.env is None:
-            raise ImportError('Please load a gym environment first!')
+        super().network_check(nodes)
 
         self.net.add_layers(nodes, self.observation_space, self.action_space)
         self.net.has_net = True
@@ -323,14 +422,7 @@ class PolicyGradient(BaseAgent):
 
 
     def add_network(self, nodes: list):
-        if (not isinstance(nodes, list)) or (not np.issubdtype(np.array(nodes).dtype, np.integer)):
-            raise TypeError('Node values must be entered as integers within a list')
-
-        if self._compiled:
-            raise AttributeError('Model is already compiled!')
-
-        if self.env is None:
-            raise ImportError('Please load a gym environment first!')
+        super().network_check(nodes)
 
         self.net.add_layers(nodes, self.observation_space, self.action_space)
         self.net.has_net = True
@@ -365,22 +457,15 @@ class PolicyGradient(BaseAgent):
 
         @ray.remote
         def env_run(predict_net):
-          #state_record = []
-          #reward_record = []
-          #action_record = []
           cum_reward = []
-
           buffer_record = []
 
           state = self.env.reset()[0]
           done = False
           prem_done = False
           while not done and not prem_done:
-              #state_record.append(torch.tensor(state))
-
               with torch.no_grad():
                   action, _, _ = predict_net.forward(state, device='cpu')
-                  #action_record.append(action.item())
 
               next_state, reward, done, prem_done, _ = self.env.step(action.item())
 
@@ -388,22 +473,14 @@ class PolicyGradient(BaseAgent):
 
               state = next_state
 
-              #reward_record.append(reward)
-
           reward_record = [exp.reward for exp in buffer_record]
           total_reward = np.array(reward_record).sum()
-
-          #cum_r = calc_cum_rewards(reward_record, self._gamma)
           cum_reward = calc_cum_rewards(reward_record, self._gamma)
-          #for r in cum_r:
-            #cum_reward.append(r)
 
-          #return state_record, action_record, cum_reward, total_reward
           return buffer_record, cum_reward, total_reward
 
         for episode in range(episodes // ep_update):
 
-            #state_record, action_record, cum_reward, total_reward = zip(*ray.get([env_run.remote(self.net.cpu()) for _ in range(ep_update)]))
             buffer_record, cum_reward, total_reward = zip(
               *ray.get([env_run.remote(self.net.cpu()) for _ in range(ep_update)]))
 
@@ -413,12 +490,6 @@ class PolicyGradient(BaseAgent):
                     print(f'Solved at target {target_reward}!')
                     break
 
-            '''state_records = []
-            for record in state_record:
-                state_records += record
-            state_records = torch.stack(state_records).to('mps')
-            cum_rewards = [cum_r for record in cum_reward for cum_r in record]
-            action_records = [action for record in action_record for action in record]'''
             state_records, action_records = zip(*[(exp.state, exp.action) for buffer in buffer_record for exp in buffer])
             cum_rewards = [cum_r for record in cum_reward for cum_r in record]
             self.net.to('mps')
@@ -438,9 +509,6 @@ class PolicyGradient(BaseAgent):
 
             print(f'Episodes: {episode * ep_update}, Loss {np.array(total_loss).mean()}, Mean Reward: {np.array(total_rewards).mean()}')
 
-
-                # At some point, change all these lists to the Experience class
-                # (complete with a .reset() or .clear() function)
 
     def action_selector(self, obs):
         self.method_check(env_loaded=True, net_exists=True, compiled=True)
@@ -466,28 +534,18 @@ class ActorCritic(BaseAgent):
 
 
     def add_network(self, nodes: list):
-        if (not isinstance(nodes, list)) or (not np.issubdtype(np.array(nodes).dtype, np.integer)):
-            raise TypeError('Node values must be entered as integers within a list')
-
-        if self._compiled:
-            raise AttributeError('Model is already compiled!')
-
-        if self.env is None:
-            raise ImportError('Please load a gym environment first!')
+        super().network_check(nodes)
 
         self.net.add_layers(nodes, self.observation_space, self.action_space)
         self.net.has_net = True
 
-    def compile(self, optimizer, learning_rate=0.001, weight_decay=1e-5, clip=1.0, lower_clip=None, upper_clip=None):
+    def compile(self, optimizer, learning_rate=0.001, weight_decay=1e-5, clip=1, lower_clip=None, upper_clip=None):
         self._optimizer = optimizer
         self._learning_rate = learning_rate
         self._regularisation = weight_decay
         super().compile_check()
 
         self.net.to(self.device)
-        self.optimizer = self._optimizers[self._optimizer](self.net.parameters(),
-                                                           lr=self._learning_rate,
-                                                           weight_decay=self._regularisation)
 
         for p in self.net.parameters():
             p.register_hook(lambda grad: torch.clamp(grad,
@@ -497,12 +555,75 @@ class ActorCritic(BaseAgent):
         self._compiled = True
 
 
-    def train(self, episodes=10000, gamma=0.999):
-        self.method_check(env_loaded=True, net_exists=True, compiled=True)
-        self._gamma = gamma
+    def train(self, target_reward, save_from, save_interval=10, episodes=10000, parallel_envs=32, gamma=0.999):
+        super().train(gamma)
 
+        total_rewards = deque([], maxlen=100)
+        total_loss = deque([], maxlen=100)
 
+        @ray.remote
+        def env_run(predict_net):
+          done = False
+          prem_done = False
+          state = self.env.reset()[0]
+          ep_record = []
+          while not done and not prem_done:
+            with torch.no_grad():
+              action, _, _, state_value = predict_net.forward(state, device='cpu')
 
-    def action_selector(self):
-        pass
+            next_state, reward, done, prem_done, _ = self.env.step(action.item())
 
+            ep_record.append(Experience(state=state,
+                                        action=action,
+                                        reward=reward))
+
+            state = next_state
+
+          cum_rewards = calc_cum_rewards([exp.reward for exp in ep_record], self._gamma)
+
+          return ep_record, cum_rewards
+
+        for episode in range(episodes // parallel_envs):
+
+          batch_records, batch_Q_s = zip(*ray.get([env_run.remote(self.net.cpu()) for _ in range(parallel_envs)]))
+
+          total_rewards += deque([np.sum([exp.reward for exp in episode]) for episode in batch_records])
+
+          if (target_reward is not None) & (len(total_rewards) == 100):
+            if np.array(total_rewards).mean() >= target_reward:
+              print(f'Solved at target {target_reward}!')
+              self.save_model(np.array(total_rewards).mean(), save_from, save_interval, best=True)
+              break
+
+          if (target_reward is not None) & (len(total_rewards) == 100):
+            self.save_model(np.array(total_rewards).mean(), save_from, save_interval, best=False)
+            if np.array(total_rewards).mean() > self.current_best_reward:
+              self.current_best_reward = np.array(total_rewards).mean()
+
+          batch_Q_s = torch.tensor([Q_s for episode in batch_Q_s for Q_s in episode],
+                                   dtype=torch.float32).to(self.device).unsqueeze(-1)
+
+          zip(*[(exp.state, exp.action) for episode in batch_records for exp in episode])
+
+          batch_states, batch_actions= zip(*[(exp.state, exp.action) for episode in batch_records for exp in episode])
+
+          batch_states = np.array(batch_states)
+          batch_actions = torch.stack(batch_actions).to(self.device).unsqueeze(-1)
+
+          self.net.to(self.device)
+          _, batch_action_probs, batch_action_logprobs, batch_state_values = self.net(batch_states)
+
+          # calculate loss
+          self.optimizer.zero_grad()
+          loss = calc_loss_actor_critic(batch_Q_s, batch_actions, batch_action_probs, batch_action_logprobs,
+                                        batch_state_values, device=self.device)
+
+          loss.backward()
+
+          # update the model and predict_model
+          self.optimizer.step()
+
+          total_loss.append(loss.item())
+
+          print(
+            f'Episodes: {episode * parallel_envs}, Loss {np.array(total_loss).mean()}, Mean Reward: {np.array(total_rewards).mean()}')

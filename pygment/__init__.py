@@ -18,9 +18,9 @@ def create_agent(agent_type='doubleDQN'):
     return agent_dict[agent_type]
 
 
-def animate(agent, env_name, max_episode_steps=500, directory='./videos'):
-    if not os.path.isdir(directory):
-        os.mkdir(directory)
+def animate(agent, env_name, max_episode_steps=500, directory=None):
+    if directory is None:
+      directory = agent._path + '/videos'
 
     env = gym.make(env_name, render_mode='rgb_array', max_episode_steps=max_episode_steps)
     env = gym.wrappers.RecordVideo(env, directory)
@@ -35,3 +35,18 @@ def animate(agent, env_name, max_episode_steps=500, directory='./videos'):
         state = next_state
 
     agent.env.close()
+
+
+def animate_live(agent, env_name, max_episode_steps=500):
+  env = gym.make(env_name, render_mode='human', max_episode_steps=max_episode_steps)
+  agent.load_env(env)
+  agent.net.to('mps')
+
+  done = False
+  state = agent.env.reset()[0]
+  agent.env.render()
+  while not done:
+    action = agent.net(state)[0].item()
+    next_state, reward, done, _, _ = agent.env.step(action)
+    state = next_state
+    agent.env.render()

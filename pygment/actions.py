@@ -19,10 +19,6 @@ def unpack_batch(batch: list):
     states, actions, rewards, next_states, dones = zip(*[(exp.state, exp.action, exp.reward, exp.next_state, exp.done)
                                                          for exp in batch])
 
-    '''return np.array(states, copy=False), np.array(actions), \
-           np.array(rewards, dtype=np.float32), \
-           np.array(next_states, copy=False), \
-           np.array(dones, dtype=np.uint8)'''
     return states, actions, rewards, next_states, dones
 
 
@@ -86,29 +82,24 @@ def calc_cum_rewards(rewards_record, gamma):
     return cum_rewards[::-1]
 
 
-def calc_loss_actor_critic(rewards, logprobs, state_values, gamma=0.99):
+def calc_loss_actor_critic(batch_Q_s, batch_actions, batch_action_probs, batch_action_logprobs,
+                           batch_state_values, device='mps'):
 
-    # rewards as input should be self.rewards for the agent
-    # logprobs should be self.logprobs
-    # state_values should be self.state_values
-    # gamma should be self.gamma -> maybe won't need a default if self.gamma has a default value?
+    # start with value gradients
+    value_loss = F.mse_loss(batch_state_values, batch_Q_s)
 
-    disc_rewards = []
-    disc_reward = 0
-    for reward in rewards:
-        disc_reward = reward + gamma * disc_reward
-        rewards.insert(0, disc_reward)
+    # and then the actor gradients
+    advantage = batch_Q_s - batch_state_values.detach()
 
+    policy_loss = batch_action_logprobs.gather(1, batch_actions)
+    policy_loss *= advantage
+    policy_loss = -policy_loss.mean()
 
-    rewards = torch.tensor(rewards)
-    rewards = (rewards - rewards.mean()) / (rewards.std())
+    beta = 0.01
+    entropy_loss = beta * (batch_action_probs * batch_action_logprobs).sum(1).mean()
 
-    loss = 0
-    for logprob, value, reward in zip(logprobs, state_values, rewards):
-        advantage = reward - value.item()
-        action_loss = -logprob * advantage
-        value_loss = F.smooth_l1_loss(value, reward)
-        loss += action_loss + value_loss
+    #loss = policy_loss + 0.5 * value_loss - entropy_loss
+    loss = policy_loss + value_loss - entropy_loss
 
     return loss
 

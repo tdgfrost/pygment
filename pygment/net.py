@@ -127,30 +127,34 @@ class ActorCriticNet(BaseNet, nn.Module):
 
     def __init__(self):
         super().__init__()
-        self.net = None
-        self.action_layer = None
-        self.value_layer = None
+        self.actor_net = None
+        self.critic_net = None
 
 
     def add_layers(self, nodes: list, observation_space, action_space):
-        self.net = super().add_layers(nodes, observation_space, action_space)
+        self.actor_net = super().add_layers(nodes, observation_space, action_space)
+        self.critic_net = super().add_layers(nodes, observation_space, 1)
 
-        self.action_layer = self.net[-1]
-        self.value_layer = nn.Linear(self.net[-2].out_features, 1)
-        self.net = self.net[:-1]
+        #self.action_layer = self.net[-1]
+        #self.value_layer = nn.Linear(self.net[-2].out_features, 1)
+        #self.net = self.net[:-1]
 
 
     def forward(self, state, device='mps'):
-        state = torch.tensor(state).to(device)
+        state_value = torch.tensor(state).to(device)
+        action_logits = torch.tensor(state).to(device)
 
-        for layer in self.net[:-1]:
-          state = F.relu(layer(state))
+        for layer in self.critic_net[:-1]:
+          state_value = F.relu(layer(state_value))
 
-        # Value layer:
-        state_value = self.value_layer(state)
+        state_value = self.critic_net[-1](state_value)
+
+        for layer in self.actor_net[:-1]:
+          action_logits = F.relu(layer(action_logits))
+
+        action_logits = self.actor_net[-1](action_logits)
 
         # Actor layer:
-        action_logits = self.action_layer(state)
         action_probs = F.softmax(action_logits, dim=-1)
         action_logprobs = F.log_softmax(action_logits, dim=-1)
         action_distribution = Categorical(action_probs)
@@ -165,6 +169,6 @@ class ActorCriticNet(BaseNet, nn.Module):
             if ~torch.isinf(action_logprobs[action.item()]):
               break
 
-        return action, action_probs, action_logprobs
+        return action, action_probs, action_logprobs, state_value
 
 
