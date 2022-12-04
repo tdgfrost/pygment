@@ -1,7 +1,9 @@
+import gymnasium as gym
 import torch
 from torch import nn
 import torch.nn.functional as F
 from torch.distributions import Categorical
+from copy import deepcopy
 
 
 class BaseNet:
@@ -11,8 +13,8 @@ class BaseNet:
     def __init__(self):
         super().__init__()
         self.has_net = False
-        self.action_space = None
         self.observation_space = None
+        self.action_space = None
 
         self.activations = {'relu': nn.ReLU,
                             'sigmoid': nn.Sigmoid,
@@ -23,19 +25,38 @@ class BaseNet:
                                    'linear': None}
 
 
-    def add_layers(self, nodes: list, observation_space, action_space):
-        self.observation_space = observation_space
-        self.action_space = action_space
+    def add_layers(self, nodes: list, env):
+        self.observation_space = env.observation_space
+        self.action_space = env.action_space
+
+        if type(self.action_space) == gym.spaces.box.Box:
+            if len(self.action_space.shape) > 1:
+                raise TypeError('Environment action space is multidimensional...')
+            self._is_continuous = True
+
+        elif type(self.action_space) == gym.spaces.discrete.Discrete:
+            self._is_continuous = False
+        else:
+            raise TypeError('Environment action space is neither Box nor Discrete...')
 
         input_layers = nn.ModuleList([])
 
         for layer in range(len(nodes)):
             if layer == 0:
-                input_layers.append(nn.Linear(self.observation_space, nodes[layer]))
+                input_layers.append(nn.Linear(self.observation_space.shape[0], nodes[layer]))
+                input_layers.append(nn.ReLU())
             else:
                 input_layers.append(nn.Linear(nodes[layer - 1], nodes[layer]))
+                input_layers.append(nn.ReLU())
 
-        input_layers.append(nn.Linear(nodes[-1], self.action_space))
+        if self._is_continuous:
+            input_layers.append(nn.Linear(nodes[-1], self.action_space.shape[0]))
+            mu = deepcopy(input_layers)
+            mu.append(nn.Tanh())
+            sigma = deepcopy(input_layers)
+            sigma.append(nn.Softplus())
+
+            return {'mu': mu, 'sigma': sigma}
 
         return input_layers
 
@@ -65,8 +86,10 @@ class DualNet(BaseNet):
                 target_param.data.copy_(tau * main_param.data + (1.0 - tau) * target_param.data)
 
 
-    def add_layers(self, nodes: list, observation_space, action_space):
-        self.main_net = super().add_layers(nodes, observation_space, action_space)
+    def add_layers(self, nodes: list, env):
+        if type(env.action_space) != gym.spaces.discrete.Discrete:
+            raise TypeError('Pygment is not currently equipped to compute continuous DQN - please choose a policy-based method')
+        self.main_net = super().add_layers(nodes, env)
 
 
     def forward(self, state, target=False, device='mps'):
@@ -92,8 +115,8 @@ class PolicyGradientNet(BaseNet, nn.Module):
         self.net = None
 
 
-    def add_layers(self, nodes: list, observation_space, action_space):
-        self.net = super().add_layers(nodes, observation_space, action_space)
+    def add_layers(self, nodes: list, env):
+        self.net = super().add_layers(nodes, env)
 
 
     def forward(self, state, device='mps'):
@@ -131,23 +154,50 @@ class ActorCriticNet(BaseNet, nn.Module):
         self.critic_net = None
 
 
-    def add_layers(self, nodes: list, observation_space, action_space):
-        self.actor_net = super().add_layers(nodes, observation_space, action_space)
-        self.critic_net = super().add_layers(nodes, observation_space, 1)
-
-        #self.action_layer = self.net[-1]
-        #self.value_layer = nn.Linear(self.net[-2].out_features, 1)
-        #self.net = self.net[:-1]
+    def add_layers(self, nodes: list, env):
+        self.actor_net = super().add_layers(nodes, env)
+        self.critic_net = super().add_layers(nodes, env)[:-1]
+        self.critic_net.append(nn.Linear(nodes[-1], 1))
 
 
     def forward(self, state, device='mps'):
         state_value = torch.tensor(state).to(device)
-        action_logits = torch.tensor(state).to(device)
 
         for layer in self.critic_net[:-1]:
           state_value = F.relu(layer(state_value))
 
         state_value = self.critic_net[-1](state_value)
+
+        if self._is_continuous:
+            return self.fwd_continuous(state, device), state_value
+
+        else:
+            return self.fwd_discrete(state, device), state_value
+
+
+    def fwd_continuous(self, state, device='mps'):
+        action_means_stds = torch.tensor(state).to(device)
+
+        for layer in self.actor_net[:-1]:
+            action_means_stds = F.relu(layer(action_means_stds))
+
+        action_means_stds = self.actor_net[-1](action_means_stds)
+        action_means = action_means_stds[:self.action_space.shape[0]]
+        action_stds = torch.nn.Softplus(action_means_stds[self.action_space.shape[0]:])
+
+        action = torch.normal(action_means,
+                              action_stds)
+
+        action_logprobs = -(action - action_means)**2 / (2 * action_stds ** 2)
+        action_logprobs -= torch.log(torch.sqrt(2 * torch.pi * action_stds ** 2))
+
+        entropy = torch.log(torch.sqrt(2 * torch.pi * torch.exp(torch.tensor(1)) * action_stds ** 2))
+
+        return action, entropy, action_logprobs
+
+
+    def fwd_discrete(self, state, device='mps'):
+        action_logits = torch.tensor(state).to(device)
 
         for layer in self.actor_net[:-1]:
           action_logits = F.relu(layer(action_logits))
@@ -169,6 +219,8 @@ class ActorCriticNet(BaseNet, nn.Module):
             if ~torch.isinf(action_logprobs[action.item()]):
               break
 
-        return action, action_probs, action_logprobs, state_value
+        entropy = (batch_action_probs * batch_action_logprobs).sum(1).mean()
+
+        return action, entropy, action_logprobs
 
 

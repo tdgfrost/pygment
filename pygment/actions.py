@@ -82,7 +82,7 @@ def calc_cum_rewards(rewards_record, gamma):
     return cum_rewards[::-1]
 
 
-def calc_loss_actor_critic(batch_Q_s, batch_actions, batch_action_probs, batch_action_logprobs,
+def calc_loss_actor_critic(batch_Q_s, batch_actions, batch_action_entropy, batch_action_logprobs,
                            batch_state_values, device='mps'):
 
     # start with value gradients
@@ -96,7 +96,7 @@ def calc_loss_actor_critic(batch_Q_s, batch_actions, batch_action_probs, batch_a
     policy_loss = -policy_loss.mean()
 
     beta = 0.01
-    entropy_loss = beta * (batch_action_probs * batch_action_logprobs).sum(1).mean()
+    entropy_loss = beta * batch_action_entropy
 
     #loss = policy_loss + 0.5 * value_loss - entropy_loss
     loss = policy_loss + value_loss - entropy_loss

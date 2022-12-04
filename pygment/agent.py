@@ -40,8 +40,6 @@ class BaseAgent:
         self.device = 'mps'
         self.optimizer = None
         self.env = None
-        self.action_space = None
-        self.observation_space = None
         self.output_activation = None
         self.current_best_reward = -10**100
         now = dt.datetime.now()
@@ -73,8 +71,6 @@ class BaseAgent:
             self.device = 'mps'
             self.optimizer = None
             self.env = None
-            self.action_space = None
-            self.observation_space = None
             self.output_activation = None
             self.current_best_reward = -10**100
             now = dt.datetime.now()
@@ -104,8 +100,6 @@ class BaseAgent:
     '''
     def load_env(self, env, stack_frames=1, reward_clipping=False):
         self.env = wrap_env(env, stack_frames, reward_clipping)
-        self.action_space = self.env.action_space.n
-        self.observation_space = self.env.observation_space.shape[0]
 
 
     def compile_check(self):
@@ -188,15 +182,17 @@ class BaseAgent:
         torch.save(current_model, current_model_path)
 
 
-    def load_model(self):
+    def load_model(self, path=None):
       invalid_path = ''
       while True:
+        if path is not None:
+          if os.path.isfile(path):
+            break
+          else:
+            invalid_path = 'Invalid path - '
         path = input(invalid_path + 'Please enter model path, or press Q/q to exist: ')
         if path == 'Q' or path == 'q':
           return
-        if os.path.isfile(path):
-          break
-        invalid_path = 'Invalid path - '
       self.net = torch.load(path)
       if self._compiled:
         self._compiled = False
@@ -238,7 +234,7 @@ class DQNAgent(BaseAgent):
     def add_network(self, nodes: list):
         super().network_check(nodes)
 
-        self.net.add_layers(nodes, self.observation_space, self.action_space)
+        self.net.add_layers(nodes, self.env)
         self.net.has_net = True
 
 
@@ -424,7 +420,7 @@ class PolicyGradient(BaseAgent):
     def add_network(self, nodes: list):
         super().network_check(nodes)
 
-        self.net.add_layers(nodes, self.observation_space, self.action_space)
+        self.net.add_layers(nodes, self.env)
         self.net.has_net = True
 
 
@@ -536,7 +532,7 @@ class ActorCritic(BaseAgent):
     def add_network(self, nodes: list):
         super().network_check(nodes)
 
-        self.net.add_layers(nodes, self.observation_space, self.action_space)
+        self.net.add_layers(nodes, self.env)
         self.net.has_net = True
 
     def compile(self, optimizer, learning_rate=0.001, weight_decay=1e-5, clip=1, lower_clip=None, upper_clip=None):
@@ -585,7 +581,9 @@ class ActorCritic(BaseAgent):
 
         for episode in range(episodes // parallel_envs):
 
-          batch_records, batch_Q_s = zip(*ray.get([env_run.remote(self.net.cpu()) for _ in range(parallel_envs)]))
+          #batch_records, batch_Q_s = zip(*ray.get([env_run.remote(self.net.cpu()) for _ in range(parallel_envs)]))
+          # DELETE BELOW
+          self.net(self.env.reset()[0])
 
           total_rewards += deque([np.sum([exp.reward for exp in episode]) for episode in batch_records])
 
@@ -611,11 +609,11 @@ class ActorCritic(BaseAgent):
           batch_actions = torch.stack(batch_actions).to(self.device).unsqueeze(-1)
 
           self.net.to(self.device)
-          _, batch_action_probs, batch_action_logprobs, batch_state_values = self.net(batch_states)
+          _, batch_action_entropy, batch_action_logprobs, batch_state_values = self.net(batch_states)
 
           # calculate loss
           self.optimizer.zero_grad()
-          loss = calc_loss_actor_critic(batch_Q_s, batch_actions, batch_action_probs, batch_action_logprobs,
+          loss = calc_loss_actor_critic(batch_Q_s, batch_actions, batch_action_entropy, batch_action_logprobs,
                                         batch_state_values, device=self.device)
 
           loss.backward()
