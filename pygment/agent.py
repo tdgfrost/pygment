@@ -9,7 +9,7 @@ import os
 from copy import deepcopy
 from .actions import GreedyEpsilonSelector, calc_loss_batch, calc_loss_policy, calc_cum_rewards, \
   calc_entropy_loss_policy, calc_loss_actor_critic
-from .net import DualNet, ActorCriticNet, PolicyGradientNet
+from .net import DualNet, ActorCriticNet, PolicyGradientNet, ActorCriticNetContinuous
 from .env import wrap_env
 from collections import deque
 import ray
@@ -40,15 +40,11 @@ class BaseAgent:
         self.device = 'mps'
         self.optimizer = None
         self.env = None
-        self.action_space = None
-        self.observation_space = None
-        self.output_activation = None
         self.current_best_reward = -10**100
         now = dt.datetime.now()
         self._path = f'./{now.year}_{now.month}_{now.day:02}_{now.hour:02}_{now.minute:02}_{now.second:02}'
         self._optimizer = None
         self._learning_rate = None
-        self.__output_activation = None
         self._compiled = False
         self._gamma = None
         self._epsilon = None
@@ -73,15 +69,11 @@ class BaseAgent:
             self.device = 'mps'
             self.optimizer = None
             self.env = None
-            self.action_space = None
-            self.observation_space = None
-            self.output_activation = None
             self.current_best_reward = -10**100
             now = dt.datetime.now()
             self._path = f'./{now.year}_{now.month}_{now.day:02}_{now.hour:02}_{now.minute:02}_{now.second:02}/'
             self._optimizer = None
             self._learning_rate = None
-            self.__output_activation = None
             self._compiled = False
             self._gamma = None
             self._epsilon = None
@@ -104,8 +96,6 @@ class BaseAgent:
     '''
     def load_env(self, env, stack_frames=1, reward_clipping=False):
         self.env = wrap_env(env, stack_frames, reward_clipping)
-        self.action_space = self.env.action_space.n
-        self.observation_space = self.env.observation_space.shape[0]
 
 
     def compile_check(self):
@@ -140,9 +130,6 @@ class BaseAgent:
       self.method_check(env_loaded=True, net_exists=True, compiled=True)
       self._gamma = gamma
 
-      if not os.path.isdir(self._path):
-        os.mkdir(self._path)
-
       self.optimizer = self._optimizers[self._optimizer](self.net.parameters(),
                                                          lr=self._learning_rate,
                                                          weight_decay=self._regularisation)
@@ -156,6 +143,9 @@ class BaseAgent:
       # and that the current model is better than the previous 'best' model.
       if (average_reward >= save_from) & ((average_reward // save_interval * save_interval) >
                                           (self.current_best_reward // save_interval * save_interval)):
+        # Check directory exists and create if not
+        if not os.path.isdir(self._path):
+          os.mkdir(self._path)
 
         # It may be the case that a previous model was loaded and training was continued. If this hasn't been
         # checked yet, screen the previous checkpoints to check whether any were saved as 'model_best_',
@@ -238,7 +228,7 @@ class DQNAgent(BaseAgent):
     def add_network(self, nodes: list):
         super().network_check(nodes)
 
-        self.net.add_layers(nodes, self.observation_space, self.action_space)
+        self.net.add_layers(nodes, self.env)
         self.net.has_net = True
 
 
@@ -424,7 +414,7 @@ class PolicyGradient(BaseAgent):
     def add_network(self, nodes: list):
         super().network_check(nodes)
 
-        self.net.add_layers(nodes, self.observation_space, self.action_space)
+        self.net.add_layers(nodes, self.env)
         self.net.has_net = True
 
 
@@ -518,7 +508,7 @@ class PolicyGradient(BaseAgent):
 
 class ActorCritic(BaseAgent):
     """
-    ActorCritic uses the actor-critic neural network to solve environments
+    ActorCritic uses the actor-critic neural network to solve environments with a discrete action space.
     """
 
     def __init__(self):
@@ -536,7 +526,7 @@ class ActorCritic(BaseAgent):
     def add_network(self, nodes: list):
         super().network_check(nodes)
 
-        self.net.add_layers(nodes, self.observation_space, self.action_space)
+        self.net.add_layers(nodes, self.env)
         self.net.has_net = True
 
     def compile(self, optimizer, learning_rate=0.001, weight_decay=1e-5, clip=1, lower_clip=None, upper_clip=None):
@@ -603,19 +593,17 @@ class ActorCritic(BaseAgent):
           batch_Q_s = torch.tensor([Q_s for episode in batch_Q_s for Q_s in episode],
                                    dtype=torch.float32).to(self.device).unsqueeze(-1)
 
-          zip(*[(exp.state, exp.action) for episode in batch_records for exp in episode])
-
           batch_states, batch_actions= zip(*[(exp.state, exp.action) for episode in batch_records for exp in episode])
 
           batch_states = np.array(batch_states)
           batch_actions = torch.stack(batch_actions).to(self.device).unsqueeze(-1)
 
           self.net.to(self.device)
-          _, batch_action_probs, batch_action_logprobs, batch_state_values = self.net(batch_states)
+          _, batch_entropy, batch_action_logprobs, batch_state_values = self.net(batch_states)
 
           # calculate loss
           self.optimizer.zero_grad()
-          loss = calc_loss_actor_critic(batch_Q_s, batch_actions, batch_action_probs, batch_action_logprobs,
+          loss = calc_loss_actor_critic(batch_Q_s, batch_actions, batch_entropy, batch_action_logprobs,
                                         batch_state_values, device=self.device)
 
           loss.backward()
@@ -627,3 +615,111 @@ class ActorCritic(BaseAgent):
 
           print(
             f'Episodes: {episode * parallel_envs}, Loss {np.array(total_loss).mean()}, Mean Reward: {np.array(total_rewards).mean()}')
+
+
+class ActorCriticContinuous(BaseAgent):
+  """
+  ActorCriticContinuous uses the actor-critic neural network to solve environments with a continuous action space.
+  """
+
+  def __init__(self):
+    super().__init__()
+    self.net = ActorCriticNetContinuous()
+
+  def reset(self):
+    reset_done = super().reset()
+
+    if reset_done:
+      self.net = ActorCriticNetContinuous()
+
+  def add_network(self, nodes: list):
+    super().network_check(nodes)
+
+    self.net.add_layers(nodes, self.env)
+    self.net.has_net = True
+
+  def compile(self, optimizer, learning_rate=0.001, weight_decay=1e-5, clip=1, lower_clip=None, upper_clip=None):
+    self._optimizer = optimizer
+    self._learning_rate = learning_rate
+    self._regularisation = weight_decay
+    super().compile_check()
+
+    self.net.to(self.device)
+
+    for p in self.net.parameters():
+      p.register_hook(lambda grad: torch.clamp(grad,
+                                               lower_clip if lower_clip is not None else -clip,
+                                               upper_clip if upper_clip is not None else clip))
+
+    self._compiled = True
+
+  def train(self, target_reward, save_from, save_interval=10, episodes=10000, parallel_envs=32, gamma=0.999):
+    super().train(gamma)
+
+    total_rewards = deque([], maxlen=100)
+    total_loss = deque([], maxlen=100)
+
+    @ray.remote
+    def env_run(predict_net):
+      done = False
+      prem_done = False
+      state = self.env.reset()[0]
+      ep_record = []
+      while not done and not prem_done:
+        with torch.no_grad():
+          actions, _, _, state_value = predict_net.forward(state, device='cpu')
+
+        next_state, reward, done, prem_done, _ = self.env.step(actions.numpy())
+
+        ep_record.append(Experience(state=state,
+                                    action=actions,
+                                    reward=reward))
+
+        state = next_state
+
+      cum_rewards = calc_cum_rewards([exp.reward for exp in ep_record], self._gamma)
+
+      return ep_record, cum_rewards
+
+    for episode in range(episodes // parallel_envs):
+
+      batch_records, batch_Q_s = zip(*ray.get([env_run.remote(self.net.cpu()) for _ in range(parallel_envs)]))
+
+      total_rewards += deque([np.sum([exp.reward for exp in episode]) for episode in batch_records])
+
+      if (target_reward is not None) & (len(total_rewards) == 100):
+        if np.array(total_rewards).mean() >= target_reward:
+          print(f'Solved at target {target_reward}!')
+          self.save_model(np.array(total_rewards).mean(), save_from, save_interval, best=True)
+          break
+
+      if (target_reward is not None) & (len(total_rewards) == 100):
+        self.save_model(np.array(total_rewards).mean(), save_from, save_interval, best=False)
+        if np.array(total_rewards).mean() > self.current_best_reward:
+          self.current_best_reward = np.array(total_rewards).mean()
+
+      batch_Q_s = torch.tensor([Q_s for episode in batch_Q_s for Q_s in episode],
+                               dtype=torch.float32).to(self.device).unsqueeze(-1)
+
+      batch_states, batch_actions = zip(*[(exp.state, exp.action) for episode in batch_records for exp in episode])
+
+      batch_states = np.array(batch_states)
+      batch_actions = torch.stack(batch_actions).to(self.device).unsqueeze(-1)
+
+      self.net.to(self.device)
+      _, batch_entropy, batch_action_logprobs, batch_state_values = self.net(batch_states)
+
+      # calculate loss
+      self.optimizer.zero_grad()
+      loss = calc_loss_actor_critic(batch_Q_s, batch_actions, batch_entropy, batch_action_logprobs,
+                                    batch_state_values, device=self.device)
+
+      loss.backward()
+
+      # update the model and predict_model
+      self.optimizer.step()
+
+      total_loss.append(loss.item())
+
+      print(
+        f'Episodes: {episode * parallel_envs}, Loss {np.array(total_loss).mean()}, Mean Reward: {np.array(total_rewards).mean()}')
