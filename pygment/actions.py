@@ -83,7 +83,7 @@ def calc_cum_rewards(rewards_record, gamma):
 
 
 def calc_loss_actor_critic(batch_Q_s, batch_actions, batch_entropy, batch_action_logprobs,
-                           batch_state_values, device='mps'):
+                           batch_state_values, device='mps', continuous=False):
 
     # start with value gradients
     value_loss = F.mse_loss(batch_state_values, batch_Q_s)
@@ -91,39 +91,17 @@ def calc_loss_actor_critic(batch_Q_s, batch_actions, batch_entropy, batch_action
     # and then the actor gradients
     advantage = batch_Q_s - batch_state_values.detach()
 
-    policy_loss = batch_action_logprobs * advantage
+    if continuous:
+        policy_loss = batch_action_logprobs * advantage
+    else:
+        policy_loss = batch_action_logprobs.gather(1, batch_actions) * advantage
     policy_loss = -policy_loss.mean()
 
     beta = 0.01
     entropy_loss = beta * batch_entropy
 
-    #loss = policy_loss + 0.5 * value_loss - entropy_loss
     loss = policy_loss + value_loss - entropy_loss
 
-    return loss
+    return policy_loss, value_loss, entropy_loss
 
-
-def calc_loss_prios(batch, batch_weights, device, model, gamma):
-    # Function for returning both the losses and the prioritised samples
-    states, actions, rewards, next_states, dones = unpack_batch(batch)
-
-    states_v = torch.tensor(states).to(device)
-    actions_v = torch.tensor(actions).to(device)
-    rewards_v = torch.tensor(rewards).to(device)
-    done_mask = torch.tensor(dones, dtype=torch.bool).to(device)
-    batch_weights_v = torch.tensor(batch_weights, dtype=torch.float32).to(device)
-
-    state_action_values = model.main_net(states_v).gather(1, actions_v.unsqueeze(-1)).squeeze(-1)
-
-    with torch.no_grad():
-        next_states_v = torch.tensor(next_states).to(device)
-        next_state_values = model.target_net(next_states_v).max(1)[0]
-        next_state_values[done_mask] = 0.0
-        expected_state_action_values = next_state_values.detach() * gamma + rewards_v
-
-    batch_weights = batch_weights ** 0.6
-    batch_weights = batch_weights / batch_weights.sum()
-
-    losses_v = batch_weights_v * (state_action_values - expected_state_action_values) ** 2
-    return losses_v.mean(), (losses_v + 1e-5).data.cpu().numpy()
 

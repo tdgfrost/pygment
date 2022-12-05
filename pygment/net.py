@@ -144,6 +144,7 @@ class ActorCriticNet(BaseNet, nn.Module):
 
     def __init__(self):
         super().__init__()
+        self.base_net = None
         self.actor_net = None
         self.critic_net = None
 
@@ -156,16 +157,14 @@ class ActorCriticNet(BaseNet, nn.Module):
         self.critic_net = super().add_layers(nodes, env.observation_space.shape[0], 1)
 
 
-
     def forward(self, state, device='mps'):
         state_value = torch.tensor(state).to(device)
         action_logits = torch.tensor(state).to(device)
 
-        for value_layer, actor_layer in zip(self.critic_net, self.actor_net):
-          state_value = value_layer(state_value)
-          action_logits = actor_layer(action_logits)
+        for layer_idx in range(len(self.actor_net)):
+          state_value = self.critic_net[layer_idx](state_value)
+          action_logits = self.actor_net[layer_idx](action_logits)
 
-        # Actor layer:
         action_probs = F.softmax(action_logits, dim=-1)
         action_logprobs = F.log_softmax(action_logits, dim=-1)
         action_distribution = Categorical(action_probs)
@@ -180,7 +179,10 @@ class ActorCriticNet(BaseNet, nn.Module):
             if ~torch.isinf(action_logprobs[action.item()]):
               break
 
-        entropy = (action_probs * action_logprobs).sum(1).mean()
+        if len(action_probs.shape) == 1:
+            entropy = (action_probs * action_logprobs).sum()
+        else:
+            entropy = (action_probs * action_logprobs).sum(1).mean()
 
         return action, entropy, action_logprobs, state_value
 
@@ -221,9 +223,9 @@ class ActorCriticNetContinuous(BaseNet, nn.Module):
     state_value = torch.tensor(state).to(device)
     action_means = torch.tensor(state).to(device)
 
-    for value_layer, base_layer in zip(self.critic_net[:-1], self.actor_net):
-      state_value = value_layer(state_value)
-      action_means = base_layer(action_means)
+    for layer_idx in range(len(self.actor_net)):
+      state_value = self.critic_net[layer_idx](state_value)
+      action_means = self.actor_net[layer_idx](action_means)
 
     state_value = self.critic_net[-1](state_value)
     action_stds = action_means.clone()
@@ -233,15 +235,15 @@ class ActorCriticNetContinuous(BaseNet, nn.Module):
       action_stds = sigma_layer(action_stds)
 
     actions = torch.normal(action_means,
-                          action_stds)
+                          action_stds.clamp(min=1e-5))
     actions = torch.clip(actions,
                          self.clip_low.to(device),
                          self.clip_high.to(device))
 
-    action_logprobs = -(actions - action_means)**2 / (2 * (action_stds ** 2).clamp(min=1e-5))
-    action_logprobs -= torch.log(torch.sqrt(2 * torch.pi * action_stds ** 2))
+    action_logprobs = -(actions - action_means)**2 / (2 * (action_stds.clamp(min=1e-5) ** 2))
+    action_logprobs -= torch.log(torch.sqrt(2 * torch.pi * action_stds.clamp(min=1e-5) ** 2))
 
-    entropy = torch.log(torch.sqrt(2 * torch.pi * torch.exp(torch.tensor(1)) * action_stds ** 2)).mean()
+    entropy = torch.log(torch.sqrt(2 * torch.pi * torch.exp(torch.tensor(1)) * action_stds.clamp(min=1e-5) ** 2)).mean()
 
     return actions, entropy, action_logprobs, state_value
 

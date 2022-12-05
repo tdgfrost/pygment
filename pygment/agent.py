@@ -36,8 +36,8 @@ class BaseAgent:
     Base Agent stores universal attributes and super() methods across the agents.
     """
 
-    def __init__(self):
-        self.device = 'mps'
+    def __init__(self, device='mps'):
+        self.device = device
         self.optimizer = None
         self.env = None
         self.current_best_reward = -10**100
@@ -204,8 +204,8 @@ class DQNAgent(BaseAgent):
     current network and an intermittently synchronised target network).
     """
 
-    def __init__(self):
-        super().__init__()
+    def __init__(self, device):
+        super().__init__(device)
         self.net = DualNet()
         self.replay_buffer = None
         self._tau = None
@@ -399,8 +399,8 @@ class PolicyGradient(BaseAgent):
     PolicyGradient is a neural network based on REINFORCE
     """
 
-    def __init__(self):
-        super().__init__()
+    def __init__(self, device):
+        super().__init__(device)
         self.net = PolicyGradientNet()
 
 
@@ -483,7 +483,7 @@ class PolicyGradient(BaseAgent):
             state_records, action_records = zip(*[(exp.state, exp.action) for buffer in buffer_record for exp in buffer])
             cum_rewards = [cum_r for record in cum_reward for cum_r in record]
             self.net.to('mps')
-            _, action_probs_records, action_logprobs_records = self.net(state_records)
+            _, action_probs_records, action_logprobs_records = self.net(state_records, self.device)
 
             # calculate loss
             self.optimizer.zero_grad()
@@ -511,8 +511,8 @@ class ActorCritic(BaseAgent):
     ActorCritic uses the actor-critic neural network to solve environments with a discrete action space.
     """
 
-    def __init__(self):
-        super().__init__()
+    def __init__(self, device):
+        super().__init__(device)
         self.net = ActorCriticNet()
 
 
@@ -550,6 +550,8 @@ class ActorCritic(BaseAgent):
 
         total_rewards = deque([], maxlen=100)
         total_loss = deque([], maxlen=100)
+        total_policy_loss = deque([], maxlen=100)
+        total_value_loss = deque([], maxlen=100)
 
         @ray.remote
         def env_run(predict_net):
@@ -599,22 +601,30 @@ class ActorCritic(BaseAgent):
           batch_actions = torch.stack(batch_actions).to(self.device).unsqueeze(-1)
 
           self.net.to(self.device)
-          _, batch_entropy, batch_action_logprobs, batch_state_values = self.net(batch_states)
+          _, batch_entropy, batch_action_logprobs, batch_state_values = self.net(batch_states, self.device)
 
           # calculate loss
           self.optimizer.zero_grad()
-          loss = calc_loss_actor_critic(batch_Q_s, batch_actions, batch_entropy, batch_action_logprobs,
-                                        batch_state_values, device=self.device)
+          policy_loss, value_loss, entropy_loss = calc_loss_actor_critic(batch_Q_s, batch_actions, batch_entropy,
+                                                                         batch_action_logprobs, batch_state_values,
+                                                                         device=self.device)
 
+          loss = policy_loss + value_loss - entropy_loss
           loss.backward()
 
           # update the model and predict_model
           self.optimizer.step()
 
-          total_loss.append(loss.item())
+          total_loss.append(policy_loss.item() + value_loss.item())
+          total_policy_loss.append(policy_loss.item())
+          total_value_loss.append(value_loss.item())
 
           print(
-            f'Episodes: {episode * parallel_envs}, Loss {np.array(total_loss).mean()}, Mean Reward: {np.array(total_rewards).mean()}')
+            f'Episodes: {episode * parallel_envs}, '
+            f'Loss {round(np.array(total_loss).mean(), 2)} '
+            f'(Policy {round(np.array(total_policy_loss).mean(), 2)}, '
+            f'Value {round(np.array(total_value_loss).mean(), 2)}), '
+            f'Mean Reward: {round(np.array(total_rewards).mean(), 2)}')
 
 
 class ActorCriticContinuous(BaseAgent):
@@ -622,8 +632,8 @@ class ActorCriticContinuous(BaseAgent):
   ActorCriticContinuous uses the actor-critic neural network to solve environments with a continuous action space.
   """
 
-  def __init__(self):
-    super().__init__()
+  def __init__(self, device):
+    super().__init__(device)
     self.net = ActorCriticNetContinuous()
 
   def reset(self):
@@ -658,6 +668,8 @@ class ActorCriticContinuous(BaseAgent):
 
     total_rewards = deque([], maxlen=100)
     total_loss = deque([], maxlen=100)
+    total_policy_loss = deque([], maxlen=100)
+    total_value_loss = deque([], maxlen=100)
 
     @ray.remote
     def env_run(predict_net):
@@ -676,6 +688,8 @@ class ActorCriticContinuous(BaseAgent):
                                     reward=reward))
 
         state = next_state
+
+      self.env.close()
 
       cum_rewards = calc_cum_rewards([exp.reward for exp in ep_record], self._gamma)
 
@@ -707,19 +721,28 @@ class ActorCriticContinuous(BaseAgent):
       batch_actions = torch.stack(batch_actions).to(self.device).unsqueeze(-1)
 
       self.net.to(self.device)
-      _, batch_entropy, batch_action_logprobs, batch_state_values = self.net(batch_states)
+
+      _, batch_entropy, batch_action_logprobs, batch_state_values = self.net(batch_states, self.device)
 
       # calculate loss
       self.optimizer.zero_grad()
-      loss = calc_loss_actor_critic(batch_Q_s, batch_actions, batch_entropy, batch_action_logprobs,
-                                    batch_state_values, device=self.device)
+      policy_loss, value_loss, entropy_loss = calc_loss_actor_critic(batch_Q_s, batch_actions, batch_entropy,
+                                                                     batch_action_logprobs, batch_state_values,
+                                                                     device=self.device, continuous=True)
 
+      loss = policy_loss + value_loss - entropy_loss
       loss.backward()
 
       # update the model and predict_model
       self.optimizer.step()
 
-      total_loss.append(loss.item())
+      total_loss.append(policy_loss.item() + value_loss.item())
+      total_policy_loss.append(policy_loss.item())
+      total_value_loss.append(value_loss.item())
 
       print(
-        f'Episodes: {episode * parallel_envs}, Loss {np.array(total_loss).mean()}, Mean Reward: {np.array(total_rewards).mean()}')
+        f'Episodes: {episode * parallel_envs}, '
+        f'Loss {round(np.array(total_loss).mean(), 2)} '
+        f'(Policy {round(np.array(total_policy_loss).mean(), 2)}, '
+        f'Value {round(np.array(total_value_loss).mean(), 2)}), '
+        f'Mean Reward: {round(np.array(total_rewards).mean(), 2)}')

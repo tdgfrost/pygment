@@ -3,11 +3,11 @@ import gymnasium as gym
 import os
 
 
-def create_agent(agent_type='doubleDQN'):
-    agent_dict = {'doubleDQN': DQNAgent(),
-                  'actorcritic': ActorCritic(),
-                  'policy': PolicyGradient(),
-                  'actorcriticcontinuous': ActorCriticContinuous()}
+def create_agent(agent_type='doubleDQN', device='mps'):
+    agent_dict = {'doubleDQN': DQNAgent(device),
+                  'actorcritic': ActorCritic(device),
+                  'policy': PolicyGradient(device),
+                  'actorcriticcontinuous': ActorCriticContinuous(device)}
 
     if agent_type not in agent_dict.keys():
         error = 'type must be one of: '

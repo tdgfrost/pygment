@@ -7,16 +7,16 @@ train_new_model = True
 animate_only = False
 
 env = gym.make('BipedalWalker-v3', max_episode_steps=1600)
-agent = pm.create_agent('actorcritic')
+agent = pm.create_agent('actorcriticcontinuous', 'cpu')
 agent.load_env(env)
 if train_new_model:
-  agent.add_network(nodes=[64, 64])
+  agent.add_network(nodes=[1024, 1024, 1024])
 else:
   agent.load_model()
 
-agent.compile('adam', learning_rate=0.001)
+agent.compile('adam', learning_rate=0.01)
 
-agent.train(target_reward=300, save_from=0, save_interval=50, episodes=100000, parallel_envs=100, gamma=0.99) if not animate_only else None
+agent.train(target_reward=300, save_from=50, save_interval=50, episodes=100000, parallel_envs=5, gamma=0.99) if not animate_only else None
 
 pm.animate(agent, 'BipedalWalker-v3', max_episode_steps=1600)
 
