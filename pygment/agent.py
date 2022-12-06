@@ -126,11 +126,14 @@ class BaseAgent:
     The train super() method ensures that the optimizer is correctly synced to the model,
     and creates a directory in which the model checkpoints and any animations can be saved.
     '''
-    def train(self, gamma):
+    def train(self, gamma, custom_params=None):
       self.method_check(env_loaded=True, net_exists=True, compiled=True)
       self._gamma = gamma
 
-      self.optimizer = self._optimizers[self._optimizer](self.net.parameters(),
+      if custom_params:
+          self.optimizer = self._optimizers[self._optimizer](custom_params)
+      else:
+          self.optimizer = self._optimizers[self._optimizer](self.net.parameters(),
                                                          lr=self._learning_rate,
                                                          weight_decay=self._regularisation)
 
@@ -565,13 +568,14 @@ class PPO(BaseAgent):
           ep_record = []
           while not done and not prem_done:
             with torch.no_grad():
-              action, _, _, state_value = predict_net.forward(state, device='cpu')
+              action, _, old_policy_logprobs, state_value = predict_net.forward(state, device='cpu')
 
             next_state, reward, done, prem_done, _ = self.env.step(action.item())
 
             ep_record.append(Experience(state=state,
                                         action=action,
-                                        reward=reward))
+                                        reward=reward,
+                                        action_logprobs=old_policy_logprobs))
 
             state = next_state
 
@@ -581,7 +585,7 @@ class PPO(BaseAgent):
 
         for episode in range(episodes // parallel_envs):
 
-          batch_records, batch_Q_s = zip(*ray.get([env_run.remote(self.net.cpu()) for _ in range(parallel_envs)]))
+          batch_records, batch_Q_s = zip(*ray.get([env_run.remote(self.net_old.cpu()) for _ in range(parallel_envs)]))
 
           total_rewards += deque([np.sum([exp.reward for exp in episode]) for episode in batch_records])
 
@@ -599,16 +603,16 @@ class PPO(BaseAgent):
           batch_Q_s = torch.tensor([Q_s for episode in batch_Q_s for Q_s in episode],
                                    dtype=torch.float32).to(self.device).unsqueeze(-1)
 
-          batch_states, batch_actions= zip(*[(exp.state, exp.action) for episode in batch_records for exp in episode])
+          batch_states, batch_actions, batch_old_policy_logprobs = zip(*[(exp.state,
+                                                                          exp.action,
+                                                                          exp.action_logprobs)
+                                                                         for episode in batch_records for exp in episode])
 
           batch_states = np.array(batch_states)
           batch_actions = torch.stack(batch_actions).to(self.device).unsqueeze(-1)
+          batch_old_policy_logprobs = torch.stack(batch_old_policy_logprobs).to(self.device)
 
           self.net.to(self.device)
-          self.net_old.to(self.device)
-
-          _, _, old_policy_logprobs, _ = self.net_old(batch_states, self.device)
-          old_policy_logprobs = old_policy_logprobs.detach()
 
           for _ in range(update_iter):
 
@@ -619,9 +623,9 @@ class PPO(BaseAgent):
               policy_loss, value_loss, entropy_loss = calc_loss_actor_critic(batch_Q_s, batch_actions, batch_entropy,
                                                                              batch_action_logprobs, batch_state_values,
                                                                              device=self.device, continuous=False,
-                                                                             old_policy_logprobs=old_policy_logprobs)
+                                                                             batch_old_policy_logprobs=batch_old_policy_logprobs)
 
-              loss = policy_loss + value_loss #- entropy_loss
+              loss = policy_loss + value_loss - entropy_loss
               loss.backward()
 
               # update the model and predict_model
@@ -679,7 +683,11 @@ class PPOContinuous(BaseAgent):
     self._compiled = True
 
   def train(self, target_reward, save_from, save_interval=10, episodes=10000, parallel_envs=32, update_iter=4, gamma=0.999):
-    super().train(gamma)
+    custom_params = [{'params': self.net.actor_net.parameters(),
+                      'lr': 0.0003},
+                     {'params': self.net.critic_net.parameters(),
+                      'lr': 0.0005}]
+    super().train(gamma, custom_params)
 
     total_rewards = deque([], maxlen=100)
     total_loss = deque([], maxlen=100)
@@ -688,7 +696,7 @@ class PPOContinuous(BaseAgent):
 
     self.net_old = deepcopy(self.net)
 
-    #@ray.remote
+    @ray.remote
     def env_run(predict_net):
       done = False
       prem_done = False
@@ -696,13 +704,14 @@ class PPOContinuous(BaseAgent):
       ep_record = []
       while not done and not prem_done:
         with torch.no_grad():
-          actions, _, _, state_value = predict_net.forward(state, device='cpu')
+          actions, _, old_policy_logprobs, state_value = predict_net.forward(state, device='cpu')
 
         next_state, reward, done, prem_done, _ = self.env.step(actions.numpy())
 
         ep_record.append(Experience(state=state,
                                     action=actions,
-                                    reward=reward))
+                                    reward=reward,
+                                    action_logprobs=old_policy_logprobs))
 
         state = next_state
 
@@ -714,8 +723,7 @@ class PPOContinuous(BaseAgent):
 
     for episode in range(episodes // parallel_envs):
 
-      #batch_records, batch_Q_s = zip(*ray.get([env_run.remote(self.net.cpu()) for _ in range(parallel_envs)]))
-      batch_records, batch_Q_s = zip(*[env_run(self.net.cpu()) for _ in range(5)])
+      batch_records, batch_Q_s = zip(*ray.get([env_run.remote(self.net_old.cpu()) for _ in range(parallel_envs)]))
 
       total_rewards += deque([np.sum([exp.reward for exp in episode]) for episode in batch_records])
 
@@ -733,16 +741,16 @@ class PPOContinuous(BaseAgent):
       batch_Q_s = torch.tensor([Q_s for episode in batch_Q_s for Q_s in episode],
                                dtype=torch.float32).to(self.device).unsqueeze(-1)
 
-      batch_states, batch_actions = zip(*[(exp.state, exp.action) for episode in batch_records for exp in episode])
+      batch_states, batch_actions, batch_old_policy_logprobs = zip(*[(exp.state,
+                                                                      exp.action,
+                                                                      exp.action_logprobs) for episode in batch_records
+                                                                     for exp in episode])
 
       batch_states = np.array(batch_states)
       batch_actions = torch.stack(batch_actions).to(self.device).unsqueeze(-1)
+      batch_old_policy_logprobs = torch.stack(batch_old_policy_logprobs).to(self.device)
 
       self.net.to(self.device)
-      self.net_old.to(self.device)
-
-      _, _, old_policy_logprobs, _ = self.net_old(batch_states, self.device)
-      old_policy_logprobs = old_policy_logprobs.detach()
 
       for _ in range(update_iter):
         _, batch_entropy, batch_action_logprobs, batch_state_values = self.net(batch_states, self.device)
@@ -752,9 +760,9 @@ class PPOContinuous(BaseAgent):
         policy_loss, value_loss, entropy_loss = calc_loss_actor_critic(batch_Q_s, batch_actions, batch_entropy,
                                                                        batch_action_logprobs, batch_state_values,
                                                                        device=self.device, continuous=True,
-                                                                       old_policy_logprobs=old_policy_logprobs)
+                                                                       batch_old_policy_logprobs=batch_old_policy_logprobs)
 
-        loss = policy_loss + value_loss #- entropy_loss
+        loss = policy_loss + 0.5 * value_loss #- entropy_loss
         loss.backward()
 
         # update the model and predict_model

@@ -7,7 +7,7 @@ train_new_model = True
 animate_only = False
 
 env = gym.make('BipedalWalker-v3', max_episode_steps=1600)
-agent = pm.create_agent('actorcriticcontinuous', 'cpu')
+agent = pm.create_agent('ppocontinuous', 'cpu')
 agent.load_env(env)
 if train_new_model:
   agent.add_network(nodes=[1024, 1024, 1024])

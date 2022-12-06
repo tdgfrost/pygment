@@ -3,7 +3,7 @@ import gymnasium as gym
 import dill
 
 env = gym.make('CartPole-v1', max_episode_steps=10000)
-agent = pm.create_agent('actorcritic')
+agent = pm.create_agent('ppo')
 agent.load_env(env)
 agent.add_network(nodes=[32, 32])
 agent.compile('adam', learning_rate=0.01)

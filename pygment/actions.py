@@ -84,25 +84,29 @@ def calc_cum_rewards(rewards_record, gamma):
 
 def calc_loss_actor_critic(batch_Q_s, batch_actions, batch_entropy, batch_action_logprobs,
                            batch_state_values, device='mps', continuous=False,
-                           epsilon=0.2, old_policy_logprobs=None):
+                           epsilon=0.2, batch_old_policy_logprobs=None):
 
     # start with value gradients
     value_loss = F.mse_loss(batch_state_values, batch_Q_s)
 
     # and then the actor gradients
     advantage = batch_Q_s - batch_state_values.detach()
+    advantage = (advantage - advantage.mean()) / (advantage.std() + 1e-8)
 
     if continuous:
-        policy_ratio = torch.exp(batch_action_logprobs - old_policy_logprobs)
+        policy_ratio = torch.exp(batch_action_logprobs - batch_old_policy_logprobs)
 
     else:
         policy_ratio = torch.exp(batch_action_logprobs.gather(1, batch_actions)
-                                 - old_policy_logprobs.gather(1, batch_actions))
+                                 - batch_old_policy_logprobs.gather(1, batch_actions))
 
     ratio_loss = policy_ratio * advantage
-    clipped_ratio_loss = torch.where(advantage > 0,
+    '''clipped_ratio_loss = torch.where(advantage > 0,
                                      (1 + epsilon) * advantage,
-                                     (1 - epsilon) * advantage)
+                                     (1 - epsilon) * advantage)'''
+    clipped_ratio_loss = torch.clamp(policy_ratio,
+                                     min=1-epsilon,
+                                     max=1+epsilon) * advantage
     policy_loss = torch.min(ratio_loss, clipped_ratio_loss)
 
     policy_loss = -policy_loss.mean()

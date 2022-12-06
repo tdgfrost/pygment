@@ -197,8 +197,6 @@ class ActorCriticNetContinuous(BaseNet, nn.Module):
     super().__init__()
     self.critic_net = None
     self.actor_net = None
-    self.mu = None
-    self.sigma = None
 
     self.clip_high = None
     self.clip_low = None
@@ -213,12 +211,16 @@ class ActorCriticNetContinuous(BaseNet, nn.Module):
 
     self.critic_net = super().add_layers(nodes, env.observation_space.shape[0], 1)
     self.actor_net = super().add_layers(nodes, env.observation_space.shape[0], 1)[:-1]
+    self.actor_net.append(nn.ModuleDict())
+    self.actor_net[-1]['mu'] = nn.ModuleList([nn.Linear(nodes[-1], env.action_space.shape[0]),
+                                              nn.Tanh()])
+    self.actor_net[-1]['sigma'] = nn.ParameterList([nn.Parameter(torch.ones(env.action_space.shape[0])*0.5,
+                                                             requires_grad=True)])
 
-    self.mu = nn.ModuleList([nn.Linear(nodes[-1], env.action_space.shape[0]),
-                             nn.Tanh()])
-    self.sigma = nn.ModuleList([nn.Linear(nodes[-1], env.action_space.shape[0]),
-                                nn.Softplus()])
-
+    # Change from ReLU to Tanh
+    '''for idx in [i for i in range(len(nodes)*2) if i % 2 != 0]:
+        self.critic_net[idx] = nn.Tanh()
+        self.actor_net[idx] = nn.Tanh()'''
 
   def forward(self, state, device='mps'):
     state_value = torch.tensor(state).to(device)
@@ -226,26 +228,19 @@ class ActorCriticNetContinuous(BaseNet, nn.Module):
 
     for layer_idx in range(len(self.actor_net)):
       state_value = self.critic_net[layer_idx](state_value)
-      action_means = self.actor_net[layer_idx](action_means)
+      if layer_idx < len(self.actor_net)-1:
+          action_means = self.actor_net[layer_idx](action_means)
+      else:
+          for mu_layer in self.actor_net[-1]['mu']:
+              action_means = mu_layer(action_means)
+          action_stds = self.actor_net[-1]['sigma'][0].clip(min=1e-8)
 
-    state_value = self.critic_net[-1](state_value)
-    action_stds = action_means.clone()
+    dist = torch.distributions.Normal(action_means,
+                                      action_stds)
+    actions = dist.sample()
+    action_logprobs = dist.log_prob(actions)
+    entropy = dist.entropy()
 
-    for mu_layer, sigma_layer in zip(self.mu, self.sigma):
-      action_means = mu_layer(action_means)
-      action_stds = sigma_layer(action_stds)
-
-    actions = torch.normal(action_means,
-                          action_stds.clip(min=1e-5))
-    actions = torch.clip(actions,
-                         self.clip_low.to(device),
-                         self.clip_high.to(device))
-
-    action_logprobs = -(actions - action_means)**2 / (2 * (action_stds.clamp(min=1e-5) ** 2))
-    action_logprobs -= torch.log(torch.sqrt(torch.tensor(2) * torch.pi) * action_stds.clamp(min=1e-5))
-
-    entropy = torch.log(torch.sqrt(2 * torch.pi * torch.exp(torch.tensor(1)) * action_stds.clamp(min=1e-5) ** 2)).mean()
-
-    return actions, entropy, action_logprobs, state_value
+    return actions, entropy.mean(), action_logprobs, state_value
 
 
