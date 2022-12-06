@@ -506,7 +506,7 @@ class PolicyGradient(BaseAgent):
         return self.net(obs)[0]
 
 
-class ActorCritic(BaseAgent):
+class PPO(BaseAgent):
     """
     ActorCritic uses the actor-critic neural network to solve environments with a discrete action space.
     """
@@ -514,6 +514,7 @@ class ActorCritic(BaseAgent):
     def __init__(self, device):
         super().__init__(device)
         self.net = ActorCriticNet()
+        self.net_old = None
 
 
     def reset(self):
@@ -521,6 +522,7 @@ class ActorCritic(BaseAgent):
 
         if reset_done:
             self.net = ActorCriticNet()
+            self.net_old = None
 
 
     def add_network(self, nodes: list):
@@ -535,23 +537,25 @@ class ActorCritic(BaseAgent):
         self._regularisation = weight_decay
         super().compile_check()
 
-        self.net.to(self.device)
+        #self.net.to(self.device)
 
-        for p in self.net.parameters():
+        '''for p in self.net.parameters():
             p.register_hook(lambda grad: torch.clamp(grad,
                                                      lower_clip if lower_clip is not None else -clip,
-                                                     upper_clip if upper_clip is not None else clip))
+                                                     upper_clip if upper_clip is not None else clip))'''
 
         self._compiled = True
 
 
-    def train(self, target_reward, save_from, save_interval=10, episodes=10000, parallel_envs=32, gamma=0.999):
+    def train(self, target_reward, save_from, save_interval=10, episodes=10000, parallel_envs=32, update_iter=4, gamma=0.999):
         super().train(gamma)
 
         total_rewards = deque([], maxlen=100)
         total_loss = deque([], maxlen=100)
         total_policy_loss = deque([], maxlen=100)
         total_value_loss = deque([], maxlen=100)
+
+        self.net_old = deepcopy(self.net)
 
         @ray.remote
         def env_run(predict_net):
@@ -601,19 +605,29 @@ class ActorCritic(BaseAgent):
           batch_actions = torch.stack(batch_actions).to(self.device).unsqueeze(-1)
 
           self.net.to(self.device)
-          _, batch_entropy, batch_action_logprobs, batch_state_values = self.net(batch_states, self.device)
+          self.net_old.to(self.device)
 
-          # calculate loss
-          self.optimizer.zero_grad()
-          policy_loss, value_loss, entropy_loss = calc_loss_actor_critic(batch_Q_s, batch_actions, batch_entropy,
-                                                                         batch_action_logprobs, batch_state_values,
-                                                                         device=self.device)
+          _, _, old_policy_logprobs, _ = self.net_old(batch_states, self.device)
+          old_policy_logprobs = old_policy_logprobs.detach()
 
-          loss = policy_loss + value_loss - entropy_loss
-          loss.backward()
+          for _ in range(update_iter):
 
-          # update the model and predict_model
-          self.optimizer.step()
+              _, batch_entropy, batch_action_logprobs, batch_state_values = self.net(batch_states, self.device)
+
+              # calculate loss
+              self.optimizer.zero_grad()
+              policy_loss, value_loss, entropy_loss = calc_loss_actor_critic(batch_Q_s, batch_actions, batch_entropy,
+                                                                             batch_action_logprobs, batch_state_values,
+                                                                             device=self.device, continuous=False,
+                                                                             old_policy_logprobs=old_policy_logprobs)
+
+              loss = policy_loss + value_loss #- entropy_loss
+              loss.backward()
+
+              # update the model and predict_model
+              self.optimizer.step()
+
+          self.net_old = deepcopy(self.net)
 
           total_loss.append(policy_loss.item() + value_loss.item())
           total_policy_loss.append(policy_loss.item())
@@ -627,9 +641,9 @@ class ActorCritic(BaseAgent):
             f'Mean Reward: {round(np.array(total_rewards).mean(), 2)}')
 
 
-class ActorCriticContinuous(BaseAgent):
+class PPOContinuous(BaseAgent):
   """
-  ActorCriticContinuous uses the actor-critic neural network to solve environments with a continuous action space.
+  PPOContinuous uses the actor-critic neural network to solve environments with a continuous action space.
   """
 
   def __init__(self, device):

@@ -1,22 +1,22 @@
-from .agent import DQNAgent, PolicyGradient, ActorCritic, ActorCriticContinuous
+from .agent import DQNAgent, PolicyGradient, PPO, PPOContinuous
 import gymnasium as gym
 import os
 
 
-def create_agent(agent_type='doubleDQN', device='mps'):
-    agent_dict = {'doubleDQN': DQNAgent(device),
-                  'actorcritic': ActorCritic(device),
+def create_agent(agent_type='doubledqn', device='mps'):
+    agent_dict = {'doubledqn': DQNAgent(device),
+                  'ppo': PPO(device),
                   'policy': PolicyGradient(device),
-                  'actorcriticcontinuous': ActorCriticContinuous(device)}
+                  'ppocontinuous': PPOContinuous(device)}
 
-    if agent_type not in agent_dict.keys():
+    if agent_type.lower() not in agent_dict.keys():
         error = 'type must be one of: '
         for key in agent_dict.keys():
             error += key + ', '
         error = error[:-2]
         raise KeyError(error)
 
-    return agent_dict[agent_type]
+    return agent_dict[agent_type.lower()]
 
 
 def animate(agent, env_name, max_episode_steps=500, directory=None):

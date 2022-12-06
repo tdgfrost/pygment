@@ -94,14 +94,16 @@ def calc_loss_actor_critic(batch_Q_s, batch_actions, batch_entropy, batch_action
 
     if continuous:
         policy_ratio = torch.exp(batch_action_logprobs - old_policy_logprobs)
-        ratio_loss = policy_ratio * advantage
-        clipped_ratio_loss = torch.where(advantage > 0,
-                                         (1 + epsilon) * advantage,
-                                         (1 - epsilon) * advantage)
-        policy_loss = torch.min(ratio_loss, clipped_ratio_loss)
 
     else:
-        policy_loss = batch_action_logprobs.gather(1, batch_actions) * advantage
+        policy_ratio = torch.exp(batch_action_logprobs.gather(1, batch_actions)
+                                 - old_policy_logprobs.gather(1, batch_actions))
+
+    ratio_loss = policy_ratio * advantage
+    clipped_ratio_loss = torch.where(advantage > 0,
+                                     (1 + epsilon) * advantage,
+                                     (1 - epsilon) * advantage)
+    policy_loss = torch.min(ratio_loss, clipped_ratio_loss)
 
     policy_loss = -policy_loss.mean()
 

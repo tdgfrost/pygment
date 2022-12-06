@@ -7,7 +7,7 @@ train_new_model = True
 animate_only = False
 
 env = gym.make('LunarLander-v2', max_episode_steps=500)
-agent = pm.create_agent('actorcritic')
+agent = pm.create_agent('PPO', 'cpu')
 agent.load_env(env)
 if train_new_model:
   agent.add_network(nodes=[64, 64])
@@ -16,7 +16,7 @@ else:
 
 agent.compile('adam', learning_rate=0.01)
 
-agent.train(target_reward=300, save_from=50, save_interval=50, episodes=100000, parallel_envs=100, gamma=0.99) if not animate_only else None
+agent.train(target_reward=300, save_from=50, save_interval=50, episodes=100000, parallel_envs=10, update_iter=4, gamma=0.99) if not animate_only else None
 
 pm.animate(agent, 'LunarLander-v2', max_episode_steps=500)
 
