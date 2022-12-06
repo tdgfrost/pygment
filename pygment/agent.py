@@ -635,6 +635,7 @@ class ActorCriticContinuous(BaseAgent):
   def __init__(self, device):
     super().__init__(device)
     self.net = ActorCriticNetContinuous()
+    self.net_old = None
 
   def reset(self):
     reset_done = super().reset()
@@ -654,16 +655,16 @@ class ActorCriticContinuous(BaseAgent):
     self._regularisation = weight_decay
     super().compile_check()
 
-    self.net.to(self.device)
+    #self.net.to(self.device)
 
-    for p in self.net.parameters():
+    '''for p in self.net.parameters():
       p.register_hook(lambda grad: torch.clamp(grad,
                                                lower_clip if lower_clip is not None else -clip,
-                                               upper_clip if upper_clip is not None else clip))
+                                               upper_clip if upper_clip is not None else clip))'''
 
     self._compiled = True
 
-  def train(self, target_reward, save_from, save_interval=10, episodes=10000, parallel_envs=32, gamma=0.999):
+  def train(self, target_reward, save_from, save_interval=10, episodes=10000, parallel_envs=32, update_iter=4, gamma=0.999):
     super().train(gamma)
 
     total_rewards = deque([], maxlen=100)
@@ -671,7 +672,9 @@ class ActorCriticContinuous(BaseAgent):
     total_policy_loss = deque([], maxlen=100)
     total_value_loss = deque([], maxlen=100)
 
-    @ray.remote
+    self.net_old = deepcopy(self.net)
+
+    #@ray.remote
     def env_run(predict_net):
       done = False
       prem_done = False
@@ -697,7 +700,8 @@ class ActorCriticContinuous(BaseAgent):
 
     for episode in range(episodes // parallel_envs):
 
-      batch_records, batch_Q_s = zip(*ray.get([env_run.remote(self.net.cpu()) for _ in range(parallel_envs)]))
+      #batch_records, batch_Q_s = zip(*ray.get([env_run.remote(self.net.cpu()) for _ in range(parallel_envs)]))
+      batch_records, batch_Q_s = zip(*[env_run(self.net.cpu()) for _ in range(5)])
 
       total_rewards += deque([np.sum([exp.reward for exp in episode]) for episode in batch_records])
 
@@ -721,20 +725,28 @@ class ActorCriticContinuous(BaseAgent):
       batch_actions = torch.stack(batch_actions).to(self.device).unsqueeze(-1)
 
       self.net.to(self.device)
+      self.net_old.to(self.device)
 
-      _, batch_entropy, batch_action_logprobs, batch_state_values = self.net(batch_states, self.device)
+      _, _, old_policy_logprobs, _ = self.net_old(batch_states, self.device)
+      old_policy_logprobs = old_policy_logprobs.detach()
 
-      # calculate loss
-      self.optimizer.zero_grad()
-      policy_loss, value_loss, entropy_loss = calc_loss_actor_critic(batch_Q_s, batch_actions, batch_entropy,
-                                                                     batch_action_logprobs, batch_state_values,
-                                                                     device=self.device, continuous=True)
+      for _ in range(update_iter):
+        _, batch_entropy, batch_action_logprobs, batch_state_values = self.net(batch_states, self.device)
 
-      loss = policy_loss + value_loss - entropy_loss
-      loss.backward()
+        # calculate loss
+        self.optimizer.zero_grad()
+        policy_loss, value_loss, entropy_loss = calc_loss_actor_critic(batch_Q_s, batch_actions, batch_entropy,
+                                                                       batch_action_logprobs, batch_state_values,
+                                                                       device=self.device, continuous=True,
+                                                                       old_policy_logprobs=old_policy_logprobs)
 
-      # update the model and predict_model
-      self.optimizer.step()
+        loss = policy_loss + value_loss #- entropy_loss
+        loss.backward()
+
+        # update the model and predict_model
+        self.optimizer.step()
+
+      self.net_old = deepcopy(self.net)
 
       total_loss.append(policy_loss.item() + value_loss.item())
       total_policy_loss.append(policy_loss.item())

@@ -3,6 +3,7 @@ from torch import nn
 import torch.nn.functional as F
 from torch.distributions import Categorical
 import gymnasium as gym
+from copy import deepcopy
 
 
 class BaseNet:
@@ -198,6 +199,7 @@ class ActorCriticNetContinuous(BaseNet, nn.Module):
     self.actor_net = None
     self.mu = None
     self.sigma = None
+
     self.clip_high = None
     self.clip_low = None
 
@@ -209,9 +211,8 @@ class ActorCriticNetContinuous(BaseNet, nn.Module):
     self.clip_high = torch.tensor(env.action_space.high)
     self.clip_low = torch.tensor(env.action_space.low)
 
-    self.actor_net = super().add_layers(nodes, env.observation_space.shape[0], 1)
-    self.actor_net.pop(-1)
     self.critic_net = super().add_layers(nodes, env.observation_space.shape[0], 1)
+    self.actor_net = super().add_layers(nodes, env.observation_space.shape[0], 1)[:-1]
 
     self.mu = nn.ModuleList([nn.Linear(nodes[-1], env.action_space.shape[0]),
                              nn.Tanh()])
@@ -235,13 +236,13 @@ class ActorCriticNetContinuous(BaseNet, nn.Module):
       action_stds = sigma_layer(action_stds)
 
     actions = torch.normal(action_means,
-                          action_stds.clamp(min=1e-5))
+                          action_stds.clip(min=1e-5))
     actions = torch.clip(actions,
                          self.clip_low.to(device),
                          self.clip_high.to(device))
 
     action_logprobs = -(actions - action_means)**2 / (2 * (action_stds.clamp(min=1e-5) ** 2))
-    action_logprobs -= torch.log(torch.sqrt(2 * torch.pi * action_stds.clamp(min=1e-5) ** 2))
+    action_logprobs -= torch.log(torch.sqrt(torch.tensor(2) * torch.pi) * action_stds.clamp(min=1e-5))
 
     entropy = torch.log(torch.sqrt(2 * torch.pi * torch.exp(torch.tensor(1)) * action_stds.clamp(min=1e-5) ** 2)).mean()
 
