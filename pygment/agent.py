@@ -260,7 +260,7 @@ class DQNAgent(BaseAgent):
         self._compiled = True
 
 
-    def train(self, target_reward, episodes=10000, batch_size=64, gamma=0.999, buffer=10000,
+    def train(self, target_reward, episodes=10000, batch_size=64, gamma=0.99, buffer=10000,
               epsilon=1, tau=0.001, decay_rate=0.999, min_epsilon=0.02):
         self.method_check(env_loaded=True, net_exists=True, compiled=True)
         self._buffer_size = buffer
@@ -443,7 +443,7 @@ class PolicyGradient(BaseAgent):
         self._compiled = True
 
 
-    def train(self, target_reward=None, episodes=10000, ep_update=4, gamma=0.999):
+    def train(self, target_reward=None, episodes=10000, ep_update=4, gamma=0.99):
         self.method_check(env_loaded=True, net_exists=True, compiled=True)
         self._gamma = gamma
 
@@ -582,7 +582,7 @@ class PPO(BaseAgent):
 
 
     def train(self, target_reward, save_from, save_interval=10, episodes=10000, parallel_envs=32, update_iter=4,
-              update_steps=1000, batch_size=128, gamma=0.999):
+              update_steps=1000, batch_size=128, gamma=0.99):
         super().train(gamma)
 
         total_rewards = deque([], maxlen=parallel_envs)
@@ -765,15 +765,15 @@ class PPOContinuous(BaseAgent):
         action = action.reshape(-1)
         action_logprobs = action_logprobs.reshape(-1)
 
-      return torch.tanh(action), entropy, action_logprobs
+      return action, entropy, action_logprobs
 
 
   def train(self, target_reward, save_from, save_interval=10, episodes=10000, parallel_envs=32, update_iter=4,
-            update_steps=1000, batch_size=128, gamma=0.999):
+            update_steps=1000, batch_size=128, gamma=0.99):
     custom_params = [{'params': self.net.actor_net.parameters(),
-                      'lr': 0.0001},
+                      'lr': 0.001},
                      {'params': self.net.critic_net.parameters(),
-                      'lr': 0.0001}]
+                      'lr': 0.0005}]
     super().train(gamma, custom_params)
 
     total_rewards = deque([], maxlen=parallel_envs)
@@ -796,7 +796,7 @@ class PPOContinuous(BaseAgent):
         action, _, old_policy_logprobs = self.get_action_and_logprobs(action_means,
                                                                       action_stds)
 
-        next_state, reward, done, prem_done, _ = self.env.step(action.numpy())
+        next_state, reward, done, prem_done, _ = self.env.step(torch.tanh(action).numpy())
 
         ep_record.append(Experience(state=state,
                                     action=action,
@@ -920,7 +920,7 @@ class PPOContinuous(BaseAgent):
           loss.backward()
 
           total_loss.append(policy_loss.item() + value_loss.item())
-          total_policy_loss.append(policy_loss.item())
+          total_policy_loss.append((-batch_action_logprobs * advantage[sample_idxes]).mean().item())
           total_value_loss.append(value_loss.item())
 
           # update the model and predict_model
