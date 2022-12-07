@@ -83,22 +83,19 @@ def calc_cum_rewards(rewards_record, gamma):
 
 
 def calc_loss_actor_critic(batch_Q_s, batch_actions, batch_entropy, batch_action_logprobs,
-                           batch_state_values, device='mps', continuous=False,
-                           epsilon=0.2, batch_old_policy_logprobs=None):
+                           batch_state_values, device='mps',
+                           epsilon=0.2, batch_old_policy_logprobs=None, advantage=None):
 
     # start with value gradients
     value_loss = F.mse_loss(batch_state_values, batch_Q_s)
 
     # and then the actor gradients
-    advantage = batch_Q_s - batch_state_values.detach()
-    advantage = (advantage - advantage.mean()) / (advantage.std() + 1e-8)
+    if advantage is None:
+        advantage = batch_Q_s - batch_state_values.detach()
+        advantage = (advantage - advantage.mean()) / (advantage.std() + 1e-8)
 
-    if continuous:
-        policy_ratio = torch.exp(batch_action_logprobs - batch_old_policy_logprobs)
 
-    else:
-        policy_ratio = torch.exp(batch_action_logprobs.gather(1, batch_actions)
-                                 - batch_old_policy_logprobs.gather(1, batch_actions))
+    policy_ratio = torch.exp(batch_action_logprobs - batch_old_policy_logprobs).reshape(-1, batch_actions.shape[-1])
 
     ratio_loss = policy_ratio * advantage
     '''clipped_ratio_loss = torch.where(advantage > 0,
@@ -112,7 +109,7 @@ def calc_loss_actor_critic(batch_Q_s, batch_actions, batch_entropy, batch_action
     policy_loss = -policy_loss.mean()
 
     beta = 0.01
-    entropy_loss = beta * batch_entropy
+    entropy_loss = beta * batch_entropy if batch_entropy else 0
 
     return policy_loss, value_loss, entropy_loss
 

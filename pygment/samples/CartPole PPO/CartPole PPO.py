@@ -1,15 +1,23 @@
 import pygment as pm
 import gymnasium as gym
-import dill
 
-env = gym.make('CartPole-v1', max_episode_steps=10000)
-agent = pm.create_agent('ppo')
+train_new_model = True
+animate_only = False
+
+env = gym.make('CartPole-v1', max_episode_steps=3000)
+agent = pm.create_agent('PPO', 'cpu')
 agent.load_env(env)
-agent.add_network(nodes=[32, 32])
-agent.compile('adam', learning_rate=0.01)
+if train_new_model:
+  agent.add_network(nodes=[64, 64])
+else:
+  agent.load_model()
 
-agent.train(target_reward=8000, episodes=100000, parallel_envs=50, gamma=1)
+agent.compile('adam', learning_rate=0.001)
 
-pm.animate(agent, 'CartPole-v1', max_episode_steps=5000)
+agent.train(target_reward=3000, save_from=100, save_interval=100, episodes=10000, parallel_envs=32,
+            update_iter=10, update_steps=10000, batch_size=1024, gamma=0.99) if not animate_only else None
 
-#pm.animate_live(agent, 'CartPole-v1', max_episode_steps=5000)
+pm.animate(agent, 'CartPole-v1', max_episode_steps=4000)
+
+#pm.animate_live(agent, 'CartPole-v1', max_episode_steps=4000)
+

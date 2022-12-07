@@ -166,26 +166,7 @@ class ActorCriticNet(BaseNet, nn.Module):
           state_value = self.critic_net[layer_idx](state_value)
           action_logits = self.actor_net[layer_idx](action_logits)
 
-        action_probs = F.softmax(action_logits, dim=-1)
-        action_logprobs = F.log_softmax(action_logits, dim=-1)
-        action_distribution = Categorical(action_probs)
-        # Following is to avoid rare events where probability is represented as zero (and logprob = inf),
-        # but is in fact non-zero, and an action is sampled from this index.
-        while True:
-          action = action_distribution.sample()
-          if action.shape:
-            if ~torch.isinf(action_logprobs.gather(1, action.unsqueeze(-1)).squeeze(-1)).all():
-              break
-          else:
-            if ~torch.isinf(action_logprobs[action.item()]):
-              break
-
-        if len(action_probs.shape) == 1:
-            entropy = (action_probs * action_logprobs).sum()
-        else:
-            entropy = (action_probs * action_logprobs).sum(1).mean()
-
-        return action, entropy, action_logprobs, state_value
+        return action_logits, state_value
 
 
 class ActorCriticNetContinuous(BaseNet, nn.Module):
@@ -210,12 +191,12 @@ class ActorCriticNetContinuous(BaseNet, nn.Module):
     self.clip_low = torch.tensor(env.action_space.low)
 
     self.critic_net = super().add_layers(nodes, env.observation_space.shape[0], 1)
-    self.actor_net = super().add_layers(nodes, env.observation_space.shape[0], 1)[:-1]
-    self.actor_net.append(nn.ModuleDict())
-    self.actor_net[-1]['mu'] = nn.ModuleList([nn.Linear(nodes[-1], env.action_space.shape[0]),
-                                              nn.Tanh()])
-    self.actor_net[-1]['sigma'] = nn.ParameterList([nn.Parameter(torch.ones(env.action_space.shape[0])*0.5,
-                                                             requires_grad=True)])
+    self.actor_net = super().add_layers(nodes, env.observation_space.shape[0], env.action_space.shape[0]*2)
+    #self.actor_net = super().add_layers(nodes, env.observation_space.shape[0], 1)[:-1]
+    #self.actor_net.append(nn.ModuleDict())
+    #self.actor_net[-1]['mu'] = nn.ModuleList([nn.Linear(nodes[-1], env.action_space.shape[0])])
+    #self.actor_net[-1]['sigma'] = nn.ParameterList([nn.Parameter(torch.ones(env.action_space.shape[0])*0.5,
+                                                             #requires_grad=True)])
 
     # Change from ReLU to Tanh
     '''for idx in [i for i in range(len(nodes)*2) if i % 2 != 0]:
@@ -228,19 +209,19 @@ class ActorCriticNetContinuous(BaseNet, nn.Module):
 
     for layer_idx in range(len(self.actor_net)):
       state_value = self.critic_net[layer_idx](state_value)
-      if layer_idx < len(self.actor_net)-1:
-          action_means = self.actor_net[layer_idx](action_means)
-      else:
-          for mu_layer in self.actor_net[-1]['mu']:
-              action_means = mu_layer(action_means)
-          action_stds = self.actor_net[-1]['sigma'][0].clip(min=1e-8)
+      action_means = self.actor_net[layer_idx](action_means)
+      #if layer_idx < len(self.actor_net)-1:
+          #action_means = self.actor_net[layer_idx](action_means)
+      #else:
+          #action_means = self.actor_net[layer_idx]['mu'][0](action_means)
+          #action_stds = self.actor_net[layer_idx]['sigma'][0] + 1e-8
 
-    dist = torch.distributions.Normal(action_means,
-                                      action_stds)
-    actions = dist.sample()
-    action_logprobs = dist.log_prob(actions)
-    entropy = dist.entropy()
+    action_means = action_means.reshape(-1, action_means.shape[-1])
 
-    return actions, entropy.mean(), action_logprobs, state_value
+    action_stds = torch.clip(torch.nn.Softplus()(action_means[:, action_means.shape[-1]//2:]),
+                              min=1e-8)
+    action_means = action_means[:, :action_means.shape[-1]//2]
+
+    return action_means, action_stds, state_value
 
 

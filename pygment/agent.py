@@ -1,6 +1,9 @@
 import torch
 from torch import nn
+import torch.nn.functional as F
+from torch.distributions import Categorical, Normal
 from torch.utils.data import DataLoader
+from tqdm import tqdm
 import numpy as np
 import random
 import time
@@ -42,7 +45,7 @@ class BaseAgent:
         self.env = None
         self.current_best_reward = -10**100
         now = dt.datetime.now()
-        self._path = f'./{now.year}_{now.month}_{now.day:02}_{now.hour:02}_{now.minute:02}_{now.second:02}'
+        self._path = f'./{now.year}_{now.month}_{now.day:02}_{now.hour:02}{now.minute:02}{now.second:02}'
         self._optimizer = None
         self._learning_rate = None
         self._compiled = False
@@ -517,7 +520,6 @@ class PPO(BaseAgent):
     def __init__(self, device):
         super().__init__(device)
         self.net = ActorCriticNet()
-        self.net_old = None
 
 
     def reset(self):
@@ -525,7 +527,6 @@ class PPO(BaseAgent):
 
         if reset_done:
             self.net = ActorCriticNet()
-            self.net_old = None
 
 
     def add_network(self, nodes: list):
@@ -550,15 +551,45 @@ class PPO(BaseAgent):
         self._compiled = True
 
 
-    def train(self, target_reward, save_from, save_interval=10, episodes=10000, parallel_envs=32, update_iter=4, gamma=0.999):
+    def get_action_and_logprobs(self, action_logits, action=None):
+        action_probs = F.softmax(action_logits, dim=-1)
+        action_logprobs = F.log_softmax(action_logits, dim=-1)
+        action_distribution = Categorical(action_probs)
+
+        if len(action_probs.shape) == 1:
+            entropy = (action_probs * action_logprobs).sum()
+        else:
+            entropy = (action_probs * action_logprobs).sum(1).mean()
+
+        # Following is to avoid rare events where probability is represented as zero (and logprob = inf),
+        # but is in fact non-zero, and an action is sampled from this index.
+        if action is None:
+            while True:
+              action = action_distribution.sample()
+              if action.shape:
+                if ~torch.isinf(action_logprobs.gather(1, action.unsqueeze(-1)).squeeze(-1)).all():
+                  break
+              else:
+                if ~torch.isinf(action_logprobs[action.item()]):
+                  break
+
+        if action.shape:
+            action_logprobs = action_logprobs.gather(1, action.reshape(-1, 1)).squeeze(-1)
+        else:
+            action_logprobs = action_logprobs[action.item()]
+
+        return action, action_logprobs, entropy
+
+
+    def train(self, target_reward, save_from, save_interval=10, episodes=10000, parallel_envs=32, update_iter=4,
+              update_steps=1000, batch_size=128, gamma=0.999):
         super().train(gamma)
 
-        total_rewards = deque([], maxlen=100)
-        total_loss = deque([], maxlen=100)
-        total_policy_loss = deque([], maxlen=100)
-        total_value_loss = deque([], maxlen=100)
-
-        self.net_old = deepcopy(self.net)
+        total_rewards = deque([], maxlen=parallel_envs)
+        total_loss = deque([], maxlen=update_steps)
+        total_policy_loss = deque([], maxlen=update_steps)
+        total_value_loss = deque([], maxlen=update_steps)
+        list_of_indexes = np.array([i for i in range(update_steps)])
 
         @ray.remote
         def env_run(predict_net):
@@ -568,7 +599,9 @@ class PPO(BaseAgent):
           ep_record = []
           while not done and not prem_done:
             with torch.no_grad():
-              action, _, old_policy_logprobs, state_value = predict_net.forward(state, device='cpu')
+              action_logits, state_value = predict_net.forward(state, device='cpu')
+
+            action, old_policy_logprobs, _ = self.get_action_and_logprobs(action_logits)
 
             next_state, reward, done, prem_done, _ = self.env.step(action.item())
 
@@ -583,62 +616,100 @@ class PPO(BaseAgent):
 
           return ep_record, cum_rewards
 
-        for episode in range(episodes // parallel_envs):
+        for episode in range(episodes):
+          batch_records = []
+          batch_Q_s = []
+          batch_states = []
+          batch_actions = []
+          batch_old_policy_logprobs = []
+          while True:
+              temp_batch_records, temp_batch_Q_s = zip(*ray.get([env_run.remote(self.net.cpu()) for _ in range(parallel_envs)]))
 
-          batch_records, batch_Q_s = zip(*ray.get([env_run.remote(self.net_old.cpu()) for _ in range(parallel_envs)]))
+              total_rewards += deque([np.sum([exp.reward for exp in episode]) for episode in temp_batch_records])
 
-          total_rewards += deque([np.sum([exp.reward for exp in episode]) for episode in batch_records])
+              batch_Q_s += [Q_s for episode in temp_batch_Q_s for Q_s in episode]
 
-          if (target_reward is not None) & (len(total_rewards) == 100):
+              temp_batch_states, temp_batch_actions, temp_batch_old_policy_logprobs = zip(*[(exp.state,
+                                                                              exp.action,
+                                                                              exp.action_logprobs)
+                                                                             for episode in temp_batch_records for exp in
+                                                                             episode])
+              batch_states += list(temp_batch_states)
+              batch_actions += list(temp_batch_actions)
+              batch_old_policy_logprobs += list(temp_batch_old_policy_logprobs)
+
+              if len(batch_states) >= update_steps:
+                  break
+
+          if (target_reward is not None) & (len(total_rewards) == parallel_envs):
             if np.array(total_rewards).mean() >= target_reward:
               print(f'Solved at target {target_reward}!')
               self.save_model(np.array(total_rewards).mean(), save_from, save_interval, best=True)
               break
 
-          if (target_reward is not None) & (len(total_rewards) == 100):
+          if (target_reward is not None) & (len(total_rewards) == parallel_envs):
             self.save_model(np.array(total_rewards).mean(), save_from, save_interval, best=False)
             if np.array(total_rewards).mean() > self.current_best_reward:
               self.current_best_reward = np.array(total_rewards).mean()
 
-          batch_Q_s = torch.tensor([Q_s for episode in batch_Q_s for Q_s in episode],
-                                   dtype=torch.float32).to(self.device).unsqueeze(-1)
+          list_of_all_steps = np.array([i for i in range(len(batch_states))])
+          choice_of_all_steps = np.random.choice(list_of_all_steps,
+                                                 size=update_steps)
 
-          batch_states, batch_actions, batch_old_policy_logprobs = zip(*[(exp.state,
-                                                                          exp.action,
-                                                                          exp.action_logprobs)
-                                                                         for episode in batch_records for exp in episode])
+          batch_Q_s = torch.tensor(batch_Q_s, dtype=torch.float32).to(self.device).unsqueeze(-1)[choice_of_all_steps]
 
-          batch_states = np.array(batch_states)
-          batch_actions = torch.stack(batch_actions).to(self.device).unsqueeze(-1)
-          batch_old_policy_logprobs = torch.stack(batch_old_policy_logprobs).to(self.device)
+          batch_states = np.array(batch_states)[choice_of_all_steps]
+          batch_actions = torch.stack(batch_actions).to(self.device).unsqueeze(-1)[choice_of_all_steps]
+          batch_old_policy_logprobs = torch.stack(batch_old_policy_logprobs).to(self.device)[choice_of_all_steps]
 
           self.net.to(self.device)
 
           for _ in range(update_iter):
 
-              _, batch_entropy, batch_action_logprobs, batch_state_values = self.net(batch_states, self.device)
+              with torch.no_grad():
+                  _, batch_state_values = self.net(batch_states, self.device)
 
-              # calculate loss
-              self.optimizer.zero_grad()
-              policy_loss, value_loss, entropy_loss = calc_loss_actor_critic(batch_Q_s, batch_actions, batch_entropy,
-                                                                             batch_action_logprobs, batch_state_values,
-                                                                             device=self.device, continuous=False,
-                                                                             batch_old_policy_logprobs=batch_old_policy_logprobs)
+              advantage = batch_Q_s - batch_state_values
+              advantage = (advantage - advantage.mean()) / (advantage.std() + 1e-8)
 
-              loss = policy_loss + value_loss - entropy_loss
-              loss.backward()
+              list_sample_idxes = np.random.choice(list_of_indexes,
+                                              size=(update_steps//batch_size, batch_size),
+                                              replace=False).tolist()
+              # The following finds the leftover idxes - this is ordered, but because it forms a minibatch,
+              # this shouldn't matter / doesn't need shuffling.
+              remaining_idxes = np.setdiff1d(list_of_indexes, list_sample_idxes).tolist()
+              list_sample_idxes.append(remaining_idxes)
 
-              # update the model and predict_model
-              self.optimizer.step()
+              for sample_idxes in list_sample_idxes:
+                  batch_action_logits, batch_state_values = self.net(batch_states[sample_idxes],
+                                                                     self.device)
 
-          self.net_old = deepcopy(self.net)
+                  _, batch_action_logprobs, batch_entropy = self.get_action_and_logprobs(batch_action_logits,
+                                                                                         batch_actions[sample_idxes])
 
-          total_loss.append(policy_loss.item() + value_loss.item())
-          total_policy_loss.append(policy_loss.item())
-          total_value_loss.append(value_loss.item())
+                  # calculate loss
+                  self.optimizer.zero_grad()
+                  policy_loss, value_loss, entropy_loss = calc_loss_actor_critic(batch_Q_s[sample_idxes],
+                                                                                 batch_actions[sample_idxes],
+                                                                                 batch_entropy, batch_action_logprobs,
+                                                                                 batch_state_values,
+                                                                                 device=self.device,
+                                                                                 batch_old_policy_logprobs=batch_old_policy_logprobs[sample_idxes],
+                                                                                 advantage=advantage[sample_idxes])
+
+                  loss = policy_loss + value_loss - entropy_loss
+                  loss.backward()
+
+                  total_loss.append(policy_loss.item() + value_loss.item())
+                  total_policy_loss.append(policy_loss.item())
+                  total_value_loss.append(value_loss.item())
+
+                  # update the model and predict_model
+                  self.optimizer.step()
+
 
           print(
-            f'Episodes: {episode * parallel_envs}, '
+            f'Epoch: {episode}, '
             f'Loss {round(np.array(total_loss).mean(), 2)} '
             f'(Policy {round(np.array(total_policy_loss).mean(), 2)}, '
             f'Value {round(np.array(total_value_loss).mean(), 2)}), '
@@ -653,7 +724,6 @@ class PPOContinuous(BaseAgent):
   def __init__(self, device):
     super().__init__(device)
     self.net = ActorCriticNetContinuous()
-    self.net_old = None
 
   def reset(self):
     reset_done = super().reset()
@@ -675,26 +745,42 @@ class PPOContinuous(BaseAgent):
 
     #self.net.to(self.device)
 
-    '''for p in self.net.parameters():
+    for p in self.net.parameters():
       p.register_hook(lambda grad: torch.clamp(grad,
                                                lower_clip if lower_clip is not None else -clip,
-                                               upper_clip if upper_clip is not None else clip))'''
+                                               upper_clip if upper_clip is not None else clip))
 
     self._compiled = True
 
-  def train(self, target_reward, save_from, save_interval=10, episodes=10000, parallel_envs=32, update_iter=4, gamma=0.999):
+
+  def get_action_and_logprobs(self, action_means, action_stds, action=None):
+      dist = Normal(action_means, action_stds)
+      if action is None:
+          action = dist.sample()
+
+      action_logprobs = dist.log_prob(action)
+      entropy = dist.entropy().mean()
+
+      if action.shape[0] == 1:
+        action = action.reshape(-1)
+        action_logprobs = action_logprobs.reshape(-1)
+
+      return torch.tanh(action), entropy, action_logprobs
+
+
+  def train(self, target_reward, save_from, save_interval=10, episodes=10000, parallel_envs=32, update_iter=4,
+            update_steps=1000, batch_size=128, gamma=0.999):
     custom_params = [{'params': self.net.actor_net.parameters(),
-                      'lr': 0.0003},
+                      'lr': 0.0001},
                      {'params': self.net.critic_net.parameters(),
-                      'lr': 0.0005}]
+                      'lr': 0.0001}]
     super().train(gamma, custom_params)
 
-    total_rewards = deque([], maxlen=100)
-    total_loss = deque([], maxlen=100)
-    total_policy_loss = deque([], maxlen=100)
-    total_value_loss = deque([], maxlen=100)
-
-    self.net_old = deepcopy(self.net)
+    total_rewards = deque([], maxlen=parallel_envs)
+    total_loss = deque([], maxlen=update_steps)
+    total_policy_loss = deque([], maxlen=update_steps)
+    total_value_loss = deque([], maxlen=update_steps)
+    list_of_indexes = np.array([i for i in range(update_steps)])
 
     @ray.remote
     def env_run(predict_net):
@@ -702,81 +788,152 @@ class PPOContinuous(BaseAgent):
       prem_done = False
       state = self.env.reset()[0]
       ep_record = []
+      episode_reward = 0
       while not done and not prem_done:
         with torch.no_grad():
-          actions, _, old_policy_logprobs, state_value = predict_net.forward(state, device='cpu')
+          action_means, action_stds, state_value = predict_net.forward(state, device='cpu')
 
-        next_state, reward, done, prem_done, _ = self.env.step(actions.numpy())
+        action, _, old_policy_logprobs = self.get_action_and_logprobs(action_means,
+                                                                      action_stds)
+
+        next_state, reward, done, prem_done, _ = self.env.step(action.numpy())
 
         ep_record.append(Experience(state=state,
-                                    action=actions,
+                                    action=action,
                                     reward=reward,
                                     action_logprobs=old_policy_logprobs))
 
+        episode_reward += reward
+
         state = next_state
 
-      self.env.close()
+      episode_states, episode_actions, episode_old_policy_logprobs = zip(*[(exp.state,
+                                                                            exp.action,
+                                                                            exp.action_logprobs)
+                                                                           for exp in ep_record])
+
+      episode_states = np.array(episode_states)
+      episode_actions = torch.stack(episode_actions)
+      episode_old_policy_logprobs = torch.stack(episode_old_policy_logprobs)
 
       cum_rewards = calc_cum_rewards([exp.reward for exp in ep_record], self._gamma)
 
-      return ep_record, cum_rewards
+      return episode_states, episode_actions, episode_old_policy_logprobs, cum_rewards, episode_reward
 
-    for episode in range(episodes // parallel_envs):
+    for episode in range(episodes):
+      batch_Q_s = []
+      step = 0
+      while True:
+        step += 1
+        temp_batch_states, temp_batch_actions, temp_batch_old_policy_logprobs, temp_batch_Q_s, batch_rewards= zip(
+          *ray.get([env_run.remote(self.net.cpu()) for _ in range(parallel_envs)]))
 
-      batch_records, batch_Q_s = zip(*ray.get([env_run.remote(self.net_old.cpu()) for _ in range(parallel_envs)]))
+        total_rewards += deque(list(batch_rewards))
 
-      total_rewards += deque([np.sum([exp.reward for exp in episode]) for episode in batch_records])
+        batch_Q_s += [Q_s for episode in temp_batch_Q_s for Q_s in episode]
 
-      if (target_reward is not None) & (len(total_rewards) == 100):
+        temp_batch_states = np.concatenate(tuple([i for i in temp_batch_states]))
+        temp_batch_actions = torch.concatenate(tuple([i for i in temp_batch_actions]))
+        temp_batch_old_policy_logprobs = torch.concatenate(tuple([i for i in temp_batch_old_policy_logprobs]))
+
+        if step == 1:
+            batch_states = np.array(temp_batch_states)
+            batch_actions = temp_batch_actions
+            batch_old_policy_logprobs = temp_batch_old_policy_logprobs
+        else:
+            batch_states = np.concatenate((batch_states, temp_batch_states))
+            batch_actions = torch.concatenate((batch_actions, temp_batch_actions))
+            batch_old_policy_logprobs = torch.concatenate((batch_old_policy_logprobs,
+                                                           temp_batch_old_policy_logprobs))
+
+        if len(batch_states) >= update_steps:
+          break
+
+      parallel_envs *= step
+
+      if (target_reward is not None) & (len(total_rewards) == total_rewards.maxlen):
         if np.array(total_rewards).mean() >= target_reward:
           print(f'Solved at target {target_reward}!')
           self.save_model(np.array(total_rewards).mean(), save_from, save_interval, best=True)
           break
 
-      if (target_reward is not None) & (len(total_rewards) == 100):
+      if (target_reward is not None) & (len(total_rewards) == total_rewards.maxlen):
         self.save_model(np.array(total_rewards).mean(), save_from, save_interval, best=False)
         if np.array(total_rewards).mean() > self.current_best_reward:
           self.current_best_reward = np.array(total_rewards).mean()
 
-      batch_Q_s = torch.tensor([Q_s for episode in batch_Q_s for Q_s in episode],
-                               dtype=torch.float32).to(self.device).unsqueeze(-1)
+      list_of_all_steps = np.array([i for i in range(len(batch_states))])
+      choice_of_all_steps = np.random.choice(list_of_all_steps,
+                                               size=update_steps)
 
-      batch_states, batch_actions, batch_old_policy_logprobs = zip(*[(exp.state,
-                                                                      exp.action,
-                                                                      exp.action_logprobs) for episode in batch_records
-                                                                     for exp in episode])
+      batch_Q_s = torch.tensor(batch_Q_s,
+                               dtype=torch.float32).to(self.device).unsqueeze(-1)[choice_of_all_steps]
 
-      batch_states = np.array(batch_states)
-      batch_actions = torch.stack(batch_actions).to(self.device).unsqueeze(-1)
-      batch_old_policy_logprobs = torch.stack(batch_old_policy_logprobs).to(self.device)
+      batch_states = batch_states[choice_of_all_steps]
+      batch_actions = batch_actions.to(self.device)[choice_of_all_steps]
+      batch_old_policy_logprobs = batch_old_policy_logprobs.to(self.device)[choice_of_all_steps]
 
       self.net.to(self.device)
 
+      #with torch.no_grad():
+        #_, _, batch_state_values = self.net(batch_states, self.device)
+
+      #advantage = batch_Q_s - batch_state_values
+      #advantage = (advantage - advantage.mean()) / (advantage.std() + 1e-8)
+
       for _ in range(update_iter):
-        _, batch_entropy, batch_action_logprobs, batch_state_values = self.net(batch_states, self.device)
 
-        # calculate loss
-        self.optimizer.zero_grad()
-        policy_loss, value_loss, entropy_loss = calc_loss_actor_critic(batch_Q_s, batch_actions, batch_entropy,
-                                                                       batch_action_logprobs, batch_state_values,
-                                                                       device=self.device, continuous=True,
-                                                                       batch_old_policy_logprobs=batch_old_policy_logprobs)
+        with torch.no_grad():
+          _, _, batch_state_values = self.net(batch_states, self.device)
 
-        loss = policy_loss + 0.5 * value_loss #- entropy_loss
-        loss.backward()
+        advantage = batch_Q_s - batch_state_values
+        advantage = (advantage - advantage.mean()) / (advantage.std() + 1e-8)
 
-        # update the model and predict_model
-        self.optimizer.step()
+        list_sample_idxes = np.random.choice(list_of_indexes,
+                                             size=(update_steps // batch_size, batch_size),
+                                             replace=False).tolist()
+        # The following finds the leftover idxes - this is ordered, but because it forms a minibatch,
+        # this shouldn't matter / doesn't need shuffling.
+        remaining_idxes = np.setdiff1d(list_of_indexes, list_sample_idxes).tolist()
+        list_sample_idxes.append(remaining_idxes)
 
-      self.net_old = deepcopy(self.net)
+        for sample_idxes in list_sample_idxes:
+          batch_action_means, batch_action_stds, batch_state_values = self.net(batch_states[sample_idxes],
+                                                                               self.device)
 
-      total_loss.append(policy_loss.item() + value_loss.item())
-      total_policy_loss.append(policy_loss.item())
-      total_value_loss.append(value_loss.item())
+          _, batch_entropy, batch_action_logprobs = self.get_action_and_logprobs(batch_action_means,
+                                                                                 batch_action_stds,
+                                                                                 batch_actions[sample_idxes])
+
+          # calculate loss
+          self.optimizer.zero_grad()
+          policy_loss, value_loss, entropy_loss = calc_loss_actor_critic(batch_Q_s[sample_idxes],
+                                                                         batch_actions[sample_idxes],
+                                                                         batch_entropy, batch_action_logprobs,
+                                                                         batch_state_values,
+                                                                         device=self.device,
+                                                                         batch_old_policy_logprobs=
+                                                                         batch_old_policy_logprobs[sample_idxes],
+                                                                         advantage=advantage[sample_idxes])
+
+          loss = policy_loss + value_loss - entropy_loss
+          loss.backward()
+
+          total_loss.append(policy_loss.item() + value_loss.item())
+          total_policy_loss.append(policy_loss.item())
+          total_value_loss.append(value_loss.item())
+
+          # update the model and predict_model
+          self.optimizer.step()
+
 
       print(
-        f'Episodes: {episode * parallel_envs}, '
+        f'Epoch: {episode}, '
         f'Loss {round(np.array(total_loss).mean(), 2)} '
         f'(Policy {round(np.array(total_policy_loss).mean(), 2)}, '
         f'Value {round(np.array(total_value_loss).mean(), 2)}), '
         f'Mean Reward: {round(np.array(total_rewards).mean(), 2)}')
+
+'''
+NEXT STEP - CONSIDER CREATING INDIVIDUAL ACTOR AND CRITIC NET CLASSES
+'''
