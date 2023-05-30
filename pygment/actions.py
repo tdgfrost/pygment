@@ -54,7 +54,7 @@ def calc_loss_policy(cum_rewards, actions, action_logprobs, device):
     return loss
 
 
-def calc_entropy_loss_policy(action_probs, action_logprobs, entropy_beta=0.01, device='mps'):
+def calc_entropy_loss_policy(action_probs, action_logprobs, entropy_beta=0.01, device='cpu'):
   if type(action_probs) is list:
       action_probs = torch.stack(action_probs).to(device)
   if type(action_logprobs) is list:
@@ -82,49 +82,35 @@ def calc_cum_rewards(rewards_record, gamma):
     return cum_rewards[::-1]
 
 
-def calc_loss_actor_critic(batch_Q_s, batch_actions, batch_action_probs, batch_action_logprobs,
-                           batch_state_values, device='mps'):
+def calc_loss_actor_critic(batch_Q_s, batch_actions, batch_entropy, batch_action_logprobs,
+                           batch_state_values, device='cpu',
+                           epsilon=0.2, batch_old_policy_logprobs=None, advantage=None):
 
     # start with value gradients
     value_loss = F.mse_loss(batch_state_values, batch_Q_s)
 
     # and then the actor gradients
-    advantage = batch_Q_s - batch_state_values.detach()
+    if advantage is None:
+        advantage = batch_Q_s - batch_state_values.detach()
+        advantage = (advantage - advantage.mean()) / (advantage.std() + 1e-8)
 
-    policy_loss = batch_action_logprobs.gather(1, batch_actions)
-    policy_loss *= advantage
+
+    policy_ratio = torch.exp(batch_action_logprobs - batch_old_policy_logprobs).reshape(-1, batch_actions.shape[-1])
+
+    ratio_loss = policy_ratio * advantage
+    '''clipped_ratio_loss = torch.where(advantage > 0,
+                                     (1 + epsilon) * advantage,
+                                     (1 - epsilon) * advantage)'''
+    clipped_ratio_loss = torch.clamp(policy_ratio,
+                                     min=1-epsilon,
+                                     max=1+epsilon) * advantage
+    policy_loss = torch.min(ratio_loss, clipped_ratio_loss)
+
     policy_loss = -policy_loss.mean()
 
     beta = 0.01
-    entropy_loss = beta * (batch_action_probs * batch_action_logprobs).sum(1).mean()
+    entropy_loss = beta * batch_entropy if batch_entropy else 0
 
-    #loss = policy_loss + 0.5 * value_loss - entropy_loss
-    loss = policy_loss + value_loss - entropy_loss
+    return policy_loss, value_loss, entropy_loss
 
-    return loss
-
-
-def calc_loss_prios(batch, batch_weights, device, model, gamma):
-    # Function for returning both the losses and the prioritised samples
-    states, actions, rewards, next_states, dones = unpack_batch(batch)
-
-    states_v = torch.tensor(states).to(device)
-    actions_v = torch.tensor(actions).to(device)
-    rewards_v = torch.tensor(rewards).to(device)
-    done_mask = torch.tensor(dones, dtype=torch.bool).to(device)
-    batch_weights_v = torch.tensor(batch_weights, dtype=torch.float32).to(device)
-
-    state_action_values = model.main_net(states_v).gather(1, actions_v.unsqueeze(-1)).squeeze(-1)
-
-    with torch.no_grad():
-        next_states_v = torch.tensor(next_states).to(device)
-        next_state_values = model.target_net(next_states_v).max(1)[0]
-        next_state_values[done_mask] = 0.0
-        expected_state_action_values = next_state_values.detach() * gamma + rewards_v
-
-    batch_weights = batch_weights ** 0.6
-    batch_weights = batch_weights / batch_weights.sum()
-
-    losses_v = batch_weights_v * (state_action_values - expected_state_action_values) ** 2
-    return losses_v.mean(), (losses_v + 1e-5).data.cpu().numpy()
 

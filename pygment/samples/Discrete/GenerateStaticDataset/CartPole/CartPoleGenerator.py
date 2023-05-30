@@ -9,7 +9,7 @@ agent.load_model('/Users/thomasfrost/Documents/Github/pygment/pygment/pygment/sa
 
 agent.compile('adam', learning_rate=0.001)
 
-all_states, all_actions, all_rewards, all_next_states, all_cum_rewards = agent.explore(episodes=5000, parallel_envs=32)
+all_states, all_actions, all_rewards, all_next_states, all_cum_rewards = agent.explore(episodes=10000, parallel_envs=32)
 
 for array, name in [[all_states, 'all_states.npy'], [all_actions, 'all_actions.npy'],
                     [all_rewards, 'all_rewards.npy'], [all_next_states, 'all_next_states.npy'],

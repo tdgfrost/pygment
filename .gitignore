@@ -16,3 +16,6 @@ pygment/samples/.DS_Store
 pygment/samples/Continuous/.DS_Store
 pygment/samples/Discrete/.DS_Store
 pygment/samples/Discrete/CartPole PPO/2023_5_30_140033/videos/rl-video-episode-0.meta.json
+pygment/.DS_Store
+pygment/__pycache__/agent.cpython-39.pyc
+pygment/samples/.DS_Store
