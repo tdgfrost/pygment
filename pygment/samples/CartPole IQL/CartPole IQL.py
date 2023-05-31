@@ -32,7 +32,7 @@ data = [pm.Experience(state=loaded_data['state'][i],
                       next_state=loaded_data['next_state'][i],
                       done=None) for i in range(len(loaded_data['state']))]
 
-agent.train(data, epochs=100, batch_size=10240, gamma=0.99, tau=0.99, beta=0.3, save=True)
+agent.train(data, epochs=100, batch_size=10240, gamma=0.99, tau=0.99, beta=100, save=True)
 agent.evaluate(episodes=100)
 
 pm.animate(agent, 'CartPole-v1', max_episode_steps=3000)
