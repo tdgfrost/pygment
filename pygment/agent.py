@@ -9,10 +9,11 @@ import random
 import time
 import datetime as dt
 import os
+import shutil
 from copy import deepcopy
 from .actions import GreedyEpsilonSelector, calc_loss_batch, calc_loss_policy, calc_cum_rewards, \
-    calc_entropy_loss_policy, calc_loss_actor_critic
-from .net import DualNet, ActorCriticNet, PolicyGradientNet, ActorCriticNetContinuous
+    calc_entropy_loss_policy, calc_loss_actor_critic, calc_iql_loss_batch, calc_iql_policy_loss_batch
+from .net import BaseNet, DualNet, ActorCriticNet, PolicyGradientNet, ActorCriticNetContinuous
 from .env import wrap_env
 from collections import deque
 import ray
@@ -24,12 +25,14 @@ class Experience:
   and values from the network).
   '''
 
-    def __init__(self, state=None, action=None, reward=None, next_state=None, done=None,
-                 action_probs=None, action_logprobs=None, state_value=None):
+    def __init__(self, state=None, action=None, reward=None, cum_reward=None, next_state=None, next_action=None,
+                 done=None, action_probs=None, action_logprobs=None, state_value=None):
         self.state = state
         self.action = action
         self.reward = reward
+        self.cum_reward = cum_reward
         self.next_state = next_state
+        self.next_action = next_action
         self.done = done
         self.action_probs = action_probs
         self.action_logprobs = action_logprobs
@@ -42,12 +45,13 @@ class BaseAgent:
     """
 
     def __init__(self, device='cpu'):
+        self.net = None
         self.device = device
         self.optimizer = None
         self.env = None
         self.current_best_reward = -10 ** 100
         now = dt.datetime.now()
-        self._path = f'./{now.year}_{now.month}_{now.day:02}_{now.hour:02}{now.minute:02}{now.second:02}'
+        self.path = f'./{now.year}_{now.month}_{now.day:02}_{now.hour:02}{now.minute:02}{now.second:02}'
         self._optimizer = None
         self._learning_rate = None
         self._compiled = False
@@ -75,7 +79,7 @@ class BaseAgent:
             self.env = None
             self.current_best_reward = -10 ** 100
             now = dt.datetime.now()
-            self._path = f'./{now.year}_{now.month}_{now.day:02}_{now.hour:02}_{now.minute:02}_{now.second:02}/'
+            self.path = f'./{now.year}_{now.month}_{now.day:02}_{now.hour:02}_{now.minute:02}_{now.second:02}/'
             self._optimizer = None
             self._learning_rate = None
             self._compiled = False
@@ -153,15 +157,15 @@ class BaseAgent:
         if (average_reward >= save_from) & ((average_reward // save_interval * save_interval) >
                                             (self.current_best_reward // save_interval * save_interval)):
             # Check directory exists and create if not
-            if not os.path.isdir(self._path):
-                os.mkdir(self._path)
+            if not os.path.isdir(self.path):
+                os.mkdir(self.path)
 
             # It may be the case that a previous model was loaded and training was continued. If this hasn't been
             # checked yet, screen the previous checkpoints to check whether any were saved as 'model_best_',
             # and clarify the score of that checkpoint.
             if self._screen_files:
                 no_best = True
-                for file in os.listdir(self._path):
+                for file in os.listdir(self.path):
                     if 'model_best_' in file:
                         no_best = False
                         prev_score = file.split('model_best_')[1].split('.pt')[0]
@@ -169,7 +173,7 @@ class BaseAgent:
                         # If the score of this checkpoint is below the current model, remove the 'model_best_' from that
                         # checkpoint.
                         if int(float(prev_score)) < (average_reward // save_interval * save_interval):
-                            os.rename(self._path + f'/{file}', self._path + f'/model_{int(float(prev_score))}.pt')
+                            os.rename(self.path + f'/{file}', self.path + f'/model_{int(float(prev_score))}.pt')
                             self._screen_files = False
                             break
 
@@ -178,23 +182,24 @@ class BaseAgent:
 
             # Define the directory to save the model in, and the name of the file, which follows the template of
             # 'model_(score)' initially, and 'model_best_(score)' at the terminus.
-            current_model_path = self._path + f'/model_best_{int(average_reward // save_interval * save_interval)}.pt' if best \
-                else self._path + f'/model_{int(average_reward // save_interval * save_interval)}.pt'
+            current_model_path = self.path + f'/model_best_{int(average_reward // save_interval * save_interval)}.pt' if best \
+                else self.path + f'/model_{int(average_reward // save_interval * save_interval)}.pt'
 
             # For some reason there are issues with saving and re-training the model under mps, so (for the time being)
             # we create a deepcopy of our model to get around this.
             current_model = deepcopy(self.net)
             torch.save(current_model, current_model_path)
 
-    def load_model(self):
-        invalid_path = ''
-        while True:
-            path = input(invalid_path + 'Please enter model path, or press Q/q to exist: ')
-            if path == 'Q' or path == 'q':
-                return
-            if os.path.isfile(path):
-                break
-            invalid_path = 'Invalid path - '
+    def load_model(self, path=None):
+        if path is None:
+            invalid_path = ''
+            while True:
+                path = input(invalid_path + 'Please enter model path, or press Q/q to exist: ')
+                if path == 'Q' or path == 'q':
+                    return
+                if os.path.isfile(path):
+                    break
+                invalid_path = 'Invalid path - '
         self.net = torch.load(path)
         if self._compiled:
             self._compiled = False
@@ -203,7 +208,7 @@ class BaseAgent:
             self._regularisation = None
             print('Model loaded - recompile agent please')
 
-        self._path = os.path.dirname(path)
+        self.path = os.path.dirname(path)
 
 
 class DQNAgent(BaseAgent):
@@ -214,6 +219,7 @@ class DQNAgent(BaseAgent):
 
     def __init__(self, device):
         super().__init__(device)
+        self._buffer_size = None
         self.net = DualNet()
         self.replay_buffer = None
         self._tau = None
@@ -391,6 +397,234 @@ class DQNAgent(BaseAgent):
             batch.append(self.replay_buffer[index])
 
         return batch
+
+
+class IQLAgent(BaseAgent):
+    """
+    IQLAgent is an implementation of the Implicit Q-Learning algorithm, a completely off-line RL algorithm.
+    """
+
+    def __init__(self, device):
+        super().__init__(device)
+        self._beta = None
+        self._tau = None
+        self.net = ActorCriticNet()
+        self._batch_size = None
+
+    def reset(self):
+        reset_done = super().reset()
+
+        if reset_done:
+            self.net = ActorCriticNet()
+            self._batch_size = None
+
+    '''
+    Feed the desired number of nodes and the associated input/output 
+    features to the DualNet network-generating method.
+    '''
+
+    def add_network(self, nodes: list):
+        super().network_check(nodes)
+
+        self.net.add_layers(nodes, self.env)
+        self.net.has_net = True
+
+    def compile(self, optimizer, learning_rate=0.001, weight_decay=1e-5):
+        self._optimizer = optimizer
+        self._learning_rate = learning_rate
+        self._regularisation = weight_decay
+        super().compile_check()
+
+        self.net.to(self.device)
+
+        self._compiled = True
+
+    def train(self, data: list, epochs=1000, batch_size=64, gamma=0.99, tau=0.99, beta=1, save=False):
+        """
+        Variable 'data' should be a 1D list of Experiences - sorted or unsorted. The reward value should be the
+        correct Q_s value for that state i.e., the cumulated discounted reward from that state onwards.
+        """
+
+        super().train(gamma)
+        self.method_check(env_loaded=True, net_exists=True, compiled=True)
+        self._gamma = gamma
+        self._tau = tau
+        self._beta = beta
+        self._batch_size = batch_size
+
+        if save:
+            if not os.path.isdir(self.path):
+                os.makedirs(self.path)
+
+        # 1) Training the Q/V network
+        print('Beginning training of Q/V networks...\n')
+        old_qv_loss = 10 ** 10
+        counter = 0
+        backup_net = deepcopy(self.net)
+        for epoch in range(1, epochs + 1):
+            np.random.default_rng().shuffle(data)
+            current_loss = []
+            current_loss_q = []
+            current_loss_v = []
+
+            for i in tqdm(range(0, len(data), batch_size)):
+                batch = data[i:i + batch_size]
+
+                self.optimizer.zero_grad()
+
+                loss_q, loss_v = calc_iql_loss_batch(batch, self.device, self.net, self._gamma, self._tau)
+
+                loss = loss_q + loss_v
+                loss.backward()
+                self.optimizer.step()
+
+                current_loss.append(loss.item())
+                current_loss_q.append(loss_q.item())
+                current_loss_v.append(loss_v.item())
+
+            if np.array(current_loss).mean() > old_qv_loss:
+                counter += 1
+                if counter == 3:
+                    self.net = deepcopy(backup_net)
+                    self.optimizer = self._optimizers[self._optimizer](self.net.parameters(), lr=self._learning_rate,
+                                                                       weight_decay=self._regularisation)
+                    print(f'Epoch {epoch}: Loss has increased from {old_qv_loss} to {np.array(current_loss).mean()} three times in a row. '
+                          f'Loss_Q: {np.array(current_loss_q).mean()}, Loss_V: {np.array(current_loss_v).mean()}\n'
+                          f'Reverting to old net and stopping Q/V training.')
+                    break
+                else:
+                    print(
+                        f'Epoch {epoch}: Loss has increased from {old_qv_loss} to {np.array(current_loss).mean()}. '
+                        f'Loss_Q: {np.array(current_loss_q).mean()}, Loss_V: {np.array(current_loss_v).mean()}')
+            else:
+                counter = 0
+                backup_net = deepcopy(self.net)
+                if save:
+                    old_save_path = os.path.join(self.path, f'no_policy_model_loss_{round(old_qv_loss, 3)}.pt')
+                    new_save_path = os.path.join(self.path,
+                                                 f'no_policy_model_loss_{round(np.array(current_loss).mean(), 3)}.pt')
+
+                    torch.save(self.net, new_save_path)
+                    if os.path.isfile(old_save_path):
+                        os.remove(old_save_path)
+
+                old_qv_loss = np.array(current_loss).mean()
+
+                print(
+                    f'Epochs completed: {epoch}, Loss: {np.array(current_loss).mean()}, '
+                    f'Loss_Q: {np.array(current_loss_q).mean()}, Loss_V: {np.array(current_loss_v).mean()}')
+
+        # 2) Training the policy network
+        print('Beginning training of policy network...\n')
+        old_policy_loss = 10 ** 10
+        counter = 0
+        backup_net = deepcopy(self.net)
+        for epoch in range(1, epochs + 1):
+            np.random.default_rng().shuffle(data)
+            current_loss = []
+
+            for i in tqdm(range(0, len(data), batch_size)):
+                batch = data[i:i + batch_size]
+
+                self.optimizer.zero_grad()
+
+                loss = calc_iql_policy_loss_batch(batch, self.device, self.net, self._beta)
+
+                loss.backward()
+                self.optimizer.step()
+
+                current_loss.append(loss.item())
+
+            if np.array(current_loss).mean() > old_policy_loss:
+                counter += 1
+                if counter == 3:
+                    self.net = deepcopy(backup_net)
+                    self.optimizer = self._optimizers[self._optimizer](self.net.parameters(), lr=self._learning_rate,
+                                                                       weight_decay=self._regularisation)
+                    print(f'Epoch {epoch}: Loss has increased from {old_policy_loss} to {np.array(current_loss).mean()} three times in a row. \n'
+                          f'Reverting to old net and ending policy training.')
+                    break
+                else:
+                    print(
+                        f'Epoch {epoch}: Loss has increased from {old_policy_loss} to {np.array(current_loss).mean()}.')
+            else:
+                counter = 0
+                backup_net = deepcopy(self.net)
+                if save:
+                    old_save_path = os.path.join(self.path, f'model_loss_{round(old_policy_loss, 3)}.pt')
+                    new_save_path = os.path.join(self.path, f'model_loss_{round(np.array(current_loss).mean(), 3)}.pt')
+
+                    torch.save(self.net, new_save_path)
+                    if os.path.isfile(old_save_path):
+                        os.remove(old_save_path)
+                    else:
+                        os.remove(os.path.join(self.path, f'no_policy_model_loss_{round(old_qv_loss, 3)}.pt'))
+
+                old_policy_loss = np.array(current_loss).mean()
+
+                print(
+                    f'Epochs completed: {epoch}, Loss: {np.array(current_loss).mean()}')
+
+    def evaluate(self, episodes=100, parallel_envs=32):
+
+        @ray.remote
+        def env_run(predict_net):
+            done = False
+            prem_done = False
+            state = self.env.reset()[0]
+            ep_record = []
+            while not done and not prem_done:
+                with torch.no_grad():
+                    Q_s, _ = predict_net.forward(state, device='cpu')
+
+                action = torch.argmax(Q_s)
+
+                next_state, reward, done, prem_done, _ = self.env.step(action.item())
+
+                ep_record.append(Experience(state=state,
+                                            action=action,
+                                            reward=reward,
+                                            next_state=next_state))
+
+                state = next_state
+
+            total_reward = sum([exp.reward for exp in ep_record])
+
+            return ep_record, total_reward
+
+        all_states = []
+        all_actions = []
+        all_rewards = []
+        all_total_rewards = []
+        all_next_states = []
+
+        print(f'Beginning evaluation over {episodes} episodes...\n')
+        for episode in tqdm(range(episodes // parallel_envs)):
+            temp_batch_records, temp_total_reward = zip(
+                *ray.get([env_run.remote(self.net.cpu()) for _ in range(parallel_envs)]))
+
+            temp_batch_states, temp_batch_actions, temp_batch_rewards, temp_batch_next_states = zip(
+                *[(exp.state, exp.action, exp.reward, exp.next_state)
+                  for episode in temp_batch_records for exp in episode])
+
+            all_states += list(temp_batch_states)
+            all_actions += list(temp_batch_actions)
+            all_rewards += list(temp_batch_rewards)
+            all_next_states += list(temp_batch_next_states)
+            all_total_rewards += list(temp_total_reward)
+
+        print(f'Evaluation complete! Average reward per episode: {np.array(all_total_rewards).mean()}')
+
+        return np.array(all_states), np.array(all_actions), np.array(all_rewards), \
+            np.array(all_next_states), np.array(all_total_rewards)
+
+    def choose_action(self, state, device='cpu'):
+        with torch.no_grad():
+            Q_s, _ = self.net.forward(state, device=device)
+
+        action = torch.argmax(Q_s)
+
+        return action.item()
 
 
 class PolicyGradient(BaseAgent):

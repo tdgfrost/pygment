@@ -114,3 +114,52 @@ def calc_loss_actor_critic(batch_Q_s, batch_actions, batch_entropy, batch_action
     return policy_loss, value_loss, entropy_loss
 
 
+def calc_iql_loss_batch(batch, device, model, gamma, tau):
+    # Unpack the batch
+    states, actions, reward, cum_reward, next_states = zip(*[(exp.state, exp.action, exp.reward, exp.cum_reward,
+                                                              exp.next_state) for exp in batch])
+
+    # Calculate Q(s,a) and V(s) for each state in the batch
+    pred_Q_s, pred_V_s = model.forward(states, device=device)
+    pred_Q_s = pred_Q_s.gather(1, torch.tensor(actions).to(device).unsqueeze(-1)).squeeze(-1)
+    pred_V_s = pred_V_s.squeeze(-1)
+
+    # Calculate loss for V(s)
+    loss_v = pred_V_s - torch.tensor(cum_reward, dtype=torch.float32).to(device)
+    mask = loss_v > 0
+    loss_v = loss_v ** 2
+    loss_v[mask] = loss_v[mask] * (1 - tau)
+    loss_v[~mask] = loss_v[~mask] * tau
+
+    # Calculate loss for Q(s,a) using the Value function
+    loss_q = torch.tensor(reward, dtype=torch.float32).to(device) + gamma * pred_V_s - pred_Q_s
+    loss_q = loss_q ** 2
+
+    return loss_q.mean(), loss_v.mean()
+
+
+def calc_iql_policy_loss_batch(batch, device, model, beta):
+    # Unpack the batch
+    states, actions, reward, cum_reward, next_states = zip(*[(exp.state, exp.action, exp.reward, exp.cum_reward,
+                                                              exp.next_state) for exp in batch])
+
+    # Calculate Q(s,a) and V(s) for each state in the batch
+    pred_Q_s, pred_V_s = model.forward(states, device=device)
+    # Set Q_s logits as normalised probabilities, and convert back to log
+    pred_Q_s = torch.softmax(pred_Q_s, dim=1)
+    pred_Q_s = pred_Q_s.gather(1, torch.tensor(actions).to(device).unsqueeze(-1)).squeeze(-1)
+    pred_Q_s = torch.log(pred_Q_s)
+    # Address any -inf values
+    pred_Q_s = torch.where(torch.isinf(pred_Q_s), -1000, pred_Q_s)
+    # Address any zero values, so that the advantage part is still retained
+    pred_Q_s = torch.where(pred_Q_s == 0, -1e-8, pred_Q_s)
+    # Detach the value network, which should remain unchanged
+    pred_V_s = pred_V_s.detach().squeeze(1)
+
+    # Calculate the policy loss
+    loss = torch.exp(beta * (torch.tensor(cum_reward, dtype=torch.float32).to(device) - pred_V_s)) * pred_Q_s
+    loss = -loss.mean()
+
+    return loss
+
+
