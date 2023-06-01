@@ -483,11 +483,11 @@ class IQLAgent(BaseAgent):
 
             if np.array(current_loss).mean() > old_qv_loss:
                 counter += 1
-                if counter == 3:
+                if counter == 5:
                     self.net = deepcopy(backup_net)
                     self.optimizer = self._optimizers[self._optimizer](self.net.parameters(), lr=self._learning_rate,
                                                                        weight_decay=self._regularisation)
-                    print(f'Epoch {epoch}: Loss has increased from {old_qv_loss} to {np.array(current_loss).mean()} three times in a row. '
+                    print(f'Epoch {epoch}: Loss has increased from {old_qv_loss} to {np.array(current_loss).mean()} five times in a row. '
                           f'Loss_Q: {np.array(current_loss_q).mean()}, Loss_V: {np.array(current_loss_v).mean()}\n'
                           f'Reverting to old net and stopping Q/V training.')
                     break
@@ -553,11 +553,11 @@ class IQLAgent(BaseAgent):
 
             if np.array(current_loss).mean() > old_policy_loss:
                 counter += 1
-                if counter == 3:
+                if counter == 5:
                     self.net = deepcopy(backup_net)
                     self.optimizer = self._optimizers[self._optimizer](self.net.parameters(), lr=self._learning_rate,
                                                                        weight_decay=self._regularisation)
-                    print(f'Epoch {epoch}: Loss has increased from {old_policy_loss} to {np.array(current_loss).mean()} three times in a row. \n'
+                    print(f'Epoch {epoch}: Loss has increased from {old_policy_loss} to {np.array(current_loss).mean()} five times in a row. \n'
                           f'Reverting to old net and ending policy training.')
                     break
                 else:

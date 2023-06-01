@@ -14,10 +14,9 @@ else:
 
 agent.compile('adam', learning_rate=0.001)
 
-agent.train(target_reward=50, save_from=10, save_interval=10, episodes=10000, parallel_envs=32,
+agent.train(target_reward=500, save_from=10, save_interval=50, episodes=10000, parallel_envs=32,
             update_iter=10, update_steps=10000, batch_size=1024, gamma=0.99) if not animate_only else None
 
-for _ in range(10):
-    pm.animate(agent, 'CartPole-v1', max_episode_steps=4000, prefix='Baseline_reward_50')
+pm.animate(agent, 'CartPole-v1', max_episode_steps=4000, prefix='')
 
 # pm.animate_live(agent, 'CartPole-v1', max_episode_steps=4000)

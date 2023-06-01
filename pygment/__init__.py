@@ -25,6 +25,9 @@ def animate(agent_instance, env_name, max_episode_steps=500, directory=None, pre
     if directory is None:
         directory = agent_instance.path + '/videos'
 
+    if not os.path.isdir(directory):
+        os.makedirs(directory)
+
     # agent_instance.net.to('mps')
 
     env = gym.make(env_name, render_mode='rgb_array', max_episode_steps=max_episode_steps)
@@ -40,15 +43,16 @@ def animate(agent_instance, env_name, max_episode_steps=500, directory=None, pre
         continuous = True
 
     done = False
+    truncated = False
     state = agent_instance.env.reset()[0]
-    while not done:
+    while not done and not truncated:
         if continuous:
             action_means, action_stds, _ = agent_instance.net(state)
             action, _, _ = agent_instance.get_action_and_logprobs(action_means, action_stds)
             action = torch.tanh(action).numpy()
         else:
             action = agent_instance.choose_action(state)
-        next_state, _, done, _, _ = agent_instance.env.step(action)
+        next_state, _, done, truncated, _ = agent_instance.env.step(action)
         state = next_state
 
     agent_instance.env.close()
