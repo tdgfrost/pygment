@@ -4,6 +4,7 @@ import torch.nn.functional as F
 from torch.distributions import Categorical
 import gymnasium as gym
 from copy import deepcopy
+import numpy as np
 
 
 class BaseNet:
@@ -158,8 +159,8 @@ class ActorCriticNet(BaseNet, nn.Module):
         self.critic_net = super().add_base_layers(nodes, env.observation_space.shape[0], 1)
 
     def forward(self, state, device='cpu'):
-        state_value = torch.tensor(state).to(device)
-        action_logits = torch.tensor(state).to(device)
+        state_value = torch.tensor(np.array(state)).to(device)
+        action_logits = torch.tensor(np.array(state)).to(device)
 
         for layer_idx in range(len(self.actor_net)):
             state_value = self.critic_net[layer_idx](state_value)

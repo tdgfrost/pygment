@@ -3,7 +3,7 @@ import gymnasium as gym
 import numpy as np
 
 #for template_reward in [20, 30, 50, 100, 130, 150, 200, 220]:
-for template_reward in [20]:
+for template_reward in [100]:
     train_new_model = True
     animate_only = False
     # template_reward = 100
@@ -34,8 +34,8 @@ for template_reward in [20]:
                           next_state=loaded_data['next_state'][i],
                           done=None) for i in range(len(loaded_data['state']))]
 
-    agent.train_qv(data, epochs=100, batch_size=1024, gamma=0.99, tau=0.99, save=True)
-    agent.train_policy(data, epochs=100, batch_size=1024, beta=0.3, save=True)
+    agent.train_qv(data, epochs=1000, batch_size=1024, gamma=0.99, tau=0.99, save=True)
+    agent.train_policy(data, epochs=1000, batch_size=1024, beta=0.09, save=True)
     _, _, _, _, rewards = agent.evaluate(episodes=100)
 
     for _ in range(10):

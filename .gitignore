@@ -138,3 +138,29 @@ pygment/samples/GenerateStaticDataset/LunarLander/30 reward/all_cum_rewards.npy
 pygment/samples/GenerateStaticDataset/LunarLander/30 reward/all_actions.npy
 pygment/samples/GenerateStaticDataset/LunarLander/220 reward/all_states.npy
 pygment/samples/GenerateStaticDataset/LunarLander/220 reward/all_rewards.npy
+pygment/__pycache__/agent.cpython-39.pyc
+pygment/.DS_Store
+pygment/samples/.DS_Store
+pygment/samples/LunarLander IQL/2023_6_01_135904/100_video/IQL_reward_-166_video0.mp4
+pygment/samples/LunarLander IQL/2023_6_01_135904/100_video/IQL_reward_-166_video1.mp4
+pygment/samples/LunarLander IQL/2023_6_01_135904/100_video/IQL_reward_-166_video2.mp4
+pygment/samples/LunarLander IQL/2023_6_01_135904/100_video/IQL_reward_-166_video3.mp4
+pygment/samples/LunarLander IQL/2023_6_01_135904/100_video/IQL_reward_-166_video4.mp4
+pygment/samples/LunarLander IQL/2023_6_01_135904/100_video/IQL_reward_-166_video5.mp4
+pygment/samples/LunarLander IQL/2023_6_01_135904/100_video/IQL_reward_-166_video6.mp4
+pygment/samples/LunarLander IQL/2023_6_01_135904/100_video/IQL_reward_-166_video7.mp4
+pygment/samples/LunarLander IQL/2023_6_01_135904/100_video/IQL_reward_-166_video8.mp4
+pygment/samples/LunarLander IQL/2023_6_01_135904/100_video/IQL_reward_-166_video9.mp4
+pygment/samples/LunarLander IQL/2023_6_01_135904/no_policy_model_loss_46.808.pt
+pygment/samples/LunarLander IQL/2023_6_01_135904/policy_model_loss_0.323.pt
+pygment/samples/LunarLander IQL/2023_6_01_224541/no_policy_model_loss_54.704.pt
+pygment/samples/LunarLander PPO/2023_6_01_120242/100_video/Baseline_reward_100_video0.mp4
+pygment/samples/LunarLander PPO/2023_6_01_120242/100_video/Baseline_reward_100_video1.mp4
+pygment/samples/LunarLander PPO/2023_6_01_120242/100_video/Baseline_reward_100_video2.mp4
+pygment/samples/LunarLander PPO/2023_6_01_120242/100_video/Baseline_reward_100_video3.mp4
+pygment/samples/LunarLander PPO/2023_6_01_120242/100_video/Baseline_reward_100_video4.mp4
+pygment/samples/LunarLander PPO/2023_6_01_120242/100_video/Baseline_reward_100_video5.mp4
+pygment/samples/LunarLander PPO/2023_6_01_120242/100_video/Baseline_reward_100_video6.mp4
+pygment/samples/LunarLander PPO/2023_6_01_120242/100_video/Baseline_reward_100_video7.mp4
+pygment/samples/LunarLander PPO/2023_6_01_120242/100_video/Baseline_reward_100_video8.mp4
+pygment/samples/LunarLander PPO/2023_6_01_120242/100_video/Baseline_reward_100_video9.mp4

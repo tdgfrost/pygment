@@ -467,7 +467,7 @@ class IQLAgent(BaseAgent):
             current_loss_v = []
 
             for i in tqdm(range(0, len(data), batch_size)):
-                batch = data[i:i + batch_size]
+                batch = np.array(data[i:i + batch_size])
 
                 self.optimizer.zero_grad()
 
@@ -504,7 +504,7 @@ class IQLAgent(BaseAgent):
                                                  f'no_policy_model_loss_{round(np.array(current_loss).mean(), 3)}.pt')
 
                     torch.save(self.net, new_save_path)
-                    if os.path.isfile(old_save_path):
+                    if os.path.isfile(old_save_path) and old_save_path != new_save_path:
                         os.remove(old_save_path)
 
                 old_qv_loss = np.array(current_loss).mean()
@@ -540,7 +540,7 @@ class IQLAgent(BaseAgent):
             current_loss = []
 
             for i in tqdm(range(0, len(data), batch_size)):
-                batch = data[i:i + batch_size]
+                batch = np.array(data[i:i + batch_size])
 
                 self.optimizer.zero_grad()
 
@@ -571,7 +571,7 @@ class IQLAgent(BaseAgent):
                     new_save_path = os.path.join(self.path, f'policy_model_loss_{round(np.array(current_loss).mean(), 3)}.pt')
 
                     torch.save(self.net, new_save_path)
-                    if os.path.isfile(old_save_path):
+                    if os.path.isfile(old_save_path) and old_save_path != new_save_path:
                         os.remove(old_save_path)
 
                 old_policy_loss = np.array(current_loss).mean()
