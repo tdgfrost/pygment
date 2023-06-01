@@ -439,7 +439,7 @@ class IQLAgent(BaseAgent):
 
         self._compiled = True
 
-    def train(self, data: list, epochs=1000, batch_size=64, gamma=0.99, tau=0.99, beta=1, save=False):
+    def train_qv(self, data: list, epochs=1000, batch_size=64, gamma=0.99, tau=0.99, save=False):
         """
         Variable 'data' should be a 1D list of Experiences - sorted or unsorted. The reward value should be the
         correct Q_s value for that state i.e., the cumulated discounted reward from that state onwards.
@@ -449,14 +449,13 @@ class IQLAgent(BaseAgent):
         self.method_check(env_loaded=True, net_exists=True, compiled=True)
         self._gamma = gamma
         self._tau = tau
-        self._beta = beta
         self._batch_size = batch_size
 
         if save:
             if not os.path.isdir(self.path):
                 os.makedirs(self.path)
 
-        # 1) Training the Q/V network
+        # Training the Q/V network
         print('Beginning training of Q/V networks...\n')
         old_qv_loss = 10 ** 10
         counter = 0
@@ -514,7 +513,24 @@ class IQLAgent(BaseAgent):
                     f'Epochs completed: {epoch}, Loss: {np.array(current_loss).mean()}, '
                     f'Loss_Q: {np.array(current_loss_q).mean()}, Loss_V: {np.array(current_loss_v).mean()}')
 
-        # 2) Training the policy network
+        print('Q/V training complete!')
+
+    def train_policy(self, data: list, epochs=1000, batch_size=64, beta=1, save=False):
+        """
+        Variable 'data' should be a 1D list of Experiences - sorted or unsorted. The reward value should be the
+        correct Q_s value for that state i.e., the cumulated discounted reward from that state onwards.
+        """
+        super().train(self._gamma)
+
+        self.method_check(env_loaded=True, net_exists=True, compiled=True)
+        self._beta = beta
+        self._batch_size = batch_size
+
+        if save:
+            if not os.path.isdir(self.path):
+                os.makedirs(self.path)
+
+        # Training the policy network
         print('Beginning training of policy network...\n')
         old_policy_loss = 10 ** 10
         counter = 0
@@ -551,19 +567,19 @@ class IQLAgent(BaseAgent):
                 counter = 0
                 backup_net = deepcopy(self.net)
                 if save:
-                    old_save_path = os.path.join(self.path, f'model_loss_{round(old_policy_loss, 3)}.pt')
-                    new_save_path = os.path.join(self.path, f'model_loss_{round(np.array(current_loss).mean(), 3)}.pt')
+                    old_save_path = os.path.join(self.path, f'policy_model_loss_{round(old_policy_loss, 3)}.pt')
+                    new_save_path = os.path.join(self.path, f'policy_model_loss_{round(np.array(current_loss).mean(), 3)}.pt')
 
                     torch.save(self.net, new_save_path)
                     if os.path.isfile(old_save_path):
                         os.remove(old_save_path)
-                    else:
-                        os.remove(os.path.join(self.path, f'no_policy_model_loss_{round(old_qv_loss, 3)}.pt'))
 
                 old_policy_loss = np.array(current_loss).mean()
 
                 print(
                     f'Epochs completed: {epoch}, Loss: {np.array(current_loss).mean()}')
+
+        print('Policy training complete!')
 
     def evaluate(self, episodes=100, parallel_envs=32):
 
@@ -770,6 +786,13 @@ class PPO(BaseAgent):
                                                      upper_clip if upper_clip is not None else clip))'''
 
         self._compiled = True
+
+    def choose_action(self, state, device='cpu'):
+        action_logits, state_value = self.net.forward(state, device=device)
+
+        action, _, _ = self.get_action_and_logprobs(action_logits)
+
+        return action.item()
 
     def get_action_and_logprobs(self, action_logits, action=None):
         action_probs = F.softmax(action_logits, dim=-1)

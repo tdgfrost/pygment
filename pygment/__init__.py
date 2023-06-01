@@ -21,14 +21,18 @@ def create_agent(agent_type='doubledqn', device='mps'):
     return agent_dict[agent_type.lower()]
 
 
-def animate(agent_instance, env_name, max_episode_steps=500, directory=None):
+def animate(agent_instance, env_name, max_episode_steps=500, directory=None, prefix=''):
     if directory is None:
         directory = agent_instance.path + '/videos'
 
     # agent_instance.net.to('mps')
 
     env = gym.make(env_name, render_mode='rgb_array', max_episode_steps=max_episode_steps)
-    env = gym.wrappers.RecordVideo(env, directory)
+    next_video = 0
+    for file in os.listdir(directory):
+        if file.endswith('.mp4'):
+            next_video += 1
+    env = gym.wrappers.RecordVideo(env, directory, name_prefix=f'{prefix}_video{next_video}')
     agent_instance.load_env(env)
     if type(env.action_space) == gym.spaces.discrete.Discrete:
         continuous = False
@@ -44,10 +48,15 @@ def animate(agent_instance, env_name, max_episode_steps=500, directory=None):
             action = torch.tanh(action).numpy()
         else:
             action = agent_instance.choose_action(state)
-        next_state, _, _, _, _ = agent_instance.env.step(action)
+        next_state, _, done, _, _ = agent_instance.env.step(action)
         state = next_state
 
     agent_instance.env.close()
+    for file in os.listdir(directory):
+        if file.endswith('.meta.json'):
+            os.remove(os.path.join(directory, file))
+        if file.endswith('-episode-0.mp4'):
+            os.rename(os.path.join(directory, file), os.path.join(directory, f'{prefix}_video{next_video}.mp4'))
 
 
 def animate_live(agent_instance, env_name, max_episode_steps=500):
@@ -60,6 +69,6 @@ def animate_live(agent_instance, env_name, max_episode_steps=500):
     agent_instance.env.render()
     while not done:
         action = agent_instance.net(state)[0].item()
-        next_state, reward, done, _, _ = agent_instance.env.step(action)
+        next_state, _, done, _, _ = agent_instance.env.step(action)
         state = next_state
         agent_instance.env.render()
