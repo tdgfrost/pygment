@@ -247,3 +247,9 @@ pygment/samples/LunarLander IQL/Experiment 2 - tau 0.9/100_video/IQL_reward_-21_
 pygment/samples/LunarLander IQL/Experiment 2 - tau 0.9/100_video/IQL_reward_-21_video9.mp4
 pygment/samples/LunarLander IQL/Experiment 2 - tau 0.9/no_policy_model_loss_172.816.pt
 pygment/samples/LunarLander IQL/Experiment 2 - tau 0.9/policy_model_loss_0.858.pt
+pygment/samples/CartPole IQL/CartPole IQL copy.py
+pygment/samples/CartPole IQL/2023_6_06_130051/value_389.pt
+pygment/samples/CartPole IQL/2023_6_06_130051/critic2_389.pt
+pygment/samples/CartPole IQL/2023_6_06_130051/critic1_389.pt
+pygment/samples/CartPole IQL/2023_6_06_130051/actor_389.pt
+pygment/samples/CartPole IQL/2023_6_06_130051/100_video/IQL_reward_370_video0.mp4
