@@ -60,18 +60,17 @@ class DualNet(BaseNet):
     Wrapper around model to create both a main_net and a target_net
     """
 
-    def __init__(self, has_dual=True):
+    def __init__(self):
         super().__init__()
         self.main_net = None
         self.target_net = None
-        self.has_dual = has_dual
         self.sync_tracker = 0
 
-    def sync(self, tau):
-        if not self.has_dual:
+    def sync(self, alpha=0.01):
+        if not self.has_net:
             return None
-        if isinstance(tau, int):
-            if self.sync_tracker == tau:
+        if isinstance(alpha, int):
+            if self.sync_tracker == alpha:
                 self.target_net.load_state_dict(self.main_net.state_dict())
                 self.sync_tracker = 0
             else:
@@ -79,22 +78,22 @@ class DualNet(BaseNet):
 
         else:
             for target_param, main_param in zip(self.target_net.parameters(), self.main_net.parameters()):
-                target_param.data.copy_(tau * main_param.data + (1.0 - tau) * target_param.data)
+                target_param.data.copy_(alpha * main_param.data + (1.0 - alpha) * target_param.data)
 
     def add_layers(self, nodes: list, env):
         if not self.env_is_discrete(env):
             raise TypeError('Action space is continuous, not discrete - please use a continuous policy')
 
         self.main_net = super().add_base_layers(nodes, env.observation_space.shape[0], env.action_space.n)
-        if self.has_dual:
-            self.target_net = deepcopy(self.main_net)
+        self.target_net = deepcopy(self.main_net)
+        self.has_net = True
 
     def forward(self, state, target=False, device='cpu'):
-        if not self.has_dual:
+        if not self.has_net:
             target = False
         net = self.target_net if target else self.main_net
 
-        Q_s = torch.tensor(state).to(device)
+        Q_s = torch.tensor(np.array(state)).to(device)
 
         for layer in net:
             Q_s = layer(Q_s)
@@ -138,6 +137,57 @@ class PolicyGradientNet(BaseNet, nn.Module):
                     break
 
         return action, action_probs, action_logprobs
+
+
+class CriticNet(BaseNet, nn.Module):
+    """
+    Wrapper for the Actor-Critic neural networks
+    """
+
+    def __init__(self):
+        super().__init__()
+        self.critic_net = None
+        self.has_net = False
+
+    def add_layers(self, nodes: list, env):
+        if not self.env_is_discrete(env):
+            raise TypeError('Action space is continuous, not discrete - please use a continuous policy')
+
+        self.critic_net = super().add_base_layers(nodes, env.observation_space.shape[0], 1)
+
+    def forward(self, state, device='cpu'):
+        state_value = torch.tensor(np.array(state)).to(device)
+
+        for layer_idx in range(len(self.critic_net)):
+            state_value = self.critic_net[layer_idx](state_value)
+
+        return state_value
+
+
+class ActorNet(BaseNet, nn.Module):
+    """
+    Wrapper around model to create both a main_net and a target_net
+    """
+
+    def __init__(self):
+        super().__init__()
+        self.actor_net = None
+        self.sync_tracker = 0
+
+    def add_layers(self, nodes: list, env):
+        if not self.env_is_discrete(env):
+            raise TypeError('Action space is continuous, not discrete - please use a continuous policy')
+
+        self.actor_net = super().add_base_layers(nodes, env.observation_space.shape[0], env.action_space.n)
+        self.has_net = True
+
+    def forward(self, state, device='cpu'):
+        logits = torch.tensor(np.array(state)).to(device)
+
+        for layer in self.actor_net:
+            logits = layer(logits)
+
+        return logits
 
 
 class ActorCriticNet(BaseNet, nn.Module):

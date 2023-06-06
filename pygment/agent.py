@@ -12,8 +12,9 @@ import os
 import shutil
 from copy import deepcopy
 from .actions import GreedyEpsilonSelector, calc_loss_batch, calc_loss_policy, calc_cum_rewards, \
-    calc_entropy_loss_policy, calc_loss_actor_critic, calc_iql_loss_batch, calc_iql_policy_loss_batch
-from .net import BaseNet, DualNet, ActorCriticNet, PolicyGradientNet, ActorCriticNetContinuous
+    calc_entropy_loss_policy, calc_loss_actor_critic, calc_iql_q_loss_batch, calc_iql_v_loss_batch, \
+    calc_iql_policy_loss_batch
+from .net import BaseNet, DualNet, ActorCriticNet, PolicyGradientNet, ActorCriticNetContinuous, CriticNet, ActorNet
 from .env import wrap_env
 from collections import deque
 import ray
@@ -406,49 +407,84 @@ class IQLAgent(BaseAgent):
 
     def __init__(self, device):
         super().__init__(device)
+        self._alpha = None
+        self.custom_params = None
         self._beta = None
         self._tau = None
-        self.net = ActorCriticNet()
+        self.critic = CriticNet()
+        self.actor1 = DualNet()
+        self.actor2 = DualNet()
+        self.policy = ActorNet()
+        self.net = self.actor1
         self._batch_size = None
 
     def reset(self):
         reset_done = super().reset()
 
         if reset_done:
-            self.net = ActorCriticNet()
+            self._alpha = None
+            self.custom_params = None
+            self._beta = None
+            self._tau = None
+            self.critic = CriticNet()
+            self.actor1 = DualNet()
+            self.actor2 = DualNet()
+            self.policy = ActorNet()
+            self.net = self.policy
             self._batch_size = None
-
-    '''
-    Feed the desired number of nodes and the associated input/output 
-    features to the DualNet network-generating method.
-    '''
 
     def add_network(self, nodes: list):
         super().network_check(nodes)
 
-        self.net.add_layers(nodes, self.env)
-        self.net.has_net = True
+        self.critic.add_layers(nodes, self.env)
+        self.actor1.add_layers(nodes, self.env)
+        self.actor2.add_layers(nodes, self.env)
+        self.policy.add_layers(nodes, self.env)
+        self.critic.has_net = True
+        self.actor1.has_net = True
+        self.actor2.has_net = True
+        self.policy.has_net = True
 
-    def compile(self, optimizer, learning_rate=0.001, weight_decay=1e-5):
+    def compile(self, optimizer, learning_rate=0.001, weight_decay=1e-5, clip=1.0, lower_clip=None, upper_clip=None):
         self._optimizer = optimizer
         self._learning_rate = learning_rate
         self._regularisation = weight_decay
         super().compile_check()
 
-        self.net.to(self.device)
+        self.critic.to(self.device)
+        self.actor1.main_net.to(self.device)
+        self.actor1.target_net.to(self.device)
+        self.actor2.main_net.to(self.device)
+        self.actor2.target_net.to(self.device)
+        self.policy.to(self.device)
+
+        for params in [self.critic.parameters(), self.actor1.main_net.parameters(), self.actor2.main_net.parameters(),
+                       self.policy.parameters()]:
+            for p in params:
+                p.register_hook(lambda grad: torch.clamp(grad,
+                                                         lower_clip if lower_clip is not None else -clip,
+                                                         upper_clip if upper_clip is not None else clip))
 
         self._compiled = True
 
-    def train_qv(self, data: list, epochs=1000, batch_size=64, gamma=0.99, tau=0.99, save=False):
+    def train_qv(self, data: list, epochs=1000, batch_size=64, gamma=0.99, tau=0.99, alpha=0.01, save=False):
         """
         Variable 'data' should be a 1D list of Experiences - sorted or unsorted. The reward value should be the
         correct Q_s value for that state i.e., the cumulated discounted reward from that state onwards.
         """
+        self.custom_params = []
 
-        super().train(gamma)
+        for params in [self.critic.parameters(), self.actor1.main_net.parameters(), self.actor2.main_net.parameters()]:
+            self.custom_params.append({'params': params,
+                                       'lr': self._learning_rate,
+                                       'weight_decay': self._regularisation})
+
+        super().train(gamma, custom_params=self.custom_params)
+
         self.method_check(env_loaded=True, net_exists=True, compiled=True)
         self._gamma = gamma
         self._tau = tau
+        self._alpha = alpha
         self._batch_size = batch_size
 
         if save:
@@ -457,61 +493,88 @@ class IQLAgent(BaseAgent):
 
         # Training the Q/V network
         print('Beginning training of Q/V networks...\n')
-        old_qv_loss = 10 ** 10
+        old_q_loss = torch.inf
+        old_v_loss = torch.inf
         counter = 0
-        backup_net = deepcopy(self.net)
+        backup_actor1 = deepcopy(self.actor1)
+        backup_actor2 = deepcopy(self.actor2)
+        backup_critic = deepcopy(self.critic)
         for epoch in range(1, epochs + 1):
             np.random.default_rng().shuffle(data)
-            current_loss = []
             current_loss_q = []
             current_loss_v = []
 
             for i in tqdm(range(0, len(data), batch_size)):
                 batch = np.array(data[i:i + batch_size])
 
+                # Calculate Q loss
+                loss_q1, loss_q2 = calc_iql_q_loss_batch(batch, self.device, self.actor1, self.actor2, self.critic,
+                                                         self._gamma)
+
+                # Calculate V loss
+                loss_v = calc_iql_v_loss_batch(batch, self.device, self.actor1, self.actor2, self.critic, self._tau)
+
+                # Update Networks
                 self.optimizer.zero_grad()
-
-                loss_q, loss_v = calc_iql_loss_batch(batch, self.device, self.net, self._gamma, self._tau)
-
-                loss = loss_q + loss_v
-                loss.backward()
+                loss_q1.backward()
+                loss_q2.backward()
+                loss_v.backward()
                 self.optimizer.step()
 
-                current_loss.append(loss.item())
-                current_loss_q.append(loss_q.item())
+                # Soft update of target networks
+                self.actor1.sync(alpha=self._alpha)
+                self.actor2.sync(alpha=self._alpha)
+
+                # Save losses
+                current_loss_q.append(loss_q1.item() + loss_q2.item())
                 current_loss_v.append(loss_v.item())
 
-            if np.array(current_loss).mean() > old_qv_loss:
+            #if np.array(current_loss_q).mean() > old_q_loss and np.array(current_loss_v).mean() > old_v_loss:
+            if False:
                 counter += 1
-                if counter == 5:
-                    self.net = deepcopy(backup_net)
-                    self.optimizer = self._optimizers[self._optimizer](self.net.parameters(), lr=self._learning_rate,
-                                                                       weight_decay=self._regularisation)
-                    print(f'Epoch {epoch}: Loss has increased from {old_qv_loss} to {np.array(current_loss).mean()} five times in a row. '
-                          f'Loss_Q: {np.array(current_loss_q).mean()}, Loss_V: {np.array(current_loss_v).mean()}\n'
-                          f'Reverting to old net and stopping Q/V training.')
+                if counter == 15:
+                    self.actor1 = deepcopy(backup_actor1)
+                    self.actor2 = deepcopy(backup_actor2)
+                    self.critic = deepcopy(backup_critic)
+                    self.optimizer = self._optimizers[self._optimizer](self.custom_params)
+                    print(
+                        f'Epoch {epoch}: \nQ_loss increased from {round(old_q_loss, 5)} to {round(np.array(current_loss_q).mean(), 5)}\n'
+                        f'V_loss increased from {round(old_v_loss, 5)} to {round(np.array(current_loss_v).mean(), 5)}\n'
+                        f'Reverting to old net and stopping Q/V training.')
                     break
                 else:
                     print(
-                        f'Epoch {epoch}: Loss has increased from {old_qv_loss} to {np.array(current_loss).mean()}. '
-                        f'Loss_Q: {np.array(current_loss_q).mean()}, Loss_V: {np.array(current_loss_v).mean()}')
+                        f'Epoch {epoch}: \nQ_loss increased from {round(old_q_loss, 5)} to {round(np.array(current_loss_q).mean(), 5)}\n'
+                        f'V_loss increased from {round(old_v_loss, 5)} to {round(np.array(current_loss_v).mean(), 5)}')
             else:
                 counter = 0
-                backup_net = deepcopy(self.net)
-                if save:
-                    old_save_path = os.path.join(self.path, f'no_policy_model_loss_{round(old_qv_loss, 3)}.pt')
-                    new_save_path = os.path.join(self.path,
-                                                 f'no_policy_model_loss_{round(np.array(current_loss).mean(), 3)}.pt')
-
-                    torch.save(self.net, new_save_path)
-                    if os.path.isfile(old_save_path) and old_save_path != new_save_path:
-                        os.remove(old_save_path)
-
-                old_qv_loss = np.array(current_loss).mean()
-
+                backup_actor1 = deepcopy(self.actor1)
+                backup_actor2 = deepcopy(self.actor2)
+                backup_critic = deepcopy(self.critic)
+                print(f'Epochs completed: {epoch}\n')
                 print(
-                    f'Epochs completed: {epoch}, Loss: {np.array(current_loss).mean()}, '
-                    f'Loss_Q: {np.array(current_loss_q).mean()}, Loss_V: {np.array(current_loss_v).mean()}')
+                    f'Q_loss {"decreased" if np.array(current_loss_q).mean() < old_q_loss else "increased"} '
+                    f'from {round(old_q_loss, 5)} to {round(np.array(current_loss_q).mean(), 5)}'
+                )
+                print(
+                    f'V_loss {"decreased" if np.array(current_loss_v).mean() < old_v_loss else "increased"} '
+                    f'from {round(old_v_loss, 5)} to {round(np.array(current_loss_v).mean(), 5)}'
+                )
+
+                if save:
+                    for net, name in [[self.actor1.target_net, 'actor1_target'],
+                                      [self.actor2.target_net, 'actor2_target'],
+                                      [self.critic, 'critic']]:
+                        old_save_path = os.path.join(self.path, f'{name}_{round(old_q_loss, 5)}.pt')
+                        new_save_path = os.path.join(self.path,
+                                                     f'{name}_{round(np.array(current_loss_q).mean(), 5)}.pt')
+
+                        torch.save(net, new_save_path)
+                        if os.path.isfile(old_save_path) and old_save_path != new_save_path:
+                            os.remove(old_save_path)
+
+                old_q_loss = np.array(current_loss_q).mean()
+                old_v_loss = np.array(current_loss_v).mean()
 
         print('Q/V training complete!')
 
@@ -520,7 +583,13 @@ class IQLAgent(BaseAgent):
         Variable 'data' should be a 1D list of Experiences - sorted or unsorted. The reward value should be the
         correct Q_s value for that state i.e., the cumulated discounted reward from that state onwards.
         """
-        super().train(self._gamma)
+        self.custom_params = []
+
+        self.custom_params.append({'params': self.policy.parameters(),
+                                   'lr': self._learning_rate,
+                                   'weight_decay': self._regularisation})
+
+        super().train(self._gamma, custom_params=self.custom_params)
 
         self.method_check(env_loaded=True, net_exists=True, compiled=True)
         self._beta = beta
@@ -532,9 +601,9 @@ class IQLAgent(BaseAgent):
 
         # Training the policy network
         print('Beginning training of policy network...\n')
-        old_policy_loss = 10 ** 10
+        old_policy_loss = torch.inf
         counter = 0
-        backup_net = deepcopy(self.net)
+        backup_policy = deepcopy(self.policy)
         for epoch in range(1, epochs + 1):
             np.random.default_rng().shuffle(data)
             current_loss = []
@@ -542,58 +611,61 @@ class IQLAgent(BaseAgent):
             for i in tqdm(range(0, len(data), batch_size)):
                 batch = np.array(data[i:i + batch_size])
 
+                loss = calc_iql_policy_loss_batch(batch, self.device, self.actor1, self.actor2, self.critic,
+                                                  self.policy, self._beta)
+
                 self.optimizer.zero_grad()
-
-                loss = calc_iql_policy_loss_batch(batch, self.device, self.net, self._beta)
-
                 loss.backward()
                 self.optimizer.step()
 
                 current_loss.append(loss.item())
 
-            if np.array(current_loss).mean() > old_policy_loss:
+            #if np.array(current_loss).mean() > old_policy_loss:
+            if False:
                 counter += 1
                 if counter == 5:
-                    self.net = deepcopy(backup_net)
-                    self.optimizer = self._optimizers[self._optimizer](self.net.parameters(), lr=self._learning_rate,
-                                                                       weight_decay=self._regularisation)
-                    print(f'Epoch {epoch}: Loss has increased from {old_policy_loss} to {np.array(current_loss).mean()} five times in a row. \n'
-                          f'Reverting to old net and ending policy training.')
+                    self.policy = deepcopy(backup_policy)
+                    self.optimizer = self._optimizers[self._optimizer](self.custom_params)
+                    print(
+                        f'Epoch {epoch}: Loss has increased from {round(old_policy_loss, 5)} to {round(np.array(current_loss).mean(), 5)} five times in a row. \n'
+                        f'Reverting to old net and ending policy training.')
                     break
                 else:
                     print(
-                        f'Epoch {epoch}: Loss has increased from {old_policy_loss} to {np.array(current_loss).mean()}.')
+                        f'Epoch {epoch}: Loss has increased from {round(old_policy_loss, 5)} to {round(np.array(current_loss).mean(), 5)}.')
             else:
                 counter = 0
-                backup_net = deepcopy(self.net)
+                backup_policy = deepcopy(self.policy)
+                #if np.array(current_loss).mean() < old_policy_loss:
                 if save:
-                    old_save_path = os.path.join(self.path, f'policy_model_loss_{round(old_policy_loss, 3)}.pt')
-                    new_save_path = os.path.join(self.path, f'policy_model_loss_{round(np.array(current_loss).mean(), 3)}.pt')
+                    for net, name in [[self.policy, 'policy']]:
+                        old_save_path = os.path.join(self.path, f'policy_loss_{name}_{round(old_policy_loss, 5)}.pt')
+                        new_save_path = os.path.join(self.path,
+                                                     f'policy_loss_{name}_{round(np.array(current_loss).mean(), 5)}.pt')
 
-                    torch.save(self.net, new_save_path)
-                    if os.path.isfile(old_save_path) and old_save_path != new_save_path:
-                        os.remove(old_save_path)
+                        torch.save(net, new_save_path)
+                        if os.path.isfile(old_save_path) and old_save_path != new_save_path:
+                            os.remove(old_save_path)
 
                 old_policy_loss = np.array(current_loss).mean()
 
-                print(
-                    f'Epochs completed: {epoch}, Loss: {np.array(current_loss).mean()}')
+                print(f'Epochs completed: {epoch}, Loss: {round(np.array(current_loss).mean(), 5)}')
 
         print('Policy training complete!')
 
     def evaluate(self, episodes=100, parallel_envs=32):
 
         @ray.remote
-        def env_run(predict_net):
+        def env_run(policy):
             done = False
             prem_done = False
             state = self.env.reset()[0]
             ep_record = []
             while not done and not prem_done:
                 with torch.no_grad():
-                    Q_s, _ = predict_net.forward(state, device='cpu')
+                    logits = policy.forward(state, device='cpu')
 
-                action = torch.argmax(Q_s)
+                action = torch.argmax(logits)
 
                 next_state, reward, done, prem_done, _ = self.env.step(action.item())
 
@@ -617,7 +689,7 @@ class IQLAgent(BaseAgent):
         print(f'Beginning evaluation over {episodes} episodes...\n')
         for episode in tqdm(range(episodes // parallel_envs)):
             temp_batch_records, temp_total_reward = zip(
-                *ray.get([env_run.remote(self.net.cpu()) for _ in range(parallel_envs)]))
+                *ray.get([env_run.remote(self.policy.cpu()) for _ in range(parallel_envs)]))
 
             temp_batch_states, temp_batch_actions, temp_batch_rewards, temp_batch_next_states = zip(
                 *[(exp.state, exp.action, exp.reward, exp.next_state)
@@ -636,11 +708,36 @@ class IQLAgent(BaseAgent):
 
     def choose_action(self, state, device='cpu'):
         with torch.no_grad():
-            Q_s, _ = self.net.forward(state, device=device)
+            logits = self.policy.forward(state, device=device)
 
-        action = torch.argmax(Q_s)
+        action = torch.argmax(logits)
 
         return action.item()
+
+    def load_model(self, actorpath1=None, actorpath2=None, criticpath=None, policypath=None):
+        if actorpath1 is not None:
+            self.actor1.main_net = torch.load(actorpath1)
+            self.actor1.target_net = torch.load(actorpath1)
+            self.actor1.has_net = True
+        if actorpath2 is not None:
+            self.actor2.main_net = torch.load(actorpath2)
+            self.actor2.target_net = torch.load(actorpath2)
+            self.actor2.has_net = True
+        if criticpath is not None:
+            self.critic = torch.load(criticpath)
+            self.critic.has_net = True
+        if policypath is not None:
+            self.policy = torch.load(policypath)
+            self.policy.has_net = True
+
+        if self._compiled:
+            self._compiled = False
+            self._optimizer = None
+            self._learning_rate = None
+            self._regularisation = None
+            print('Model loaded - recompile agent please')
+
+        self.path = os.path.dirname(actorpath1)
 
 
 class PolicyGradient(BaseAgent):
@@ -981,7 +1078,8 @@ class PPO(BaseAgent):
                 ep_record.append(Experience(state=state,
                                             action=action,
                                             reward=reward,
-                                            next_state=next_state))
+                                            next_state=next_state,
+                                            done=done))
 
                 state = next_state
 
@@ -994,24 +1092,26 @@ class PPO(BaseAgent):
         all_rewards = []
         all_cum_rewards = []
         all_next_states = []
+        all_dones = []
 
         print(f'Beginning exploration over {episodes} episodes...')
         for episode in tqdm(range(episodes // parallel_envs)):
             temp_batch_records, temp_batch_Qs = zip(
                 *ray.get([env_run.remote(self.net.cpu()) for _ in range(parallel_envs)]))
 
-            temp_batch_states, temp_batch_actions, temp_batch_rewards, temp_batch_next_states = zip(
-                *[(exp.state, exp.action, exp.reward, exp.next_state)
+            temp_batch_states, temp_batch_actions, temp_batch_rewards, temp_batch_next_states,\
+                temp_batch_dones = zip(*[(exp.state, exp.action, exp.reward, exp.next_state, exp.done)
                   for episode in temp_batch_records for exp in episode])
 
             all_states += list(temp_batch_states)
             all_actions += list(temp_batch_actions)
             all_rewards += list(temp_batch_rewards)
             all_next_states += list(temp_batch_next_states)
+            all_dones += list(temp_batch_dones)
             all_cum_rewards += list([Q_s for episode in temp_batch_Qs for Q_s in episode])
 
         return np.array(all_states), np.array(all_actions), np.array(all_rewards), \
-            np.array(all_next_states), np.array(all_cum_rewards)
+            np.array(all_next_states), np.array(all_dones), np.array(all_cum_rewards)
 
 
 class PPOContinuous(BaseAgent):
