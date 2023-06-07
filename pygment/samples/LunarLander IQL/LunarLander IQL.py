@@ -4,7 +4,7 @@ import numpy as np
 
 #for template_reward in [20, 30, 50, 100, 130, 150, 200, 220]:
 for template_reward in [130]:
-    train_new_model = False
+    load_prior_model = False
     animate_only = False
     # template_reward = 100
 
@@ -13,11 +13,11 @@ for template_reward in [130]:
     agent.load_env(env)
 
     agent.add_network(nodes=[64, 64])
-    if not train_new_model:
-        agent.load_model(actorpath1='./2023_6_05_164504/actor1_target_4489.34731.pt',
-                         actorpath2='./2023_6_05_164504/actor2_target_4489.34731.pt',
-                         criticpath='./2023_6_05_164504/critic_4489.34731.pt',
-                         policypath='./2023_6_05_164504/policy_loss_policy_0.84957.pt')
+    if load_prior_model:
+        agent.load_model(criticpath1='',
+                         criticpath2='',
+                         valuepath='',
+                         policypath='')
 
     agent.compile('adam', learning_rate=0.01, weight_decay=1e-8, clip=1)
 
@@ -35,10 +35,10 @@ for template_reward in [130]:
                           next_state=loaded_data['next_state'][i],
                           done=loaded_data['dones'][i]) for i in range(len(loaded_data['state']))]
 
-    #agent.train_qv(data, epochs=1000, batch_size=512, gamma=0.99, tau=0.9, alpha=0.01, save=True)
-    #agent.train_policy(data, epochs=1000, batch_size=512, beta=0.001, save=True)
-    _, _, _, _, rewards = agent.evaluate(episodes=100)
+    agent.train(data, critic=True, value=True, actor=True, evaluate=True, steps=1e6, batch_size=64,
+                gamma=0.99, tau=0.9, alpha=0.005, beta=3, save=True)
 
+    _, _, _, _, rewards = agent.evaluate(episodes=100)
     for _ in range(10):
         pm.animate(agent, 'LunarLander-v2', max_episode_steps=500, directory=agent.path+f'/{template_reward}_video',
                    prefix=f'IQL_reward_{int(rewards.mean())}')

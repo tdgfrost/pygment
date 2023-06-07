@@ -512,7 +512,7 @@ class IQLAgent(BaseAgent):
             ray.init()
 
         # Start training
-        print('Beginning training of Q/V networks...\n')
+        print('Beginning training...\n')
         progress_bar = tqdm(range(1, int(steps) + 1), file=sys.stdout)
         for step in progress_bar:
             batch = self.sample(data, batch_size)
@@ -526,7 +526,8 @@ class IQLAgent(BaseAgent):
             current_loss_policy.append(loss_policy)
 
             if step % 100 == 0:
-                _, _, _, _, total_rewards = self.evaluate(episodes=100, parallel_envs=16, verbose=False) if evaluate else None
+                _, _, _, _, total_rewards = self.evaluate(episodes=100, parallel_envs=16,
+                                                          verbose=False) if evaluate else None
 
                 print(f'\nSteps completed: {step}\n')
                 if critic:
@@ -550,7 +551,7 @@ class IQLAgent(BaseAgent):
                         f'from {int(old_average_reward)} to {int(total_rewards.mean())}'
                     )
                     print(
-                        f'Best reward {max(current_best_reward, total_rewards.mean())}'
+                        f'Best reward {max(current_best_reward, int(total_rewards.mean()))}'
                     )
 
                 if total_rewards.mean() > current_best_reward:
@@ -568,7 +569,7 @@ class IQLAgent(BaseAgent):
                             if os.path.isfile(old_save_path) and old_save_path != new_save_path:
                                 os.remove(old_save_path)
 
-                    current_best_reward = total_rewards.mean()
+                    current_best_reward = int(total_rewards.mean())
 
                 old_q_loss = np.array(current_loss_q).mean()
                 old_v_loss = np.array(current_loss_v).mean()
@@ -681,10 +682,37 @@ class IQLAgent(BaseAgent):
             all_next_states += list(temp_batch_next_states)
             all_total_rewards += list(temp_total_reward)
 
-        print(f'Evaluation complete! Average reward per episode: {np.array(all_total_rewards).mean()}') if verbose else None
+        print(
+            f'Evaluation complete! Average reward per episode: {np.array(all_total_rewards).mean()}') if verbose else None
 
         return np.array(all_states), np.array(all_actions), np.array(all_rewards), \
             np.array(all_next_states), np.array(all_total_rewards)
+
+    def evaluate_offline(self, data, episodes=100, parallel_envs=32, verbose=True):
+
+        dones = np.array([exp.done for exp in data])
+        episode_idxs = np.where(dones)[0] + 1
+        episode_idxs = episode_idxs.tolist()
+        episode_idxs.insert(0, 0)
+        episode_idxs = np.array(episode_idxs)
+        episode_idxs = [slice(i, j) for i, j in zip(episode_idxs[:-1], episode_idxs[1:])]
+        np.random.default_rng().shuffle(episode_idxs)
+
+        for ep_idx in episode_idxs[:episodes]:
+            p = 1.0
+            h = []
+            t = 0
+            r = 0
+            for exp in data[ep_idx]:
+                h.append(exp.state)
+                logits = self.actor.forward(exp.state, device='cpu')
+                actionprobs = F.softmax(logits)[exp.action]
+                p *= actionprobs
+
+
+        # return np.array(all_states), np.array(all_actions), np.array(all_rewards), \
+        # np.array(all_next_states), np.array(all_total_rewards)
+        return
 
     def choose_action(self, state, device='cpu'):
         with torch.no_grad():
@@ -1079,9 +1107,9 @@ class PPO(BaseAgent):
             temp_batch_records, temp_batch_Qs = zip(
                 *ray.get([env_run.remote(self.net.cpu()) for _ in range(parallel_envs)]))
 
-            temp_batch_states, temp_batch_actions, temp_batch_rewards, temp_batch_next_states,\
+            temp_batch_states, temp_batch_actions, temp_batch_rewards, temp_batch_next_states, \
                 temp_batch_dones = zip(*[(exp.state, exp.action, exp.reward, exp.next_state, exp.done)
-                  for episode in temp_batch_records for exp in episode])
+                                         for episode in temp_batch_records for exp in episode])
 
             all_states += list(temp_batch_states)
             all_actions += list(temp_batch_actions)

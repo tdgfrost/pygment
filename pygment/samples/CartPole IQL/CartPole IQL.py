@@ -18,7 +18,7 @@ for template_reward in [100]:
                          valuepath='./2023_6_06_130051/value_389.pt',
                          actorpath='./2023_6_06_130051/actor_389.pt')
 
-    agent.compile('adam', learning_rate=0.01)
+    agent.compile('adam', learning_rate=0.01, clip=0.1)
 
     data_path = f'../GenerateStaticDataset/CartPole/{template_reward} reward'
 
@@ -38,7 +38,7 @@ for template_reward in [100]:
                           done=loaded_data['dones'][i]) for i in range(len(loaded_data['state']))]
 
     agent.train(data, critic=True, value=True, actor=True, evaluate=True, steps=1e6, batch_size=64,
-                gamma=0.99, tau=0.8, alpha=0.005, beta=0.3, save=True)
+                gamma=0.99, tau=0.99, alpha=0.005, beta=1, save=True)
 
     _, _, _, _, rewards = agent.evaluate(episodes=100)
 

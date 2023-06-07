@@ -181,7 +181,12 @@ def calc_iql_policy_loss_batch(batch, device, actor1, actor2, critic, policy, be
         pred_V_s = critic.forward(states, device=device).squeeze(1)
 
     # Calculate the policy loss
+
     loss = torch.exp(beta * (pred_Q - pred_V_s)) * action_logprobs
     loss = -loss.mean()
+    """
+    # EXPERIMENTAL - trying to use PPO-like clipping to make policy training more stable
+    loss = min(torch.exp(beta * (pred_Q - pred_V_s)) * action_logprobs)
+    """
 
     return loss
