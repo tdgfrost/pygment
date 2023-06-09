@@ -136,29 +136,44 @@ def calc_iql_v_loss_batch(batch, device, actor1, actor2, critic, tau):
 
 def calc_iql_q_loss_batch(batch, device, critic1, critic2, value, gamma):
     # Unpack the batch
-    states, actions, reward, next_states, dones = zip(*[(exp.state, exp.action, exp.reward,
-                                                         exp.next_state, exp.done) for exp in batch])
+    states, actions, reward, next_states, next_actions, dones = zip(*[(exp.state, exp.action, exp.reward,
+                                                                       exp.next_state, exp.next_action, exp.done) for
+                                                                      exp in batch])
 
     # Calculate Q(s,a) for each state in the batch
     pred_Q1 = critic1.forward(states, target=False, device=device)
-    pred_Q1 = pred_Q1.gather(1, torch.tensor(actions).to(device).unsqueeze(-1)).squeeze(-1)
+    pred_Q1_choice = pred_Q1.gather(1, torch.tensor(actions).to(device).unsqueeze(-1)).squeeze(-1)
     pred_Q2 = critic2.forward(states, target=False, device=device)
-    pred_Q2 = pred_Q2.gather(1, torch.tensor(actions).to(device).unsqueeze(-1)).squeeze(-1)
+    pred_Q2_choice = pred_Q2.gather(1, torch.tensor(actions).to(device).unsqueeze(-1)).squeeze(-1)
 
+    """
     # Calculate V(s') for each state in the batch
     with torch.no_grad():
         pred_V_s = value.forward(next_states, device=device).squeeze(-1)
         pred_V_s = torch.where(~torch.tensor(dones).to(device), pred_V_s, torch.zeros_like(pred_V_s))
+    """
+    # Calculate Q'(s',a') for the next state in the batch
+    with torch.no_grad():
+        pred_Q1_next = critic1.forward(next_states, target=True, device=device)
+        pred_Q1_next_choice = pred_Q1_next.gather(1, torch.tensor(next_actions).to(device).unsqueeze(-1)).squeeze(-1)
+        pred_Q2_next = critic2.forward(next_states, target=True, device=device)
+        pred_Q2_next_choice = pred_Q2_next.gather(1, torch.tensor(next_actions).to(device).unsqueeze(-1)).squeeze(-1)
+        pred_Q_next_choice = torch.min(pred_Q1_next_choice, pred_Q2_next_choice)
+        pred_Q_next_choice = torch.where(~torch.tensor(dones).to(device), pred_Q_next_choice,
+                                         torch.zeros_like(pred_Q_next_choice))
 
     # Calculate loss_q
-    target_q = torch.tensor(reward, dtype=torch.float32).to(device) + gamma * pred_V_s
-    loss_q1 = F.mse_loss(pred_Q1, target_q)
-    loss_q2 = F.mse_loss(pred_Q2, target_q)
+    # target_q = torch.tensor(reward, dtype=torch.float32).to(device) + gamma * pred_V_s
+    target_q = torch.tensor(reward, dtype=torch.float32).to(device) + gamma * pred_Q_next_choice
+
+    loss_q1 = F.mse_loss(pred_Q1_choice, target_q)
+    loss_q2 = F.mse_loss(pred_Q2_choice, target_q)
 
     return loss_q1, loss_q2
 
 
-def calc_iql_policy_loss_batch(batch, device, actor1, actor2, critic, policy, beta):
+def calc_iql_policy_loss_batch(batch, device, actor1, actor2, critic, policy, old_action_logprobs, beta,
+                               ppo_clip):
     # Unpack the batch
     states, actions = zip(*[(exp.state, exp.action) for exp in batch])
 
@@ -180,9 +195,52 @@ def calc_iql_policy_loss_batch(batch, device, actor1, actor2, critic, policy, be
     with torch.no_grad():
         pred_V_s = critic.forward(states, device=device).squeeze(1)
 
-    # Calculate the policy loss
+    # Calculate Advantage
+    advantage = pred_Q - pred_V_s
+    advantage = (advantage - advantage.mean()) / (torch.max(advantage.std() + 1e-8))
+    advantage = torch.exp(beta * advantage)
 
-    loss = torch.exp(beta * (pred_Q - pred_V_s)) * action_logprobs
+    # Calculate the policy loss
+    ratio = torch.exp(action_logprobs - old_action_logprobs) - 1
+    clipped_ratio_pos_adv = torch.clamp(ratio, min=-ppo_clip)
+    clipped_ratio_neg_adv = torch.clamp(ratio, max=ppo_clip)
+    """
+    The goal of the PPO-like loss function is the following:
+    - We always want to trend towards a positive ratio, because that means we are moving in the direction of the
+    behavioural policy.
+    - So when the ratio is positive, the loss (which gets inverted) should be positive.
+    - And when the ratio is negative, the loss (which gets inverted) should be negative.
+    
+    - We prefer to make strong moves when the advantage is positive (i.e., >1) and the ratio is positive.
+    This is expressed as a large positive loss, which is good.
+    
+    - We prefer to make strong moves when the advantage is negative (i.e., <1) and the ratio is negative.
+    This is expressed as a small negative loss (because the bigger the negative advantage, the closer the value is to 0).
+    
+    - We prefer to make weak moves when the advantage is positive (i.e., >1) and the ratio is negative.
+    If we clip the ratio to avoid large negative ratios, then the overall loss will be negative but small.
+    
+    - We prefer to make weak moves when the advantage is negative (i.e., <1) and the ratio is positive.
+    If we clip the ratio to avoid large positive ratios, then the overall loss will be positive but small.
+    
+    So, in summary:
+    1. Positive ratio, positive advantage -> positive loss (which gets inverted i.e., is good)
+    2. Negative ratio, positive advantage -> negative loss, clipped and small (which gets inverted i.e., is bad)
+    
+    3. Positive ratio, negative advantage -> positive loss, but clipped and small (which gets inverted i.e., is good)
+    4. Negative ratio, negative advantage -> negative loss (which gets inverted i.e., is bad)
+    """
+    loss = torch.where(advantage > 1,
+                       # When advantage is positive, ratio will be pos or neg.
+                       # If ratio is positive, then loss is positive i.e., ratio * advantage.
+                       # If ratio is negative, clip at -0.2, and loss is negative i.e., clipped(ratio) * advantage
+                       torch.max(ratio, clipped_ratio_pos_adv) * advantage,
+                       # When advantage is negative, ratio will be pos or neg.
+                       # If ratio is positive, then loss is positive but clipped i.e., clipped(ratio) * advantage
+                       # If ratio is negative, then loss is negative i.e., ratio * advantage
+                       torch.min(ratio, clipped_ratio_neg_adv) * advantage)
+
+    # loss = torch.exp(beta * (pred_Q - pred_V_s)) * action_logprobs
     loss = -loss.mean()
 
-    return loss
+    return loss, action_logprobs

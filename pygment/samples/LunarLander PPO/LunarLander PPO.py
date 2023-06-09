@@ -3,16 +3,16 @@ import gymnasium as gym
 import torch
 import os
 
-train_new_model = False
+load_prior_model = False
 animate_only = True
 
 env = gym.make('LunarLander-v2', max_episode_steps=500)
 agent = pm.create_agent('ppo')
 agent.load_env(env)
-if train_new_model:
-    agent.add_network(nodes=[64, 64])
-else:
-    agent.load_model()
+
+agent.add_network(nodes=[64, 64])
+if load_prior_model:
+    agent.load_model('/Users/thomasfrost/Documents/Github/pygment/pygment/pygment/samples/LunarLander PPO/2023_6_01_120242/model_150.pt')
 
 agent.compile('adam', learning_rate=0.01)
 

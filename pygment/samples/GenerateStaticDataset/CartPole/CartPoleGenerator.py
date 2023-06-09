@@ -3,10 +3,9 @@ import gymnasium as gym
 import numpy as np
 import os
 
-for target_reward in [100]:
+for target_reward in [100, 200]:
     env = gym.make('CartPole-v1', max_episode_steps=3000)
     agent = pm.create_agent('PPO', 'cpu')
-    #target_reward = 100
     agent.load_env(env)
     agent.load_model(f'/Users/thomasfrost/Documents/Github/pygment/pygment/pygment/samples/CartPole PPO/2023_5_30_140032/model_{target_reward}.pt')
 
@@ -15,10 +14,12 @@ for target_reward in [100]:
     if not os.path.isdir(f'./{target_reward} reward'):
         os.makedirs(f'./{target_reward} reward')
 
-    all_states, all_actions, all_rewards, all_next_states, all_dones, all_cum_rewards = agent.explore(episodes=10000, parallel_envs=32)
+    all_states, all_actions, all_rewards, all_next_states, all_next_actions, \
+        all_dones, all_cum_rewards = agent.explore(episodes=10000, parallel_envs=32)
 
     for array, name in [[all_states, 'all_states.npy'], [all_actions, 'all_actions.npy'],
                         [all_rewards, 'all_rewards.npy'], [all_next_states, 'all_next_states.npy'],
-                        [all_dones, 'all_dones.npy'], [all_cum_rewards, 'all_cum_rewards.npy']]:
+                        [all_next_actions, 'all_next_actions.npy'], [all_dones, 'all_dones.npy'],
+                        [all_cum_rewards, 'all_cum_rewards.npy']]:
         np.save(f'./{target_reward} reward/{name}', array)
 

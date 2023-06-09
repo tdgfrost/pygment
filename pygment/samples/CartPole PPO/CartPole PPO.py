@@ -1,15 +1,15 @@
 import pygment as pm
 import gymnasium as gym
 
-train_new_model = False
-animate_only = True
+load_prior_model = False
+animate_only = False
 
 env = gym.make('CartPole-v1', max_episode_steps=3000)
 agent = pm.create_agent('PPO', 'cpu')
 agent.load_env(env)
-if train_new_model:
-    agent.add_network(nodes=[64, 64])
-else:
+
+agent.add_network(nodes=[64, 64])
+if load_prior_model:
     agent.load_model()
 
 agent.compile('adam', learning_rate=0.001)

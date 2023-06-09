@@ -2,6 +2,8 @@ from .agent import DQNAgent, PolicyGradient, PPO, PPOContinuous, IQLAgent, Exper
 import gymnasium as gym
 import os
 import torch
+import os
+os.environ["IMAGEIO_FFMPEG_EXE"] = "/opt/homebrew/bin/ffmpeg"
 
 
 def create_agent(agent_type='doubledqn', device='mps'):

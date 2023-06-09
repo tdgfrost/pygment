@@ -25,7 +25,7 @@ for template_reward in [100]:
     loaded_data = {}
     for key, filename in [['state', 'all_states.npy'], ['actions', 'all_actions.npy'],
                           ['rewards', 'all_rewards.npy'], ['next_state', 'all_next_states.npy'],
-                          ['dones', 'all_dones.npy']]:
+                          ['next_action', 'all_next_actions.npy'], ['dones', 'all_dones.npy']]:
         loaded_data[key] = np.load(data_path + '/' + filename)
 
     # Reduce scale of the rewards
@@ -35,10 +35,11 @@ for template_reward in [100]:
                           action=loaded_data['actions'][i],
                           reward=loaded_data['rewards'][i],
                           next_state=loaded_data['next_state'][i],
+                          next_action=loaded_data['next_action'][i],
                           done=loaded_data['dones'][i]) for i in range(len(loaded_data['state']))]
 
     agent.train(data, critic=True, value=True, actor=True, evaluate=True, steps=1e6, batch_size=64,
-                gamma=0.99, tau=0.99, alpha=0.005, beta=1, save=True)
+                gamma=0.99, tau=0.99, alpha=0.005, beta=3, save=True)
 
     _, _, _, _, rewards = agent.evaluate(episodes=100)
 

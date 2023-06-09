@@ -474,7 +474,7 @@ class IQLAgent(BaseAgent):
         return data[:batch_size]
 
     def train(self, data, critic=True, value=True, actor=True, evaluate=True, steps=1000, batch_size=64,
-              gamma=0.99, tau=0.99, alpha=0.01, beta=1, save=False):
+              gamma=0.99, tau=0.99, alpha=0.01, beta=1, update_iter=4, ppo_clip=0.01, ppo_clip_decay=0.9, save=False):
         """
         Variable 'data' should be a 1D list of Experiences - sorted or unsorted. The reward value should be the
         correct Q_s value for that state i.e., the cumulated discounted reward from that state onwards.
@@ -501,15 +501,15 @@ class IQLAgent(BaseAgent):
         old_q_loss = torch.inf
         old_v_loss = torch.inf
         old_policy_loss = torch.inf
-        old_average_reward = 0
+        old_average_reward = -10**10
         current_loss_q = []
         current_loss_v = []
         current_loss_policy = []
-        current_best_reward = 0
+        current_best_reward = -10**10
 
         # If evaluating, start ray instance
-        if evaluate:
-            ray.init()
+        # if evaluate:
+        # ray.init()
 
         # Start training
         print('Beginning training...\n')
@@ -519,7 +519,8 @@ class IQLAgent(BaseAgent):
 
             loss_q = self._update_q(batch, gamma, alpha) if critic else None
             loss_v = self._update_v(batch, tau) if value else None
-            loss_policy = self._update_policy(batch, beta) if actor else None
+            loss_policy = self._update_policy(batch, beta, update_iter, ppo_clip) if actor else None
+            ppo_clip *= ppo_clip_decay
 
             current_loss_q.append(loss_q)
             current_loss_v.append(loss_v)
@@ -617,12 +618,12 @@ class IQLAgent(BaseAgent):
 
         return loss_v.item()
 
-    def _update_policy(self, batch: list, beta=1):
+    def _update_policy(self, batch: list, beta=1, update_iter=4, ppo_clip=0.01):
         """
         Variable 'batch' should be a 1D list of Experiences - sorted or unsorted. The reward value should be the
         correct Q_s value for that state i.e., the cumulated discounted reward from that state onwards.
         """
-
+        """
         loss_policy = calc_iql_policy_loss_batch(batch, self.device, self.critic1, self.critic2, self.value,
                                                  self.actor, beta)
 
@@ -631,22 +632,50 @@ class IQLAgent(BaseAgent):
         self.optimizer.step()
 
         return loss_policy.item()
+        """
+        # Unpack the batch
+        states, actions = zip(*[(exp.state, exp.action) for exp in batch])
+
+        # Calculate the logprobs of the action taken
+        with torch.no_grad():
+            old_action_logits = self.actor.forward(states, device=self.device)
+            old_action_logprobs = torch.log_softmax(old_action_logits, dim=1)
+            old_action_logprobs = old_action_logprobs.gather(1,
+                                                             torch.tensor(actions).to(self.device).unsqueeze(-1)).squeeze(
+                -1)
+            old_action_logprobs = torch.where(torch.isinf(old_action_logprobs), -1000, old_action_logprobs)
+            old_action_logprobs = torch.where(old_action_logprobs == 0, -1e-8, old_action_logprobs)
+
+        total_loss_policy = 0
+
+        for _ in range(update_iter):
+            loss_policy, action_logprobs = calc_iql_policy_loss_batch(batch, self.device, self.critic1, self.critic2,
+                                                                      self.value, self.actor, old_action_logprobs, beta,
+                                                                      ppo_clip)
+
+            self.optimizer.zero_grad()
+            loss_policy.backward()
+            self.optimizer.step()
+
+            total_loss_policy += loss_policy.item()
+
+        return total_loss_policy
 
     def evaluate(self, episodes=100, parallel_envs=32, verbose=True):
 
         @ray.remote
-        def env_run(policy):
+        def env_run(actor):
             done = False
             prem_done = False
             state = self.env.reset()[0]
             ep_record = []
             while not done and not prem_done:
                 with torch.no_grad():
-                    logits = policy.forward(state, device='cpu')
+                    logits = actor.forward(state, device='cpu')
 
-                action = torch.argmax(logits)
+                action = torch.argmax(logits).item()
 
-                next_state, reward, done, prem_done, _ = self.env.step(action.item())
+                next_state, reward, done, prem_done, _ = self.env.step(action)
 
                 ep_record.append(Experience(state=state,
                                             action=action,
@@ -666,7 +695,7 @@ class IQLAgent(BaseAgent):
         all_next_states = []
 
         print(f'Beginning evaluation over {episodes} episodes...\n') if verbose else None
-        for episode in tqdm(range(episodes // parallel_envs), disable=not verbose):
+        for episode in tqdm(range(episodes // parallel_envs), disable=not verbose, file=sys.stdout):
             temp_batch_records, temp_total_reward = zip(
                 *ray.get([env_run.remote(self.actor.cpu()) for _ in range(parallel_envs)]))
 
@@ -708,7 +737,6 @@ class IQLAgent(BaseAgent):
                 logits = self.actor.forward(exp.state, device='cpu')
                 actionprobs = F.softmax(logits)[exp.action]
                 p *= actionprobs
-
 
         # return np.array(all_states), np.array(all_actions), np.array(all_rewards), \
         # np.array(all_next_states), np.array(all_total_rewards)
@@ -1068,28 +1096,44 @@ class PPO(BaseAgent):
 
     def explore(self, episodes=10000, parallel_envs=32, gamma=0.99):
         super().train_base(gamma)
+        if not ray.is_initialized():
+            ray.init()
 
         @ray.remote
         def env_run(predict_net):
             done = False
             prem_done = False
-            state = self.env.reset()[0]
             ep_record = []
+
+            state = self.env.reset()[0]
+            with torch.no_grad():
+                action_logits, _ = predict_net.forward(state, device='cpu')
+
+            action, _, _ = self.get_action_and_logprobs(action_logits)
+
+            action = action.item()
+
             while not done and not prem_done:
-                with torch.no_grad():
-                    action_logits, state_value = predict_net.forward(state, device='cpu')
 
-                action, old_policy_logprobs, _ = self.get_action_and_logprobs(action_logits)
+                next_state, reward, done, prem_done, _ = self.env.step(action)
 
-                next_state, reward, done, prem_done, _ = self.env.step(action.item())
+                if not done and not prem_done:
+                    with torch.no_grad():
+                        next_action_logits, _ = predict_net.forward(state, device='cpu')
+
+                    next_action, _, _ = self.get_action_and_logprobs(next_action_logits)
+
+                    next_action = next_action.item()
 
                 ep_record.append(Experience(state=state,
                                             action=action,
                                             reward=reward,
                                             next_state=next_state,
+                                            next_action=next_action,
                                             done=done))
 
                 state = next_state
+                action = next_action
 
             cum_rewards = calc_cum_rewards([exp.reward for exp in ep_record], self._gamma)
 
@@ -1098,28 +1142,31 @@ class PPO(BaseAgent):
         all_states = []
         all_actions = []
         all_rewards = []
-        all_cum_rewards = []
         all_next_states = []
+        all_next_actions = []
         all_dones = []
+        all_cum_rewards = []
 
-        print(f'Beginning exploration over {episodes} episodes...')
-        for episode in tqdm(range(episodes // parallel_envs)):
+        print(f'\nBeginning exploration over {episodes} episodes...')
+        for episode in tqdm(range(episodes // parallel_envs), file=sys.stdout):
             temp_batch_records, temp_batch_Qs = zip(
                 *ray.get([env_run.remote(self.net.cpu()) for _ in range(parallel_envs)]))
 
             temp_batch_states, temp_batch_actions, temp_batch_rewards, temp_batch_next_states, \
-                temp_batch_dones = zip(*[(exp.state, exp.action, exp.reward, exp.next_state, exp.done)
-                                         for episode in temp_batch_records for exp in episode])
+                temp_next_actions, temp_batch_dones = zip(*[(exp.state, exp.action, exp.reward, exp.next_state,
+                                                             exp.next_action, exp.done)
+                                                            for episode in temp_batch_records for exp in episode])
 
             all_states += list(temp_batch_states)
             all_actions += list(temp_batch_actions)
             all_rewards += list(temp_batch_rewards)
             all_next_states += list(temp_batch_next_states)
+            all_next_actions += list(temp_next_actions)
             all_dones += list(temp_batch_dones)
             all_cum_rewards += list([Q_s for episode in temp_batch_Qs for Q_s in episode])
 
         return np.array(all_states), np.array(all_actions), np.array(all_rewards), \
-            np.array(all_next_states), np.array(all_dones), np.array(all_cum_rewards)
+            np.array(all_next_states), np.array(all_next_actions), np.array(all_dones), np.array(all_cum_rewards)
 
 
 class PPOContinuous(BaseAgent):

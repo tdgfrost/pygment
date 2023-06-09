@@ -185,7 +185,7 @@ class ActorNet(BaseNet, nn.Module):
         logits = torch.tensor(np.array(state)).to(device)
 
         for layer in self.actor_net:
-            logits = layer(logits)
+            logits = layer.to(device)(logits)
 
         return logits
 
