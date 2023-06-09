@@ -26,21 +26,23 @@ for template_reward in [100]:
     loaded_data = {}
     for key, filename in [['state', 'all_states.npy'], ['actions', 'all_actions.npy'],
                           ['rewards', 'all_rewards.npy'], ['next_state', 'all_next_states.npy'],
-                          ['next_action', 'all_next_actions.npy'], ['dones', 'all_dones.npy']]:
+                          ['next_action', 'all_next_actions.npy'], ['dones', 'all_dones.npy'],
+                          ['all_cum_rewards', 'all_cum_rewards.npy']]:
         loaded_data[key] = np.load(data_path + '/' + filename)
 
     # Reduce scale of the rewards
-    loaded_data['rewards'] = loaded_data['rewards'] / 1000
+    # loaded_data['rewards'] = loaded_data['rewards'] / 1000
 
     data = [pm.Experience(state=loaded_data['state'][i],
                           action=loaded_data['actions'][i],
                           reward=loaded_data['rewards'][i],
                           next_state=loaded_data['next_state'][i],
                           next_action=loaded_data['next_action'][i],
+                          cum_reward=loaded_data['all_cum_rewards'][i],
                           done=loaded_data['dones'][i]) for i in range(len(loaded_data['state']))]
 
     agent.train(data, critic=True, value=True, actor=True, evaluate=True, steps=1e6, batch_size=64,
-                gamma=0.99, tau=0.9, alpha=0.005, beta=1, update_iter=10, ppo_clip=0.01, ppo_clip_decay=1, save=True)
+                gamma=0.99, tau=0.8, alpha=1, beta=0.3, update_iter=10, ppo_clip=0.01, ppo_clip_decay=1, save=True)
 
     _, _, _, _, rewards = agent.evaluate(episodes=100)
     for _ in range(10):

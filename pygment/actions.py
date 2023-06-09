@@ -136,9 +136,10 @@ def calc_iql_v_loss_batch(batch, device, actor1, actor2, critic, tau):
 
 def calc_iql_q_loss_batch(batch, device, critic1, critic2, value, gamma):
     # Unpack the batch
-    states, actions, reward, next_states, next_actions, dones = zip(*[(exp.state, exp.action, exp.reward,
-                                                                       exp.next_state, exp.next_action, exp.done) for
-                                                                      exp in batch])
+    states, actions, reward, next_states, next_actions, cum_rewards, dones = zip(*[(exp.state, exp.action, exp.reward,
+                                                                                    exp.next_state, exp.next_action,
+                                                                                    exp.cum_reward, exp.done)
+                                                                                   for exp in batch])
 
     # Calculate Q(s,a) for each state in the batch
     pred_Q1 = critic1.forward(states, target=False, device=device)
@@ -151,7 +152,7 @@ def calc_iql_q_loss_batch(batch, device, critic1, critic2, value, gamma):
     with torch.no_grad():
         pred_V_s = value.forward(next_states, device=device).squeeze(-1)
         pred_V_s = torch.where(~torch.tensor(dones).to(device), pred_V_s, torch.zeros_like(pred_V_s))
-    """
+    
     # Calculate Q'(s',a') for the next state in the batch
     with torch.no_grad():
         pred_Q1_next = critic1.forward(next_states, target=True, device=device)
@@ -161,10 +162,11 @@ def calc_iql_q_loss_batch(batch, device, critic1, critic2, value, gamma):
         pred_Q_next_choice = torch.min(pred_Q1_next_choice, pred_Q2_next_choice)
         pred_Q_next_choice = torch.where(~torch.tensor(dones).to(device), pred_Q_next_choice,
                                          torch.zeros_like(pred_Q_next_choice))
-
+    """
     # Calculate loss_q
     # target_q = torch.tensor(reward, dtype=torch.float32).to(device) + gamma * pred_V_s
-    target_q = torch.tensor(reward, dtype=torch.float32).to(device) + gamma * pred_Q_next_choice
+    # target_q = torch.tensor(reward, dtype=torch.float32).to(device) + gamma * pred_Q_next_choice
+    target_q = torch.tensor(cum_rewards, dtype=torch.float32).to(device)
 
     loss_q1 = F.mse_loss(pred_Q1_choice, target_q)
     loss_q2 = F.mse_loss(pred_Q2_choice, target_q)

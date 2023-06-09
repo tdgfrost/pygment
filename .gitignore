@@ -339,3 +339,35 @@ pygment/samples/LunarLander PPO/2023_6_08_182419/150_video/Baseline_reward_100_v
 pygment/samples/LunarLander PPO/2023_6_08_182419/150_video/Baseline_reward_100_video7.mp4
 pygment/samples/LunarLander PPO/2023_6_08_182419/150_video/Baseline_reward_100_video8.mp4
 pygment/samples/LunarLander PPO/2023_6_08_182419/150_video/Baseline_reward_100_video9.mp4
+pygment/samples/LunarLander IQL/2023_6_09_134736/actor_-138.pt
+pygment/samples/LunarLander IQL/2023_6_09_134736/critic1_-138.pt
+pygment/samples/LunarLander IQL/2023_6_09_134736/critic2_-138.pt
+pygment/samples/LunarLander IQL/2023_6_09_134736/value_-138.pt
+pygment/samples/LunarLander IQL/2023_6_09_141444/actor_-22.pt
+pygment/samples/LunarLander IQL/2023_6_09_141444/critic1_-22.pt
+pygment/samples/LunarLander IQL/2023_6_09_141444/critic2_-22.pt
+pygment/samples/LunarLander IQL/2023_6_09_141444/value_-22.pt
+pygment/samples/LunarLander IQL/2023_6_09_142731/actor_135.pt
+pygment/samples/LunarLander IQL/2023_6_09_142731/critic1_135.pt
+pygment/samples/LunarLander IQL/2023_6_09_142731/critic2_135.pt
+pygment/samples/LunarLander IQL/2023_6_09_142731/value_135.pt
+pygment/samples/LunarLander IQL/2023_6_09_150146/actor_122.pt
+pygment/samples/LunarLander IQL/2023_6_09_150146/critic1_122.pt
+pygment/samples/LunarLander IQL/2023_6_09_150146/critic2_122.pt
+pygment/samples/LunarLander IQL/2023_6_09_150146/value_122.pt
+pygment/samples/LunarLander IQL/2023_6_09_175646/actor_-330.pt
+pygment/samples/LunarLander IQL/2023_6_09_175646/critic1_-330.pt
+pygment/samples/LunarLander IQL/2023_6_09_175646/critic2_-330.pt
+pygment/samples/LunarLander IQL/2023_6_09_175646/value_-330.pt
+pygment/samples/LunarLander IQL/2023_6_09_180146/actor_-133.pt
+pygment/samples/LunarLander IQL/2023_6_09_180146/critic1_-133.pt
+pygment/samples/LunarLander IQL/2023_6_09_180146/critic2_-133.pt
+pygment/samples/LunarLander IQL/2023_6_09_180146/value_-133.pt
+pygment/samples/LunarLander IQL/2023_6_09_181442/actor_-25.pt
+pygment/samples/LunarLander IQL/2023_6_09_181442/critic1_-25.pt
+pygment/samples/LunarLander IQL/2023_6_09_181442/critic2_-25.pt
+pygment/samples/LunarLander IQL/2023_6_09_181442/value_-25.pt
+pygment/samples/LunarLander IQL/Experiment 3 using SARSA, tau=0.9/actor_176.pt
+pygment/samples/LunarLander IQL/Experiment 3 using SARSA, tau=0.9/critic1_176.pt
+pygment/samples/LunarLander IQL/Experiment 3 using SARSA, tau=0.9/critic2_176.pt
+pygment/samples/LunarLander IQL/Experiment 3 using SARSA, tau=0.9/value_176.pt
