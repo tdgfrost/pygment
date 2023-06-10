@@ -16,3 +16,362 @@ pygment/samples/.DS_Store
 pygment/samples/Continuous/.DS_Store
 pygment/samples/Discrete/.DS_Store
 pygment/samples/Discrete/CartPole PPO/2023_5_30_140033/videos/rl-video-episode-0.meta.json
+pygment/.DS_Store
+pygment/__pycache__/agent.cpython-39.pyc
+pygment/samples/.DS_Store
+pygment/.DS_Store
+.DS_Store
+pygment/.DS_Store
+pygment/__pycache__/agent.cpython-39.pyc
+pygment/samples/.DS_Store
+pygment/samples/Discrete/CartPole PPO/2023_6_01_110201/videos/Baseline_reward_50/Baseline_reward_50_video9.mp4
+pygment/samples/Discrete/CartPole PPO/2023_6_01_110201/videos/Baseline_reward_50/Baseline_reward_50_video8.mp4
+pygment/samples/Discrete/CartPole PPO/2023_6_01_110201/videos/Baseline_reward_50/Baseline_reward_50_video7.mp4
+pygment/samples/Discrete/CartPole PPO/2023_6_01_110201/videos/Baseline_reward_50/Baseline_reward_50_video6.mp4
+pygment/samples/Discrete/CartPole PPO/2023_6_01_110201/videos/Baseline_reward_50/Baseline_reward_50_video5.mp4
+pygment/samples/Discrete/CartPole PPO/2023_6_01_110201/videos/Baseline_reward_50/Baseline_reward_50_video4.mp4
+pygment/samples/Discrete/CartPole PPO/2023_6_01_110201/videos/Baseline_reward_50/Baseline_reward_50_video3.mp4
+pygment/samples/Discrete/CartPole PPO/2023_6_01_110201/videos/Baseline_reward_50/Baseline_reward_50_video2.mp4
+pygment/samples/Discrete/CartPole PPO/2023_6_01_110201/videos/Baseline_reward_50/Baseline_reward_50_video1.mp4
+pygment/samples/Discrete/CartPole PPO/2023_6_01_110201/videos/Baseline_reward_50/Baseline_reward_50_video0.mp4
+pygment/samples/Discrete/CartPole PPO/2023_6_01_110201/videos/Baseline_reward_30/Baseline_reward_30_video9.mp4
+pygment/samples/Discrete/CartPole PPO/2023_6_01_110201/videos/Baseline_reward_30/Baseline_reward_30_video8.mp4
+pygment/samples/Discrete/CartPole PPO/2023_6_01_110201/videos/Baseline_reward_30/Baseline_reward_30_video7.mp4
+pygment/samples/Discrete/CartPole PPO/2023_6_01_110201/videos/Baseline_reward_30/Baseline_reward_30_video6.mp4
+pygment/samples/Discrete/CartPole PPO/2023_6_01_110201/videos/Baseline_reward_30/Baseline_reward_30_video5.mp4
+pygment/samples/Discrete/CartPole PPO/2023_6_01_110201/videos/Baseline_reward_30/Baseline_reward_30_video4.mp4
+pygment/samples/Discrete/CartPole PPO/2023_6_01_110201/videos/Baseline_reward_30/Baseline_reward_30_video3.mp4
+pygment/samples/Discrete/CartPole PPO/2023_6_01_110201/videos/Baseline_reward_30/Baseline_reward_30_video2.mp4
+pygment/samples/Discrete/CartPole PPO/2023_6_01_110201/videos/Baseline_reward_30/Baseline_reward_30_video10.mp4
+pygment/samples/Discrete/CartPole PPO/2023_6_01_110201/videos/Baseline_reward_30/Baseline_reward_30_video1.mp4
+pygment/samples/Discrete/CartPole PPO/2023_6_01_110201/videos/Baseline_reward_20/Baseline_reward_20_video9.mp4
+pygment/samples/Discrete/CartPole PPO/2023_6_01_110201/videos/Baseline_reward_20/Baseline_reward_20_video8.mp4
+pygment/samples/Discrete/CartPole PPO/2023_6_01_110201/videos/Baseline_reward_20/Baseline_reward_20_video7.mp4
+pygment/samples/Discrete/CartPole PPO/2023_6_01_110201/videos/Baseline_reward_20/Baseline_reward_20_video6.mp4
+pygment/samples/Discrete/CartPole PPO/2023_6_01_110201/videos/Baseline_reward_20/Baseline_reward_20_video5.mp4
+pygment/samples/Discrete/CartPole PPO/2023_6_01_110201/videos/Baseline_reward_20/Baseline_reward_20_video4.mp4
+pygment/samples/Discrete/CartPole PPO/2023_6_01_110201/videos/Baseline_reward_20/Baseline_reward_20_video3.mp4
+pygment/samples/Discrete/CartPole PPO/2023_6_01_110201/videos/Baseline_reward_20/Baseline_reward_20_video2.mp4
+pygment/samples/Discrete/CartPole PPO/2023_6_01_110201/videos/Baseline_reward_20/Baseline_reward_20_video10.mp4
+pygment/samples/Discrete/CartPole PPO/2023_6_01_110201/videos/Baseline_reward_20/Baseline_reward_20_video1.mp4
+pygment/samples/CartPole IQL/Experiment 3 - 20/20_video/Baseline_reward_20/Baseline_reward_20_video1.mp4
+pygment/samples/CartPole IQL/Experiment 3 - 20/20_video/Baseline_reward_20/Baseline_reward_20_video10.mp4
+pygment/samples/CartPole IQL/Experiment 3 - 20/20_video/Baseline_reward_20/Baseline_reward_20_video2.mp4
+pygment/samples/CartPole IQL/Experiment 3 - 20/20_video/Baseline_reward_20/Baseline_reward_20_video3.mp4
+pygment/samples/CartPole IQL/Experiment 3 - 20/20_video/Baseline_reward_20/Baseline_reward_20_video4.mp4
+pygment/samples/CartPole IQL/Experiment 3 - 20/20_video/Baseline_reward_20/Baseline_reward_20_video5.mp4
+pygment/samples/CartPole IQL/Experiment 3 - 20/20_video/Baseline_reward_20/Baseline_reward_20_video6.mp4
+pygment/samples/CartPole IQL/Experiment 3 - 20/20_video/Baseline_reward_20/Baseline_reward_20_video7.mp4
+pygment/samples/CartPole IQL/Experiment 3 - 20/20_video/Baseline_reward_20/Baseline_reward_20_video8.mp4
+pygment/samples/CartPole IQL/Experiment 3 - 20/20_video/Baseline_reward_20/Baseline_reward_20_video9.mp4
+pygment/samples/CartPole IQL/Experiment 2 - 100/Side-by-side.mp4
+pygment/samples/CartPole IQL/Experiment 3 - 20/20_video/IQL_reward_500.mp4
+pygment/samples/CartPole IQL/Experiment 4 - 30/30_video/Baseline_reward_30/Baseline_reward_30_video1.mp4
+pygment/samples/CartPole IQL/Experiment 4 - 30/30_video/Baseline_reward_30/Baseline_reward_30_video10.mp4
+pygment/samples/CartPole IQL/Experiment 4 - 30/30_video/Baseline_reward_30/Baseline_reward_30_video2.mp4
+pygment/samples/CartPole IQL/Experiment 4 - 30/30_video/Baseline_reward_30/Baseline_reward_30_video3.mp4
+pygment/samples/CartPole IQL/Experiment 4 - 30/30_video/Baseline_reward_30/Baseline_reward_30_video4.mp4
+pygment/samples/CartPole IQL/Experiment 4 - 30/30_video/Baseline_reward_30/Baseline_reward_30_video5.mp4
+pygment/samples/CartPole IQL/Experiment 4 - 30/30_video/Baseline_reward_30/Baseline_reward_30_video6.mp4
+pygment/samples/CartPole IQL/Experiment 4 - 30/30_video/Baseline_reward_30/Baseline_reward_30_video7.mp4
+pygment/samples/CartPole IQL/Experiment 4 - 30/30_video/Baseline_reward_30/Baseline_reward_30_video8.mp4
+pygment/samples/CartPole IQL/Experiment 4 - 30/30_video/Baseline_reward_30/Baseline_reward_30_video9.mp4
+pygment/samples/CartPole IQL/Experiment 4 - 30/30_video/IQL_reward_497_video0.mp4
+pygment/samples/CartPole IQL/Experiment 5 - 50/50_video/Baseline_reward_50/Baseline_reward_50_video0.mp4
+pygment/samples/CartPole IQL/Experiment 5 - 50/50_video/Baseline_reward_50/Baseline_reward_50_video1.mp4
+pygment/samples/CartPole IQL/Experiment 5 - 50/50_video/Baseline_reward_50/Baseline_reward_50_video2.mp4
+pygment/samples/CartPole IQL/Experiment 5 - 50/50_video/Baseline_reward_50/Baseline_reward_50_video3.mp4
+pygment/samples/CartPole IQL/Experiment 5 - 50/50_video/Baseline_reward_50/Baseline_reward_50_video4.mp4
+pygment/samples/CartPole IQL/Experiment 5 - 50/50_video/Baseline_reward_50/Baseline_reward_50_video5.mp4
+pygment/samples/CartPole IQL/Experiment 5 - 50/50_video/Baseline_reward_50/Baseline_reward_50_video6.mp4
+pygment/samples/CartPole IQL/Experiment 5 - 50/50_video/Baseline_reward_50/Baseline_reward_50_video7.mp4
+pygment/samples/CartPole IQL/Experiment 5 - 50/50_video/Baseline_reward_50/Baseline_reward_50_video8.mp4
+pygment/samples/CartPole IQL/Experiment 5 - 50/50_video/Baseline_reward_50/Baseline_reward_50_video9.mp4
+pygment/samples/CartPole IQL/Experiment 5 - 50/50_video/IQL_reward_500_video0.mp4
+pygment/samples/CartPole PPO/2023_5_30_140032/videos/Baseline_reward_100_video0.mp4
+pygment/samples/CartPole PPO/2023_5_30_140032/videos/Baseline_reward_100_video1.mp4
+pygment/samples/CartPole PPO/2023_5_30_140032/videos/Baseline_reward_100_video2.mp4
+pygment/samples/CartPole PPO/2023_5_30_140032/videos/Baseline_reward_100_video3.mp4
+pygment/samples/CartPole PPO/2023_5_30_140032/videos/Baseline_reward_100_video4.mp4
+pygment/samples/CartPole PPO/2023_5_30_140032/videos/Baseline_reward_100_video5.mp4
+pygment/samples/CartPole PPO/2023_5_30_140032/videos/Baseline_reward_100_video6.mp4
+pygment/samples/CartPole PPO/2023_5_30_140032/videos/Baseline_reward_100_video7.mp4
+pygment/samples/CartPole PPO/2023_5_30_140032/videos/Baseline_reward_100_video8.mp4
+pygment/samples/CartPole PPO/2023_5_30_140032/videos/Baseline_reward_100_video9.mp4
+pygment/samples/GenerateStaticDataset/LunarLander/100 reward/all_actions.npy
+pygment/samples/GenerateStaticDataset/LunarLander/100 reward/all_cum_rewards.npy
+pygment/samples/GenerateStaticDataset/LunarLander/100 reward/all_next_states.npy
+pygment/samples/GenerateStaticDataset/LunarLander/100 reward/all_rewards.npy
+pygment/samples/GenerateStaticDataset/LunarLander/100 reward/all_states.npy
+pygment/samples/GenerateStaticDataset/LunarLander/130 reward/all_actions.npy
+pygment/samples/GenerateStaticDataset/LunarLander/130 reward/all_cum_rewards.npy
+pygment/samples/GenerateStaticDataset/LunarLander/130 reward/all_next_states.npy
+pygment/samples/GenerateStaticDataset/LunarLander/130 reward/all_rewards.npy
+pygment/samples/GenerateStaticDataset/LunarLander/130 reward/all_states.npy
+pygment/samples/GenerateStaticDataset/LunarLander/150 reward/all_actions.npy
+pygment/samples/GenerateStaticDataset/LunarLander/150 reward/all_cum_rewards.npy
+pygment/samples/GenerateStaticDataset/LunarLander/150 reward/all_next_states.npy
+pygment/samples/GenerateStaticDataset/LunarLander/150 reward/all_rewards.npy
+pygment/samples/GenerateStaticDataset/LunarLander/150 reward/all_states.npy
+pygment/samples/GenerateStaticDataset/LunarLander/20 reward/all_actions.npy
+pygment/samples/GenerateStaticDataset/LunarLander/20 reward/all_cum_rewards.npy
+pygment/samples/GenerateStaticDataset/LunarLander/20 reward/all_next_states.npy
+pygment/samples/GenerateStaticDataset/LunarLander/20 reward/all_rewards.npy
+pygment/samples/GenerateStaticDataset/LunarLander/20 reward/all_states.npy
+pygment/samples/GenerateStaticDataset/LunarLander/200 reward/all_actions.npy
+pygment/samples/GenerateStaticDataset/LunarLander/200 reward/all_cum_rewards.npy
+pygment/samples/GenerateStaticDataset/LunarLander/200 reward/all_next_states.npy
+pygment/samples/GenerateStaticDataset/LunarLander/200 reward/all_rewards.npy
+pygment/samples/GenerateStaticDataset/LunarLander/200 reward/all_states.npy
+pygment/samples/GenerateStaticDataset/LunarLander/220 reward/all_actions.npy
+pygment/samples/GenerateStaticDataset/LunarLander/220 reward/all_cum_rewards.npy
+pygment/samples/GenerateStaticDataset/LunarLander/220 reward/all_next_states.npy
+pygment/samples/GenerateStaticDataset/LunarLander/50 reward/all_states.npy
+pygment/samples/GenerateStaticDataset/LunarLander/50 reward/all_rewards.npy
+pygment/samples/GenerateStaticDataset/LunarLander/50 reward/all_next_states.npy
+pygment/samples/GenerateStaticDataset/LunarLander/50 reward/all_cum_rewards.npy
+pygment/samples/GenerateStaticDataset/LunarLander/50 reward/all_actions.npy
+pygment/samples/GenerateStaticDataset/LunarLander/30 reward/all_states.npy
+pygment/samples/GenerateStaticDataset/LunarLander/30 reward/all_rewards.npy
+pygment/samples/GenerateStaticDataset/LunarLander/30 reward/all_next_states.npy
+pygment/samples/GenerateStaticDataset/LunarLander/30 reward/all_cum_rewards.npy
+pygment/samples/GenerateStaticDataset/LunarLander/30 reward/all_actions.npy
+pygment/samples/GenerateStaticDataset/LunarLander/220 reward/all_states.npy
+pygment/samples/GenerateStaticDataset/LunarLander/220 reward/all_rewards.npy
+pygment/__pycache__/agent.cpython-39.pyc
+pygment/.DS_Store
+pygment/samples/.DS_Store
+pygment/samples/LunarLander IQL/2023_6_01_135904/100_video/IQL_reward_-166_video0.mp4
+pygment/samples/LunarLander IQL/2023_6_01_135904/100_video/IQL_reward_-166_video1.mp4
+pygment/samples/LunarLander IQL/2023_6_01_135904/100_video/IQL_reward_-166_video2.mp4
+pygment/samples/LunarLander IQL/2023_6_01_135904/100_video/IQL_reward_-166_video3.mp4
+pygment/samples/LunarLander IQL/2023_6_01_135904/100_video/IQL_reward_-166_video4.mp4
+pygment/samples/LunarLander IQL/2023_6_01_135904/100_video/IQL_reward_-166_video5.mp4
+pygment/samples/LunarLander IQL/2023_6_01_135904/100_video/IQL_reward_-166_video6.mp4
+pygment/samples/LunarLander IQL/2023_6_01_135904/100_video/IQL_reward_-166_video7.mp4
+pygment/samples/LunarLander IQL/2023_6_01_135904/100_video/IQL_reward_-166_video8.mp4
+pygment/samples/LunarLander IQL/2023_6_01_135904/100_video/IQL_reward_-166_video9.mp4
+pygment/samples/LunarLander IQL/2023_6_01_135904/no_policy_model_loss_46.808.pt
+pygment/samples/LunarLander IQL/2023_6_01_135904/policy_model_loss_0.323.pt
+pygment/samples/LunarLander IQL/2023_6_01_224541/no_policy_model_loss_54.704.pt
+pygment/samples/LunarLander PPO/2023_6_01_120242/100_video/Baseline_reward_100_video0.mp4
+pygment/samples/LunarLander PPO/2023_6_01_120242/100_video/Baseline_reward_100_video1.mp4
+pygment/samples/LunarLander PPO/2023_6_01_120242/100_video/Baseline_reward_100_video2.mp4
+pygment/samples/LunarLander PPO/2023_6_01_120242/100_video/Baseline_reward_100_video3.mp4
+pygment/samples/LunarLander PPO/2023_6_01_120242/100_video/Baseline_reward_100_video4.mp4
+pygment/samples/LunarLander PPO/2023_6_01_120242/100_video/Baseline_reward_100_video5.mp4
+pygment/samples/LunarLander PPO/2023_6_01_120242/100_video/Baseline_reward_100_video6.mp4
+pygment/samples/LunarLander PPO/2023_6_01_120242/100_video/Baseline_reward_100_video7.mp4
+pygment/samples/LunarLander PPO/2023_6_01_120242/100_video/Baseline_reward_100_video8.mp4
+pygment/samples/LunarLander PPO/2023_6_01_120242/100_video/Baseline_reward_100_video9.mp4
+pygment/samples/CartPole IQL/2023_6_05_151548/actor1_target_9e-05.pt
+pygment/samples/CartPole IQL/2023_6_05_151548/actor2_target_9e-05.pt
+pygment/samples/CartPole IQL/2023_6_05_151548/critic_9e-05.pt
+pygment/samples/CartPole IQL/2023_6_05_151701/actor1_target_6e-05.pt
+pygment/samples/CartPole IQL/2023_6_05_151701/actor2_target_6e-05.pt
+pygment/samples/CartPole IQL/2023_6_05_151701/critic_6e-05.pt
+pygment/samples/CartPole IQL/2023_6_05_151701/policy_loss_policy_0.61613.pt
+pygment/samples/CartPole IQL/2023_6_05_151701/policy_loss_policy_0.61939.pt
+pygment/samples/CartPole IQL/2023_6_05_151701/policy_loss_policy_0.61971.pt
+pygment/samples/CartPole IQL/2023_6_05_151701/policy_loss_policy_0.62079.pt
+pygment/samples/CartPole IQL/2023_6_05_151701/policy_loss_policy_0.62091.pt
+pygment/samples/CartPole IQL/2023_6_05_151701/policy_loss_policy_0.62496.pt
+pygment/samples/CartPole IQL/2023_6_05_153405/policy_loss_policy_0.61963.pt
+pygment/samples/GenerateStaticDataset/CartPole/100 reward/all_actions.npy
+pygment/samples/GenerateStaticDataset/CartPole/100 reward/all_cum_rewards.npy
+pygment/samples/GenerateStaticDataset/CartPole/100 reward/all_dones.npy
+pygment/samples/GenerateStaticDataset/CartPole/100 reward/all_next_states.npy
+pygment/samples/GenerateStaticDataset/CartPole/100 reward/all_rewards.npy
+pygment/samples/GenerateStaticDataset/CartPole/100 reward/all_states.npy
+pygment/samples/GenerateStaticDataset/CartPole/20 reward/all_actions.npy
+pygment/samples/GenerateStaticDataset/CartPole/20 reward/all_cum_rewards.npy
+pygment/samples/GenerateStaticDataset/CartPole/20 reward/all_next_states.npy
+pygment/samples/GenerateStaticDataset/CartPole/20 reward/all_rewards.npy
+pygment/samples/GenerateStaticDataset/CartPole/20 reward/all_states.npy
+pygment/samples/GenerateStaticDataset/CartPole/30 reward/all_actions.npy
+pygment/samples/GenerateStaticDataset/CartPole/30 reward/all_cum_rewards.npy
+pygment/samples/GenerateStaticDataset/CartPole/30 reward/all_next_states.npy
+pygment/samples/GenerateStaticDataset/CartPole/30 reward/all_rewards.npy
+pygment/samples/GenerateStaticDataset/CartPole/30 reward/all_states.npy
+pygment/samples/GenerateStaticDataset/CartPole/50 reward/all_actions.npy
+pygment/samples/GenerateStaticDataset/CartPole/50 reward/all_cum_rewards.npy
+pygment/samples/GenerateStaticDataset/CartPole/50 reward/all_next_states.npy
+pygment/samples/GenerateStaticDataset/CartPole/50 reward/all_rewards.npy
+pygment/samples/GenerateStaticDataset/CartPole/50 reward/all_states.npy
+pygment/samples/GenerateStaticDataset/CartPole/100 reward/all_actions.npy
+pygment/samples/GenerateStaticDataset/CartPole/100 reward/all_cum_rewards.npy
+pygment/samples/GenerateStaticDataset/CartPole/100 reward/all_next_states.npy
+pygment/samples/GenerateStaticDataset/CartPole/100 reward/all_rewards.npy
+pygment/samples/GenerateStaticDataset/CartPole/100 reward/all_states.npy
+pygment/samples/GenerateStaticDataset/CartPole/20 reward/all_actions.npy
+pygment/samples/GenerateStaticDataset/CartPole/20 reward/all_cum_rewards.npy
+pygment/samples/GenerateStaticDataset/CartPole/20 reward/all_next_states.npy
+pygment/samples/GenerateStaticDataset/CartPole/20 reward/all_rewards.npy
+pygment/samples/GenerateStaticDataset/CartPole/20 reward/all_states.npy
+pygment/samples/GenerateStaticDataset/CartPole/30 reward/all_actions.npy
+pygment/samples/GenerateStaticDataset/CartPole/30 reward/all_cum_rewards.npy
+pygment/samples/GenerateStaticDataset/CartPole/30 reward/all_next_states.npy
+pygment/samples/GenerateStaticDataset/CartPole/30 reward/all_rewards.npy
+pygment/samples/GenerateStaticDataset/CartPole/30 reward/all_states.npy
+pygment/samples/GenerateStaticDataset/CartPole/50 reward/all_actions.npy
+pygment/samples/GenerateStaticDataset/CartPole/50 reward/all_cum_rewards.npy
+pygment/samples/GenerateStaticDataset/CartPole/50 reward/all_next_states.npy
+pygment/samples/GenerateStaticDataset/CartPole/50 reward/all_rewards.npy
+pygment/samples/GenerateStaticDataset/CartPole/50 reward/all_states.npy
+pygment/samples/GenerateStaticDataset/CartPole/100 reward/all_actions.npy
+pygment/samples/LunarLander IQL/2023_6_05_164504/actor1_target_4489.34731.pt
+pygment/samples/LunarLander IQL/2023_6_05_164504/actor2_target_4489.34731.pt
+pygment/samples/LunarLander IQL/2023_6_05_164504/critic_4489.34731.pt
+pygment/samples/LunarLander IQL/2023_6_05_164504/policy_loss_policy_0.84957.pt
+pygment/samples/LunarLander IQL/Experiment 1 - tau 0.99/100_video/IQL_reward_-166_video0.mp4
+pygment/samples/LunarLander IQL/Experiment 1 - tau 0.99/100_video/IQL_reward_-166_video1.mp4
+pygment/samples/LunarLander IQL/Experiment 1 - tau 0.99/100_video/IQL_reward_-166_video2.mp4
+pygment/samples/LunarLander IQL/Experiment 1 - tau 0.99/100_video/IQL_reward_-166_video3.mp4
+pygment/samples/LunarLander IQL/Experiment 1 - tau 0.99/100_video/IQL_reward_-166_video4.mp4
+pygment/samples/LunarLander IQL/Experiment 1 - tau 0.99/100_video/IQL_reward_-166_video5.mp4
+pygment/samples/LunarLander IQL/Experiment 1 - tau 0.99/100_video/IQL_reward_-166_video6.mp4
+pygment/samples/LunarLander IQL/Experiment 1 - tau 0.99/100_video/IQL_reward_-166_video7.mp4
+pygment/samples/LunarLander IQL/Experiment 1 - tau 0.99/100_video/IQL_reward_-166_video8.mp4
+pygment/samples/LunarLander IQL/Experiment 1 - tau 0.99/100_video/IQL_reward_-166_video9.mp4
+pygment/samples/LunarLander IQL/Experiment 1 - tau 0.99/no_policy_model_loss_46.808.pt
+pygment/samples/LunarLander IQL/Experiment 1 - tau 0.99/policy_model_loss_0.323.pt
+pygment/samples/LunarLander IQL/Experiment 2 - tau 0.9/100_video/IQL_reward_-21_video0.mp4
+pygment/samples/LunarLander IQL/Experiment 2 - tau 0.9/100_video/IQL_reward_-21_video1.mp4
+pygment/samples/LunarLander IQL/Experiment 2 - tau 0.9/100_video/IQL_reward_-21_video2.mp4
+pygment/samples/LunarLander IQL/Experiment 2 - tau 0.9/100_video/IQL_reward_-21_video3.mp4
+pygment/samples/LunarLander IQL/Experiment 2 - tau 0.9/100_video/IQL_reward_-21_video4.mp4
+pygment/samples/LunarLander IQL/Experiment 2 - tau 0.9/100_video/IQL_reward_-21_video5.mp4
+pygment/samples/LunarLander IQL/Experiment 2 - tau 0.9/100_video/IQL_reward_-21_video6.mp4
+pygment/samples/LunarLander IQL/Experiment 2 - tau 0.9/100_video/IQL_reward_-21_video7.mp4
+pygment/samples/LunarLander IQL/Experiment 2 - tau 0.9/100_video/IQL_reward_-21_video8.mp4
+pygment/samples/LunarLander IQL/Experiment 2 - tau 0.9/100_video/IQL_reward_-21_video9.mp4
+pygment/samples/LunarLander IQL/Experiment 2 - tau 0.9/no_policy_model_loss_172.816.pt
+pygment/samples/LunarLander IQL/Experiment 2 - tau 0.9/policy_model_loss_0.858.pt
+pygment/samples/CartPole IQL/CartPole IQL copy.py
+pygment/samples/CartPole IQL/2023_6_06_130051/value_389.pt
+pygment/samples/CartPole IQL/2023_6_06_130051/critic2_389.pt
+pygment/samples/CartPole IQL/2023_6_06_130051/critic1_389.pt
+pygment/samples/CartPole IQL/2023_6_06_130051/actor_389.pt
+pygment/samples/CartPole IQL/2023_6_06_130051/100_video/IQL_reward_370_video0.mp4
+pygment/samples/CartPole IQL/2023_6_06_183151/100_video/IQL_reward_471_video0.mp4
+pygment/samples/CartPole IQL/2023_6_06_183151/100_video/IQL_reward_471_video1.mp4
+pygment/samples/CartPole IQL/2023_6_06_183151/100_video/IQL_reward_471_video2.mp4
+pygment/samples/CartPole IQL/2023_6_06_183151/100_video/IQL_reward_471_video3.mp4
+pygment/samples/CartPole IQL/2023_6_06_183151/100_video/IQL_reward_471_video4.mp4
+pygment/samples/CartPole IQL/2023_6_06_183151/100_video/IQL_reward_471_video5.mp4
+pygment/samples/CartPole IQL/2023_6_06_183151/100_video/IQL_reward_471_video6.mp4
+pygment/samples/CartPole IQL/2023_6_06_183151/100_video/IQL_reward_471_video7.mp4
+pygment/samples/CartPole IQL/2023_6_06_183151/100_video/IQL_reward_471_video8.mp4
+pygment/samples/CartPole IQL/2023_6_06_183151/100_video/IQL_reward_471_video9.mp4
+pygment/samples/CartPole IQL/2023_6_06_183151/actor_482.pt
+pygment/samples/CartPole IQL/2023_6_06_183151/critic1_482.pt
+pygment/samples/CartPole IQL/2023_6_06_183151/critic2_482.pt
+pygment/samples/CartPole IQL/2023_6_06_183151/value_482.pt
+pygment/samples/CartPole IQL/2023_6_06_183351/actor_431.pt
+pygment/samples/CartPole IQL/2023_6_06_183351/critic1_431.pt
+pygment/samples/CartPole IQL/2023_6_06_183351/critic2_431.pt
+pygment/samples/CartPole IQL/2023_6_06_183351/value_431.pt
+pygment/samples/LunarLander IQL/2023_6_06_183732/actor_60.pt
+pygment/samples/LunarLander IQL/2023_6_06_183732/critic1_60.pt
+pygment/samples/LunarLander IQL/2023_6_06_183732/critic2_60.pt
+pygment/samples/LunarLander IQL/2023_6_06_183732/value_60.pt
+pygment/samples/LunarLander IQL/2023_6_06_184317/actor_199.pt
+pygment/samples/LunarLander IQL/2023_6_06_184317/critic1_199.pt
+pygment/samples/LunarLander IQL/2023_6_06_184317/critic2_199.pt
+pygment/samples/LunarLander IQL/2023_6_06_184317/value_199.pt
+.idea/other.xml
+.DS_Store
+pygment/.DS_Store
+pygment/__pycache__/agent.cpython-310.pyc.4353955792
+pygment/samples/CartPole IQL/Experiment 1 - 482/100_video/IQL_reward_471_video0.mp4
+pygment/samples/CartPole IQL/Experiment 1 - 482/100_video/IQL_reward_471_video1.mp4
+pygment/samples/CartPole IQL/Experiment 1 - 482/100_video/IQL_reward_471_video2.mp4
+pygment/samples/CartPole IQL/Experiment 1 - 482/100_video/IQL_reward_471_video3.mp4
+pygment/samples/CartPole IQL/Experiment 1 - 482/100_video/IQL_reward_471_video4.mp4
+pygment/samples/CartPole IQL/Experiment 1 - 482/100_video/IQL_reward_471_video5.mp4
+pygment/samples/CartPole IQL/Experiment 1 - 482/100_video/IQL_reward_471_video6.mp4
+pygment/samples/CartPole IQL/Experiment 1 - 482/100_video/IQL_reward_471_video7.mp4
+pygment/samples/CartPole IQL/Experiment 1 - 482/100_video/IQL_reward_471_video8.mp4
+pygment/samples/CartPole IQL/Experiment 1 - 482/100_video/IQL_reward_471_video9.mp4
+pygment/samples/CartPole IQL/Side-by-side.mp4
+pygment/samples/CartPole PPO/2023_6_07_151653/model_0.pt
+pygment/samples/LunarLander IQL/2023_6_09_120812/actor_-105.pt
+pygment/samples/LunarLander IQL/2023_6_09_120812/critic1_-105.pt
+pygment/samples/LunarLander IQL/2023_6_09_120812/critic2_-105.pt
+pygment/samples/LunarLander IQL/2023_6_09_120812/value_-105.pt
+pygment/samples/LunarLander IQL/2023_6_09_122258/actor_-75.pt
+pygment/samples/LunarLander IQL/2023_6_09_122258/critic1_-75.pt
+pygment/samples/LunarLander IQL/2023_6_09_122258/critic2_-75.pt
+pygment/samples/LunarLander IQL/2023_6_09_122258/value_-75.pt
+pygment/samples/LunarLander IQL/2023_6_09_123244/actor_-6.pt
+pygment/samples/LunarLander IQL/2023_6_09_123244/critic1_-6.pt
+pygment/samples/LunarLander IQL/2023_6_09_123244/critic2_-6.pt
+pygment/samples/LunarLander IQL/2023_6_09_123244/value_-6.pt
+pygment/samples/LunarLander IQL/Experiment 2 - 150 to 232/150_baseline_video/Baseline_reward_100_video0.mp4
+pygment/samples/LunarLander IQL/Experiment 2 - 150 to 232/150_baseline_video/Baseline_reward_100_video1.mp4
+pygment/samples/LunarLander IQL/Experiment 2 - 150 to 232/150_baseline_video/Baseline_reward_100_video2.mp4
+pygment/samples/LunarLander IQL/Experiment 2 - 150 to 232/150_baseline_video/Baseline_reward_100_video3.mp4
+pygment/samples/LunarLander IQL/Experiment 2 - 150 to 232/150_baseline_video/Baseline_reward_100_video4.mp4
+pygment/samples/LunarLander IQL/Experiment 2 - 150 to 232/150_baseline_video/Baseline_reward_100_video5.mp4
+pygment/samples/LunarLander IQL/Experiment 2 - 150 to 232/150_baseline_video/Baseline_reward_100_video6.mp4
+pygment/samples/LunarLander IQL/Experiment 2 - 150 to 232/150_baseline_video/Baseline_reward_100_video7.mp4
+pygment/samples/LunarLander IQL/Experiment 2 - 150 to 232/150_baseline_video/Baseline_reward_100_video8.mp4
+pygment/samples/LunarLander IQL/Experiment 2 - 150 to 232/150_baseline_video/Baseline_reward_100_video9.mp4
+pygment/samples/LunarLander IQL/Experiment 2 - 150 to 232/150_to_232_video/IQL_reward_232_video0.mp4
+pygment/samples/LunarLander IQL/Experiment 2 - 150 to 232/150_to_232_video/IQL_reward_232_video1.mp4
+pygment/samples/LunarLander IQL/Experiment 2 - 150 to 232/150_to_232_video/IQL_reward_232_video2.mp4
+pygment/samples/LunarLander IQL/Experiment 2 - 150 to 232/150_to_232_video/IQL_reward_232_video3.mp4
+pygment/samples/LunarLander IQL/Experiment 2 - 150 to 232/150_to_232_video/IQL_reward_232_video4.mp4
+pygment/samples/LunarLander IQL/Experiment 2 - 150 to 232/150_to_232_video/IQL_reward_232_video5.mp4
+pygment/samples/LunarLander IQL/Experiment 2 - 150 to 232/150_to_232_video/IQL_reward_232_video6.mp4
+pygment/samples/LunarLander IQL/Experiment 2 - 150 to 232/150_to_232_video/IQL_reward_232_video7.mp4
+pygment/samples/LunarLander IQL/Experiment 2 - 150 to 232/150_to_232_video/IQL_reward_232_video8.mp4
+pygment/samples/LunarLander IQL/Experiment 2 - 150 to 232/150_to_232_video/IQL_reward_232_video9.mp4
+pygment/samples/LunarLander IQL/Experiment 2 - 150 to 232/Side-by-side.mp4
+pygment/samples/LunarLander IQL/LunarLander IQL copy.py
+pygment/samples/LunarLander PPO/2023_6_08_182419/150_video/Baseline_reward_100_video0.mp4
+pygment/samples/LunarLander PPO/2023_6_08_182419/150_video/Baseline_reward_100_video1.mp4
+pygment/samples/LunarLander PPO/2023_6_08_182419/150_video/Baseline_reward_100_video2.mp4
+pygment/samples/LunarLander PPO/2023_6_08_182419/150_video/Baseline_reward_100_video3.mp4
+pygment/samples/LunarLander PPO/2023_6_08_182419/150_video/Baseline_reward_100_video4.mp4
+pygment/samples/LunarLander PPO/2023_6_08_182419/150_video/Baseline_reward_100_video5.mp4
+pygment/samples/LunarLander PPO/2023_6_08_182419/150_video/Baseline_reward_100_video6.mp4
+pygment/samples/LunarLander PPO/2023_6_08_182419/150_video/Baseline_reward_100_video7.mp4
+pygment/samples/LunarLander PPO/2023_6_08_182419/150_video/Baseline_reward_100_video8.mp4
+pygment/samples/LunarLander PPO/2023_6_08_182419/150_video/Baseline_reward_100_video9.mp4
+pygment/samples/LunarLander IQL/2023_6_09_134736/actor_-138.pt
+pygment/samples/LunarLander IQL/2023_6_09_134736/critic1_-138.pt
+pygment/samples/LunarLander IQL/2023_6_09_134736/critic2_-138.pt
+pygment/samples/LunarLander IQL/2023_6_09_134736/value_-138.pt
+pygment/samples/LunarLander IQL/2023_6_09_141444/actor_-22.pt
+pygment/samples/LunarLander IQL/2023_6_09_141444/critic1_-22.pt
+pygment/samples/LunarLander IQL/2023_6_09_141444/critic2_-22.pt
+pygment/samples/LunarLander IQL/2023_6_09_141444/value_-22.pt
+pygment/samples/LunarLander IQL/2023_6_09_142731/actor_135.pt
+pygment/samples/LunarLander IQL/2023_6_09_142731/critic1_135.pt
+pygment/samples/LunarLander IQL/2023_6_09_142731/critic2_135.pt
+pygment/samples/LunarLander IQL/2023_6_09_142731/value_135.pt
+pygment/samples/LunarLander IQL/2023_6_09_150146/actor_122.pt
+pygment/samples/LunarLander IQL/2023_6_09_150146/critic1_122.pt
+pygment/samples/LunarLander IQL/2023_6_09_150146/critic2_122.pt
+pygment/samples/LunarLander IQL/2023_6_09_150146/value_122.pt
+pygment/samples/LunarLander IQL/2023_6_09_175646/actor_-330.pt
+pygment/samples/LunarLander IQL/2023_6_09_175646/critic1_-330.pt
+pygment/samples/LunarLander IQL/2023_6_09_175646/critic2_-330.pt
+pygment/samples/LunarLander IQL/2023_6_09_175646/value_-330.pt
+pygment/samples/LunarLander IQL/2023_6_09_180146/actor_-133.pt
+pygment/samples/LunarLander IQL/2023_6_09_180146/critic1_-133.pt
+pygment/samples/LunarLander IQL/2023_6_09_180146/critic2_-133.pt
+pygment/samples/LunarLander IQL/2023_6_09_180146/value_-133.pt
+pygment/samples/LunarLander IQL/2023_6_09_181442/actor_-25.pt
+pygment/samples/LunarLander IQL/2023_6_09_181442/critic1_-25.pt
+pygment/samples/LunarLander IQL/2023_6_09_181442/critic2_-25.pt
+pygment/samples/LunarLander IQL/2023_6_09_181442/value_-25.pt
+pygment/samples/LunarLander IQL/Experiment 3 using SARSA, tau=0.9/actor_176.pt
+pygment/samples/LunarLander IQL/Experiment 3 using SARSA, tau=0.9/critic1_176.pt
+pygment/samples/LunarLander IQL/Experiment 3 using SARSA, tau=0.9/critic2_176.pt
+pygment/samples/LunarLander IQL/Experiment 3 using SARSA, tau=0.9/value_176.pt
+pygment/samples/LunarLander IQL/2023_6_09_181442/actor_115.pt
+pygment/samples/LunarLander IQL/2023_6_09_181442/critic1_115.pt
+pygment/samples/LunarLander IQL/2023_6_09_181442/critic2_115.pt
+pygment/samples/LunarLander IQL/2023_6_09_181442/value_115.pt

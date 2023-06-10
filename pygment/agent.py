@@ -1,20 +1,21 @@
 import torch
 from torch import nn
+import torch.nn.functional as F
+from torch.distributions import Categorical, Normal
 from torch.utils.data import DataLoader
+from tqdm import tqdm
 import numpy as np
 import random
 import time
+import sys
 import datetime as dt
 import os
+import shutil
 from copy import deepcopy
 from .actions import GreedyEpsilonSelector, calc_loss_batch, calc_loss_policy, calc_cum_rewards, \
-<<<<<<< Updated upstream
-  calc_entropy_loss_policy, calc_loss_actor_critic
-from .net import DualNet, ActorCriticNet, PolicyGradientNet
-=======
-    calc_entropy_loss_policy, calc_loss_actor_critic
-from .net import DualNet, ActorCriticNet, PolicyGradientNet, ActorCriticNetContinuous
->>>>>>> Stashed changes
+    calc_entropy_loss_policy, calc_loss_actor_critic, calc_iql_q_loss_batch, calc_iql_v_loss_batch, \
+    calc_iql_policy_loss_batch
+from .net import BaseNet, DualNet, ActorCriticNet, PolicyGradientNet, ActorCriticNetContinuous, CriticNet, ActorNet
 from .env import wrap_env
 from collections import deque
 import ray
@@ -26,12 +27,14 @@ class Experience:
   and values from the network).
   '''
 
-    def __init__(self, state=None, action=None, reward=None, next_state=None, done=None,
-                 action_probs=None, action_logprobs=None, state_value=None):
+    def __init__(self, state=None, action=None, reward=None, cum_reward=None, next_state=None, next_action=None,
+                 done=None, action_probs=None, action_logprobs=None, state_value=None):
         self.state = state
         self.action = action
         self.reward = reward
+        self.cum_reward = cum_reward
         self.next_state = next_state
+        self.next_action = next_action
         self.done = done
         self.action_probs = action_probs
         self.action_logprobs = action_logprobs
@@ -43,23 +46,16 @@ class BaseAgent:
     Base Agent stores universal attributes and super() methods across the agents.
     """
 
-    def __init__(self):
-        self.device = 'mps'
+    def __init__(self, device='cpu'):
+        self.net = None
+        self.device = device
         self.optimizer = None
         self.env = None
-<<<<<<< Updated upstream
-        self.action_space = None
-        self.observation_space = None
-        self.output_activation = None
-        self.current_best_reward = -10**100
-=======
         self.current_best_reward = -10 ** 100
->>>>>>> Stashed changes
         now = dt.datetime.now()
-        self._path = f'./{now.year}_{now.month}_{now.day:02}_{now.hour:02}_{now.minute:02}_{now.second:02}'
+        self.path = f'./{now.year}_{now.month}_{now.day:02}_{now.hour:02}{now.minute:02}{now.second:02}'
         self._optimizer = None
         self._learning_rate = None
-        self.__output_activation = None
         self._compiled = False
         self._gamma = None
         self._epsilon = None
@@ -80,22 +76,14 @@ class BaseAgent:
             break
 
         if reset_input in ['y', 'Y']:
-            self.device = 'mps'
+            self.device = 'cpu'
             self.optimizer = None
             self.env = None
-<<<<<<< Updated upstream
-            self.action_space = None
-            self.observation_space = None
-            self.output_activation = None
-            self.current_best_reward = -10**100
-=======
             self.current_best_reward = -10 ** 100
->>>>>>> Stashed changes
             now = dt.datetime.now()
-            self._path = f'./{now.year}_{now.month}_{now.day:02}_{now.hour:02}_{now.minute:02}_{now.second:02}/'
+            self.path = f'./{now.year}_{now.month}_{now.day:02}_{now.hour:02}_{now.minute:02}_{now.second:02}/'
             self._optimizer = None
             self._learning_rate = None
-            self.__output_activation = None
             self._compiled = False
             self._gamma = None
             self._epsilon = None
@@ -119,8 +107,6 @@ class BaseAgent:
 
     def load_env(self, env, stack_frames=1, reward_clipping=False):
         self.env = wrap_env(env, stack_frames, reward_clipping)
-        self.action_space = self.env.action_space.n
-        self.observation_space = self.env.observation_space.shape[0]
 
     def compile_check(self):
         if self._compiled:
@@ -150,20 +136,8 @@ class BaseAgent:
     The train super() method ensures that the optimizer is correctly synced to the model,
     and creates a directory in which the model checkpoints and any animations can be saved.
     '''
-<<<<<<< Updated upstream
-    def train(self, gamma):
-      self.method_check(env_loaded=True, net_exists=True, compiled=True)
-      self._gamma = gamma
 
-      if not os.path.isdir(self._path):
-        os.mkdir(self._path)
-
-      self.optimizer = self._optimizers[self._optimizer](self.net.parameters(),
-                                                         lr=self._learning_rate,
-                                                         weight_decay=self._regularisation)
-=======
-
-    def train(self, gamma, custom_params=None):
+    def train_base(self, gamma, custom_params=None):
         self.method_check(env_loaded=True, net_exists=True, compiled=True)
         self._gamma = gamma
 
@@ -173,7 +147,6 @@ class BaseAgent:
             self.optimizer = self._optimizers[self._optimizer](self.net.parameters(),
                                                                lr=self._learning_rate,
                                                                weight_decay=self._regularisation)
->>>>>>> Stashed changes
 
     '''
     save_model does several important steps/checks prior to model saving, which are detailed below.
@@ -181,27 +154,20 @@ class BaseAgent:
 
     def save_model(self, average_reward, save_from, save_interval, best=False):
 
-<<<<<<< Updated upstream
-      # Check that the current model performance exceeds the 'save_from' threshold,
-      # and that the current model is better than the previous 'best' model.
-      if (average_reward >= save_from) & ((average_reward // save_interval * save_interval) >
-                                          (self.current_best_reward // save_interval * save_interval)):
-=======
         # Check that the current model performance exceeds the 'save_from' threshold,
         # and that the current model is better than the previous 'best' model.
         if (average_reward >= save_from) & ((average_reward // save_interval * save_interval) >
                                             (self.current_best_reward // save_interval * save_interval)):
             # Check directory exists and create if not
-            if not os.path.isdir(self._path):
-                os.mkdir(self._path)
->>>>>>> Stashed changes
+            if not os.path.isdir(self.path):
+                os.mkdir(self.path)
 
             # It may be the case that a previous model was loaded and training was continued. If this hasn't been
             # checked yet, screen the previous checkpoints to check whether any were saved as 'model_best_',
             # and clarify the score of that checkpoint.
             if self._screen_files:
                 no_best = True
-                for file in os.listdir(self._path):
+                for file in os.listdir(self.path):
                     if 'model_best_' in file:
                         no_best = False
                         prev_score = file.split('model_best_')[1].split('.pt')[0]
@@ -209,7 +175,7 @@ class BaseAgent:
                         # If the score of this checkpoint is below the current model, remove the 'model_best_' from that
                         # checkpoint.
                         if int(float(prev_score)) < (average_reward // save_interval * save_interval):
-                            os.rename(self._path + f'/{file}', self._path + f'/model_{int(float(prev_score))}.pt')
+                            os.rename(self.path + f'/{file}', self.path + f'/model_{int(float(prev_score))}.pt')
                             self._screen_files = False
                             break
 
@@ -218,8 +184,8 @@ class BaseAgent:
 
             # Define the directory to save the model in, and the name of the file, which follows the template of
             # 'model_(score)' initially, and 'model_best_(score)' at the terminus.
-            current_model_path = self._path + f'/model_best_{int(average_reward // save_interval * save_interval)}.pt' if best \
-                else self._path + f'/model_{int(average_reward // save_interval * save_interval)}.pt'
+            current_model_path = self.path + f'/model_best_{int(average_reward // save_interval * save_interval)}.pt' if best \
+                else self.path + f'/model_{int(average_reward // save_interval * save_interval)}.pt'
 
             # For some reason there are issues with saving and re-training the model under mps, so (for the time being)
             # we create a deepcopy of our model to get around this.
@@ -244,7 +210,7 @@ class BaseAgent:
             self._regularisation = None
             print('Model loaded - recompile agent please')
 
-        self._path = os.path.dirname(path)
+        self.path = os.path.dirname(path)
 
 
 class DQNAgent(BaseAgent):
@@ -253,8 +219,9 @@ class DQNAgent(BaseAgent):
     current network and an intermittently synchronised target network).
     """
 
-    def __init__(self):
-        super().__init__()
+    def __init__(self, device):
+        super().__init__(device)
+        self._buffer_size = None
         self.net = DualNet()
         self.replay_buffer = None
         self._tau = None
@@ -277,7 +244,7 @@ class DQNAgent(BaseAgent):
     def add_network(self, nodes: list):
         super().network_check(nodes)
 
-        self.net.add_layers(nodes, self.observation_space, self.action_space)
+        self.net.add_layers(nodes, self.env)
         self.net.has_net = True
 
     def compile(self, optimizer, learning_rate=0.001, weight_decay=1e-5, clip=1.0, lower_clip=None, upper_clip=None):
@@ -301,12 +268,7 @@ class DQNAgent(BaseAgent):
 
         self._compiled = True
 
-<<<<<<< Updated upstream
-
-    def train(self, target_reward, episodes=10000, batch_size=64, gamma=0.999, buffer=10000,
-=======
     def train(self, target_reward, episodes=10000, batch_size=64, gamma=0.99, buffer=10000,
->>>>>>> Stashed changes
               epsilon=1, tau=0.001, decay_rate=0.999, min_epsilon=0.02):
         self.method_check(env_loaded=True, net_exists=True, compiled=True)
         self._buffer_size = buffer
@@ -439,13 +401,388 @@ class DQNAgent(BaseAgent):
         return batch
 
 
+class IQLAgent(BaseAgent):
+    """
+    IQLAgent is an implementation of the Implicit Q-Learning algorithm, a completely off-line RL algorithm.
+    """
+
+    def __init__(self, device):
+        super().__init__(device)
+        self._alpha = None
+        self.custom_params = None
+        self._beta = None
+        self._tau = None
+        self.value = CriticNet()
+        self.critic1 = DualNet()
+        self.critic2 = DualNet()
+        self.actor = ActorNet()
+        self.net = self.critic1
+        self._batch_size = None
+
+    def reset(self):
+        reset_done = super().reset()
+
+        if reset_done:
+            self._alpha = None
+            self.custom_params = None
+            self._beta = None
+            self._tau = None
+            self.value = CriticNet()
+            self.critic1 = DualNet()
+            self.critic2 = DualNet()
+            self.actor = ActorNet()
+            self.net = self.actor
+            self._batch_size = None
+
+    def add_network(self, nodes: list):
+        super().network_check(nodes)
+
+        self.value.add_layers(nodes, self.env)
+        self.critic1.add_layers(nodes, self.env)
+        self.critic2.add_layers(nodes, self.env)
+        self.actor.add_layers(nodes, self.env)
+        self.value.has_net = True
+        self.critic1.has_net = True
+        self.critic2.has_net = True
+        self.actor.has_net = True
+
+    def compile(self, optimizer, learning_rate=0.001, weight_decay=1e-5, clip=1.0, lower_clip=None, upper_clip=None):
+        self._optimizer = optimizer
+        self._learning_rate = learning_rate
+        self._regularisation = weight_decay
+        super().compile_check()
+
+        self.value.to(self.device)
+        self.critic1.main_net.to(self.device)
+        self.critic1.target_net.to(self.device)
+        self.critic2.main_net.to(self.device)
+        self.critic2.target_net.to(self.device)
+        self.actor.to(self.device)
+
+        for params in [self.value.parameters(), self.critic1.main_net.parameters(), self.critic2.main_net.parameters(),
+                       self.actor.parameters()]:
+            for p in params:
+                p.register_hook(lambda grad: torch.clamp(grad,
+                                                         lower_clip if lower_clip is not None else -clip,
+                                                         upper_clip if upper_clip is not None else clip))
+
+        self._compiled = True
+
+    @staticmethod
+    def sample(data, batch_size):
+        np.random.default_rng().shuffle(data)
+        return data[:batch_size]
+
+    def train(self, data, critic=True, value=True, actor=True, evaluate=True, steps=1000, batch_size=64,
+              gamma=0.99, tau=0.99, alpha=0.01, beta=1, update_iter=4, ppo_clip=0.01, ppo_clip_decay=0.9, save=False):
+        """
+        Variable 'data' should be a 1D list of Experiences - sorted or unsorted. The reward value should be the
+        correct Q_s value for that state i.e., the cumulated discounted reward from that state onwards.
+        """
+        if save:
+            evaluate = True
+
+        # Set up optimiser
+        self.custom_params = []
+        for params in [self.value.parameters(), self.critic1.main_net.parameters(), self.critic2.main_net.parameters(),
+                       self.actor.parameters()]:
+            self.custom_params.append({'params': params,
+                                       'lr': self._learning_rate,
+                                       'weight_decay': self._regularisation})
+
+        super().train_base(gamma, custom_params=self.custom_params)
+
+        # Make save directory if needed
+        if save:
+            if not os.path.isdir(self.path):
+                os.makedirs(self.path)
+
+        # Create logs
+        old_q_loss = torch.inf
+        old_v_loss = torch.inf
+        old_policy_loss = torch.inf
+        old_average_reward = -10**10
+        current_loss_q = []
+        current_loss_v = []
+        current_loss_policy = []
+        current_best_reward = -10**10
+
+        # If evaluating, start ray instance
+        # if evaluate:
+        # ray.init()
+
+        # Start training
+        print('Beginning training...\n')
+        progress_bar = tqdm(range(1, int(steps) + 1), file=sys.stdout)
+        for step in progress_bar:
+            batch = self.sample(data, batch_size)
+
+            loss_q = self._update_q(batch, gamma, alpha) if critic else None
+            loss_v = self._update_v(batch, tau) if value else None
+            loss_policy = self._update_policy(batch, beta, update_iter, ppo_clip) if actor else None
+            ppo_clip *= ppo_clip_decay
+
+            current_loss_q.append(loss_q)
+            current_loss_v.append(loss_v)
+            current_loss_policy.append(loss_policy)
+
+            if step % 100 == 0:
+                _, _, _, _, total_rewards = self.evaluate(episodes=100, parallel_envs=16,
+                                                          verbose=False) if evaluate else None
+
+                print(f'\nSteps completed: {step}\n')
+                if critic:
+                    print(
+                        f'Q_loss {"decreased" if np.array(current_loss_q).mean() < old_q_loss else "increased"} '
+                        f'from {round(old_q_loss, 5)} to {round(np.array(current_loss_q).mean(), 5)}'
+                    )
+                if value:
+                    print(
+                        f'V_loss {"decreased" if np.array(current_loss_v).mean() < old_v_loss else "increased"} '
+                        f'from {round(old_v_loss, 5)} to {round(np.array(current_loss_v).mean(), 5)}'
+                    )
+                if actor:
+                    print(
+                        f'Policy loss {"decreased" if np.array(current_loss_policy).mean() < old_policy_loss else "increased"} '
+                        f'from {round(old_policy_loss, 5)} to {round(np.array(current_loss_policy).mean(), 5)}'
+                    )
+                if evaluate:
+                    print(
+                        f'Average reward {"decreased" if total_rewards.mean() < old_average_reward else "increased"} '
+                        f'from {int(old_average_reward)} to {int(total_rewards.mean())}'
+                    )
+                    print(
+                        f'Best reward {max(current_best_reward, int(total_rewards.mean()))}'
+                    )
+
+                if total_rewards.mean() > current_best_reward:
+                    if save:
+                        for net, name in [
+                            [self.critic1.target_net, 'critic1'],
+                            [self.critic2.target_net, 'critic2'],
+                            [self.value, 'value'],
+                            [self.actor, 'actor']
+                        ]:
+                            old_save_path = os.path.join(self.path, f'{name}_{int(current_best_reward)}.pt')
+                            new_save_path = os.path.join(self.path, f'{name}_{int(total_rewards.mean())}.pt')
+
+                            torch.save(net, new_save_path)
+                            if os.path.isfile(old_save_path) and old_save_path != new_save_path:
+                                os.remove(old_save_path)
+
+                    current_best_reward = int(total_rewards.mean())
+
+                old_q_loss = np.array(current_loss_q).mean()
+                old_v_loss = np.array(current_loss_v).mean()
+                old_policy_loss = np.array(current_loss_policy).mean()
+                old_average_reward = total_rewards.mean()
+                current_loss_q = []
+                current_loss_v = []
+                current_loss_policy = []
+
+    def _update_q(self, batch: list, gamma, alpha):
+        """
+        Variable 'batch' should be a 1D list of Experiences - sorted or unsorted. The reward value should be the
+        correct Q_s value for that state i.e., the cumulated discounted reward from that state onwards.
+        """
+
+        # Calculate Q loss
+        loss_q1, loss_q2 = calc_iql_q_loss_batch(batch, self.device, self.critic1, self.critic2, self.value,
+                                                 gamma)
+
+        # Update Networks
+        self.optimizer.zero_grad()
+        loss_q1.backward()
+        loss_q2.backward()
+        self.optimizer.step()
+
+        # Soft update of target networks
+        self.critic1.sync(alpha)
+        self.critic2.sync(alpha)
+
+        return loss_q1.item() + loss_q2.item()
+
+    def _update_v(self, batch: list, tau):
+        """
+        Variable 'batch' should be a 1D list of Experiences - sorted or unsorted. The reward value should be the
+        correct Q_s value for that state i.e., the cumulated discounted reward from that state onwards.
+        """
+
+        # Calculate V loss
+        loss_v = calc_iql_v_loss_batch(batch, self.device, self.critic1, self.critic2, self.value, tau)
+
+        # Update Networks
+        self.optimizer.zero_grad()
+        loss_v.backward()
+        self.optimizer.step()
+
+        return loss_v.item()
+
+    def _update_policy(self, batch: list, beta=1, update_iter=4, ppo_clip=0.01):
+        """
+        Variable 'batch' should be a 1D list of Experiences - sorted or unsorted. The reward value should be the
+        correct Q_s value for that state i.e., the cumulated discounted reward from that state onwards.
+        """
+        """
+        loss_policy = calc_iql_policy_loss_batch(batch, self.device, self.critic1, self.critic2, self.value,
+                                                 self.actor, beta)
+
+        self.optimizer.zero_grad()
+        loss_policy.backward()
+        self.optimizer.step()
+
+        return loss_policy.item()
+        """
+        # Unpack the batch
+        states, actions = zip(*[(exp.state, exp.action) for exp in batch])
+
+        # Calculate the logprobs of the action taken
+        with torch.no_grad():
+            old_action_logits = self.actor.forward(states, device=self.device)
+            old_action_logprobs = torch.log_softmax(old_action_logits, dim=1)
+            old_action_logprobs = old_action_logprobs.gather(1,
+                                                             torch.tensor(actions).to(self.device).unsqueeze(-1)).squeeze(
+                -1)
+            old_action_logprobs = torch.where(torch.isinf(old_action_logprobs), -1000, old_action_logprobs)
+            old_action_logprobs = torch.where(old_action_logprobs == 0, -1e-8, old_action_logprobs)
+
+        total_loss_policy = 0
+
+        for _ in range(update_iter):
+            loss_policy, action_logprobs = calc_iql_policy_loss_batch(batch, self.device, self.critic1, self.critic2,
+                                                                      self.value, self.actor, old_action_logprobs, beta,
+                                                                      ppo_clip)
+
+            self.optimizer.zero_grad()
+            loss_policy.backward()
+            self.optimizer.step()
+
+            total_loss_policy += loss_policy.item()
+
+        return total_loss_policy
+
+    def evaluate(self, episodes=100, parallel_envs=32, verbose=True):
+
+        @ray.remote
+        def env_run(actor):
+            done = False
+            prem_done = False
+            state = self.env.reset()[0]
+            ep_record = []
+            while not done and not prem_done:
+                with torch.no_grad():
+                    logits = actor.forward(state, device='cpu')
+
+                action = torch.argmax(logits).item()
+
+                next_state, reward, done, prem_done, _ = self.env.step(action)
+
+                ep_record.append(Experience(state=state,
+                                            action=action,
+                                            reward=reward,
+                                            next_state=next_state))
+
+                state = next_state
+
+            total_reward = sum([exp.reward for exp in ep_record])
+
+            return ep_record, total_reward
+
+        all_states = []
+        all_actions = []
+        all_rewards = []
+        all_total_rewards = []
+        all_next_states = []
+
+        print(f'Beginning evaluation over {episodes} episodes...\n') if verbose else None
+        for episode in tqdm(range(episodes // parallel_envs), disable=not verbose, file=sys.stdout):
+            temp_batch_records, temp_total_reward = zip(
+                *ray.get([env_run.remote(self.actor.cpu()) for _ in range(parallel_envs)]))
+
+            self.actor.to(self.device)
+
+            temp_batch_states, temp_batch_actions, temp_batch_rewards, temp_batch_next_states = zip(
+                *[(exp.state, exp.action, exp.reward, exp.next_state)
+                  for episode in temp_batch_records for exp in episode])
+
+            all_states += list(temp_batch_states)
+            all_actions += list(temp_batch_actions)
+            all_rewards += list(temp_batch_rewards)
+            all_next_states += list(temp_batch_next_states)
+            all_total_rewards += list(temp_total_reward)
+
+        print(
+            f'Evaluation complete! Average reward per episode: {np.array(all_total_rewards).mean()}') if verbose else None
+
+        return np.array(all_states), np.array(all_actions), np.array(all_rewards), \
+            np.array(all_next_states), np.array(all_total_rewards)
+
+    def evaluate_offline(self, data, episodes=100, parallel_envs=32, verbose=True):
+
+        dones = np.array([exp.done for exp in data])
+        episode_idxs = np.where(dones)[0] + 1
+        episode_idxs = episode_idxs.tolist()
+        episode_idxs.insert(0, 0)
+        episode_idxs = np.array(episode_idxs)
+        episode_idxs = [slice(i, j) for i, j in zip(episode_idxs[:-1], episode_idxs[1:])]
+        np.random.default_rng().shuffle(episode_idxs)
+
+        for ep_idx in episode_idxs[:episodes]:
+            p = 1.0
+            h = []
+            t = 0
+            r = 0
+            for exp in data[ep_idx]:
+                h.append(exp.state)
+                logits = self.actor.forward(exp.state, device='cpu')
+                actionprobs = F.softmax(logits)[exp.action]
+                p *= actionprobs
+
+        # return np.array(all_states), np.array(all_actions), np.array(all_rewards), \
+        # np.array(all_next_states), np.array(all_total_rewards)
+        return
+
+    def choose_action(self, state, device='cpu'):
+        with torch.no_grad():
+            logits = self.actor.forward(state, device=device)
+
+        action = torch.argmax(logits)
+
+        return action.item()
+
+    def load_model(self, criticpath1=None, criticpath2=None, valuepath=None, actorpath=None):
+        if criticpath1 is not None:
+            self.critic1.main_net = torch.load(criticpath1)
+            self.critic1.target_net = torch.load(criticpath1)
+            self.critic1.has_net = True
+        if criticpath2 is not None:
+            self.critic2.main_net = torch.load(criticpath2)
+            self.critic2.target_net = torch.load(criticpath2)
+            self.critic2.has_net = True
+        if valuepath is not None:
+            self.value = torch.load(valuepath)
+            self.value.has_net = True
+        if actorpath is not None:
+            self.actor = torch.load(actorpath)
+            self.actor.has_net = True
+
+        if self._compiled:
+            self._compiled = False
+            self._optimizer = None
+            self._learning_rate = None
+            self._regularisation = None
+            print('Model loaded - recompile agent please')
+
+        self.path = os.path.dirname(criticpath1)
+
+
 class PolicyGradient(BaseAgent):
     """
     PolicyGradient is a neural network based on REINFORCE
     """
 
-    def __init__(self):
-        super().__init__()
+    def __init__(self, device):
+        super().__init__(device)
         self.net = PolicyGradientNet()
 
     def reset(self):
@@ -457,7 +794,7 @@ class PolicyGradient(BaseAgent):
     def add_network(self, nodes: list):
         super().network_check(nodes)
 
-        self.net.add_layers(nodes, self.observation_space, self.action_space)
+        self.net.add_layers(nodes, self.env)
         self.net.has_net = True
 
     def compile(self, optimizer, learning_rate=0.001, weight_decay=1e-5, clip=1.0, lower_clip=None, upper_clip=None):
@@ -478,12 +815,7 @@ class PolicyGradient(BaseAgent):
 
         self._compiled = True
 
-<<<<<<< Updated upstream
-
-    def train(self, target_reward=None, episodes=10000, ep_update=4, gamma=0.999):
-=======
     def train(self, target_reward=None, episodes=10000, ep_update=4, gamma=0.99):
->>>>>>> Stashed changes
         self.method_check(env_loaded=True, net_exists=True, compiled=True)
         self._gamma = gamma
 
@@ -528,16 +860,16 @@ class PolicyGradient(BaseAgent):
             state_records, action_records = zip(
                 *[(exp.state, exp.action) for buffer in buffer_record for exp in buffer])
             cum_rewards = [cum_r for record in cum_reward for cum_r in record]
-            self.net.to('mps')
-            _, action_probs_records, action_logprobs_records = self.net(state_records)
+            self.net.to('cpu')
+            _, action_probs_records, action_logprobs_records = self.net(state_records, self.device)
 
             # calculate loss
             self.optimizer.zero_grad()
-            loss = calc_loss_policy(cum_rewards, action_records, action_logprobs_records, device='mps')
+            loss = calc_loss_policy(cum_rewards, action_records, action_logprobs_records, device='cpu')
             loss.backward(retain_graph=True)
             # Now calculate the entropy loss
 
-            entropy_loss = calc_entropy_loss_policy(action_probs_records, action_logprobs_records, device='mps')
+            entropy_loss = calc_entropy_loss_policy(action_probs_records, action_logprobs_records, device='cpu')
             entropy_loss.backward()
             # update the model and predict_model
             self.optimizer.step()
@@ -552,13 +884,13 @@ class PolicyGradient(BaseAgent):
         return self.net(obs)[0]
 
 
-class ActorCritic(BaseAgent):
+class PPO(BaseAgent):
     """
-    ActorCritic uses the actor-critic neural network to solve environments
+    ActorCritic uses the actor-critic neural network to solve environments with a discrete action space.
     """
 
-    def __init__(self):
-        super().__init__()
+    def __init__(self, device):
+        super().__init__(device)
         self.net = ActorCriticNet()
 
     def reset(self):
@@ -570,7 +902,7 @@ class ActorCritic(BaseAgent):
     def add_network(self, nodes: list):
         super().network_check(nodes)
 
-        self.net.add_layers(nodes, self.observation_space, self.action_space)
+        self.net.add_layers(nodes, self.env)
         self.net.has_net = True
 
     def compile(self, optimizer, learning_rate=0.001, weight_decay=1e-5, clip=1, lower_clip=None, upper_clip=None):
@@ -579,23 +911,22 @@ class ActorCritic(BaseAgent):
         self._regularisation = weight_decay
         super().compile_check()
 
-<<<<<<< Updated upstream
-        self.net.to(self.device)
-=======
         # self.net.to(self.device)
->>>>>>> Stashed changes
 
-        for p in self.net.parameters():
+        '''for p in self.net.parameters():
             p.register_hook(lambda grad: torch.clamp(grad,
                                                      lower_clip if lower_clip is not None else -clip,
-                                                     upper_clip if upper_clip is not None else clip))
+                                                     upper_clip if upper_clip is not None else clip))'''
 
         self._compiled = True
 
-<<<<<<< Updated upstream
+    def choose_action(self, state, device='cpu'):
+        action_logits, state_value = self.net.forward(state, device=device)
 
-    def train(self, target_reward, save_from, save_interval=10, episodes=10000, parallel_envs=32, gamma=0.999):
-=======
+        action, _, _ = self.get_action_and_logprobs(action_logits)
+
+        return action.item()
+
     def get_action_and_logprobs(self, action_logits, action=None):
         action_probs = F.softmax(action_logits, dim=-1)
         action_logprobs = F.log_softmax(action_logits, dim=-1)
@@ -627,23 +958,16 @@ class ActorCritic(BaseAgent):
 
     def train(self, target_reward, save_from, save_interval=10, episodes=10000, parallel_envs=32, update_iter=4,
               update_steps=1000, batch_size=128, gamma=0.99):
->>>>>>> Stashed changes
-        super().train(gamma)
+        super().train_base(gamma)
 
-        total_rewards = deque([], maxlen=100)
-        total_loss = deque([], maxlen=100)
+        total_rewards = deque([], maxlen=parallel_envs)
+        total_loss = deque([], maxlen=update_steps)
+        total_policy_loss = deque([], maxlen=update_steps)
+        total_value_loss = deque([], maxlen=update_steps)
+        list_of_indexes = np.array([i for i in range(update_steps)])
 
         @ray.remote
         def env_run(predict_net):
-<<<<<<< Updated upstream
-          done = False
-          prem_done = False
-          state = self.env.reset()[0]
-          ep_record = []
-          while not done and not prem_done:
-            with torch.no_grad():
-              action, _, _, state_value = predict_net.forward(state, device='cpu')
-=======
             done = False
             prem_done = False
             state = self.env.reset()[0]
@@ -653,20 +977,13 @@ class ActorCritic(BaseAgent):
                     action_logits, state_value = predict_net.forward(state, device='cpu')
 
                 action, old_policy_logprobs, _ = self.get_action_and_logprobs(action_logits)
->>>>>>> Stashed changes
 
                 next_state, reward, done, prem_done, _ = self.env.step(action.item())
 
-<<<<<<< Updated upstream
-            ep_record.append(Experience(state=state,
-                                        action=action,
-                                        reward=reward))
-=======
                 ep_record.append(Experience(state=state,
                                             action=action,
                                             reward=reward,
                                             action_logprobs=old_policy_logprobs))
->>>>>>> Stashed changes
 
                 state = next_state
 
@@ -674,52 +991,6 @@ class ActorCritic(BaseAgent):
 
             return ep_record, cum_rewards
 
-<<<<<<< Updated upstream
-        for episode in range(episodes // parallel_envs):
-
-          batch_records, batch_Q_s = zip(*ray.get([env_run.remote(self.net.cpu()) for _ in range(parallel_envs)]))
-
-          total_rewards += deque([np.sum([exp.reward for exp in episode]) for episode in batch_records])
-
-          if (target_reward is not None) & (len(total_rewards) == 100):
-            if np.array(total_rewards).mean() >= target_reward:
-              print(f'Solved at target {target_reward}!')
-              self.save_model(np.array(total_rewards).mean(), save_from, save_interval, best=True)
-              break
-
-          if (target_reward is not None) & (len(total_rewards) == 100):
-            self.save_model(np.array(total_rewards).mean(), save_from, save_interval, best=False)
-            if np.array(total_rewards).mean() > self.current_best_reward:
-              self.current_best_reward = np.array(total_rewards).mean()
-
-          batch_Q_s = torch.tensor([Q_s for episode in batch_Q_s for Q_s in episode],
-                                   dtype=torch.float32).to(self.device).unsqueeze(-1)
-
-          zip(*[(exp.state, exp.action) for episode in batch_records for exp in episode])
-
-          batch_states, batch_actions= zip(*[(exp.state, exp.action) for episode in batch_records for exp in episode])
-
-          batch_states = np.array(batch_states)
-          batch_actions = torch.stack(batch_actions).to(self.device).unsqueeze(-1)
-
-          self.net.to(self.device)
-          _, batch_action_probs, batch_action_logprobs, batch_state_values = self.net(batch_states)
-
-          # calculate loss
-          self.optimizer.zero_grad()
-          loss = calc_loss_actor_critic(batch_Q_s, batch_actions, batch_action_probs, batch_action_logprobs,
-                                        batch_state_values, device=self.device)
-
-          loss.backward()
-
-          # update the model and predict_model
-          self.optimizer.step()
-
-          total_loss.append(loss.item())
-
-          print(
-            f'Episodes: {episode * parallel_envs}, Loss {np.array(total_loss).mean()}, Mean Reward: {np.array(total_rewards).mean()}')
-=======
         for episode in range(episodes):
             batch_records = []
             batch_Q_s = []
@@ -824,28 +1095,45 @@ class ActorCritic(BaseAgent):
                 f'Mean Reward: {round(np.array(total_rewards).mean(), 2)}')
 
     def explore(self, episodes=10000, parallel_envs=32, gamma=0.99):
-        super().train(gamma)
+        super().train_base(gamma)
+        if not ray.is_initialized():
+            ray.init()
 
         @ray.remote
         def env_run(predict_net):
             done = False
             prem_done = False
-            state = self.env.reset()[0]
             ep_record = []
+
+            state = self.env.reset()[0]
+            with torch.no_grad():
+                action_logits, _ = predict_net.forward(state, device='cpu')
+
+            action, _, _ = self.get_action_and_logprobs(action_logits)
+
+            action = action.item()
+
             while not done and not prem_done:
-                with torch.no_grad():
-                    action_logits, state_value = predict_net.forward(state, device='cpu')
 
-                action, old_policy_logprobs, _ = self.get_action_and_logprobs(action_logits)
+                next_state, reward, done, prem_done, _ = self.env.step(action)
 
-                next_state, reward, done, prem_done, _ = self.env.step(action.item())
+                if not done and not prem_done:
+                    with torch.no_grad():
+                        next_action_logits, _ = predict_net.forward(state, device='cpu')
+
+                    next_action, _, _ = self.get_action_and_logprobs(next_action_logits)
+
+                    next_action = next_action.item()
 
                 ep_record.append(Experience(state=state,
                                             action=action,
                                             reward=reward,
-                                            next_state=next_state))
+                                            next_state=next_state,
+                                            next_action=next_action,
+                                            done=done))
 
                 state = next_state
+                action = next_action
 
             cum_rewards = calc_cum_rewards([exp.reward for exp in ep_record], self._gamma)
 
@@ -854,27 +1142,31 @@ class ActorCritic(BaseAgent):
         all_states = []
         all_actions = []
         all_rewards = []
-        all_cum_rewards = []
         all_next_states = []
+        all_next_actions = []
+        all_dones = []
+        all_cum_rewards = []
 
-        print(f'Beginning exploration over {episodes} episodes...')
-        for episode in tqdm(range(episodes // parallel_envs)):
-
+        print(f'\nBeginning exploration over {episodes} episodes...')
+        for episode in tqdm(range(episodes // parallel_envs), file=sys.stdout):
             temp_batch_records, temp_batch_Qs = zip(
                 *ray.get([env_run.remote(self.net.cpu()) for _ in range(parallel_envs)]))
 
-            temp_batch_states, temp_batch_actions, temp_batch_rewards, temp_batch_next_states = zip(
-                *[(exp.state, exp.action, exp.reward, exp.next_state)
-                  for episode in temp_batch_records for exp in episode])
+            temp_batch_states, temp_batch_actions, temp_batch_rewards, temp_batch_next_states, \
+                temp_next_actions, temp_batch_dones = zip(*[(exp.state, exp.action, exp.reward, exp.next_state,
+                                                             exp.next_action, exp.done)
+                                                            for episode in temp_batch_records for exp in episode])
 
             all_states += list(temp_batch_states)
             all_actions += list(temp_batch_actions)
             all_rewards += list(temp_batch_rewards)
             all_next_states += list(temp_batch_next_states)
+            all_next_actions += list(temp_next_actions)
+            all_dones += list(temp_batch_dones)
             all_cum_rewards += list([Q_s for episode in temp_batch_Qs for Q_s in episode])
 
         return np.array(all_states), np.array(all_actions), np.array(all_rewards), \
-            np.array(all_next_states), np.array(all_cum_rewards)
+            np.array(all_next_states), np.array(all_next_actions), np.array(all_dones), np.array(all_cum_rewards)
 
 
 class PPOContinuous(BaseAgent):
@@ -933,7 +1225,7 @@ class PPOContinuous(BaseAgent):
                           'lr': 0.0005},  # 0.0005
                          {'params': self.net.critic_net.parameters(),
                           'lr': 0.0005}]  # 0.0005
-        super().train(gamma, custom_params)
+        super().train_base(gamma, custom_params)
 
         total_rewards = deque([], maxlen=parallel_envs)
         total_loss = deque([], maxlen=update_steps)
@@ -1099,4 +1391,3 @@ NEXT STEP - START CONSOLIDATING INCONSISTENCIES ACROSS CLASSES IN TERMS OF NET A
 NOTE THAT ANIMATE CURRENTLY IS NOT CONSISTENT ACROSS ALL CLASSES
 THEN - CONSIDER CREATING INDIVIDUAL ACTOR AND CRITIC NET CLASSES
 '''
->>>>>>> Stashed changes
