@@ -216,48 +216,23 @@ def calc_iql_policy_loss_batch(batch, device, critic1, critic2, value, actor, ol
 
     # Calculate the policy loss
     ratio = torch.exp(action_logprobs - old_action_logprobs) - 1
-    clipped_ratio_pos_adv = torch.clamp(ratio, min=-ppo_clip)
-    clipped_ratio_neg_adv = torch.clamp(ratio, max=ppo_clip)
+    clipped_ratio = torch.clamp(ratio, max=ppo_clip)
+
     """
-    The goal of the PPO-like loss function is the following:
-    - We always want to trend towards a positive ratio, because that means we are moving in the direction of the
-    behavioural policy.
-    - So when the ratio is positive, the loss (which gets inverted) should be positive.
-    - And when the ratio is negative, the loss (which gets inverted) should be negative.
+    The ratio is always trending positive i.e., we always want the actions chosen to increase in probability.
     
-    - We prefer to make strong moves when the advantage is positive (i.e., >1) and the ratio is positive.
-    This is expressed as a large positive loss, which is good.
+    If the ratio is negative, it will be trending back to positive i.e., staying within our trusted region.
+    If the ratio is positive, it may move outside our trusted region, and so we will clip it.
     
-    - We prefer to make strong moves when the advantage is negative (i.e., <1) and the ratio is negative.
-    This is expressed as a small negative loss (because the bigger the negative advantage, the closer the value is to 0).
+    Importantly, these changes will be weighted by the advantage function - which will be kept small if the
+    advantage is "negative", and will be large if the advantage is "positive".
     
-    - We prefer to make weak moves when the advantage is positive (i.e., >1) and the ratio is negative.
-    If we clip the ratio to avoid large negative ratios, then the overall loss will be negative but small.
-    
-    - We prefer to make weak moves when the advantage is negative (i.e., <1) and the ratio is positive.
-    If we clip the ratio to avoid large positive ratios, then the overall loss will be positive but small.
-    
-    So, in summary:
-    1. Positive ratio, positive advantage -> positive loss (which gets inverted i.e., is good)
-    2. Negative ratio, positive advantage -> negative loss, clipped and small (which gets inverted i.e., is bad)
-    
-    3. Positive ratio, negative advantage -> positive loss, but clipped and small (which gets inverted i.e., is good)
-    4. Negative ratio, negative advantage -> negative loss (which gets inverted i.e., is bad)
+    So ultimately, the only 'large' changes will be from a negative ratio with a large advantage.
+    All other changes will either be clipped (all very positive ratios) 
+    or will be small (negative ratio with small advantage).
     """
-    """
-    loss = torch.where(advantage > 1,
-                       # When advantage is "positive"...
-                       # If ratio is positive, then loss is positive (good) i.e., ratio * advantage.
-                       # If ratio is negative, clip at -0.2, and loss is negative (bad) i.e., clipped(ratio) * advantage
-                       torch.max(ratio, clipped_ratio_pos_adv) * advantage,
-                       # When advantage is "negative"...
-                       # If ratio is positive, then loss is positive (bad) but clipped i.e., clipped(ratio) * advantage
-                       # If ratio is negative, then loss is negative (good) i.e., ratio * advantage
-                       torch.min(ratio, clipped_ratio_neg_adv) * advantage)
-    """
-    loss = torch.where(advantage > 1,
-                       ratio * advantage,
-                       torch.clamp(ratio, -0.02, 0.02) * advantage)
+
+    loss = torch.min(ratio, clipped_ratio) * advantage
 
     # loss = torch.exp(beta * (pred_Q - pred_V_s)) * action_logprobs
     loss = -loss.mean()
