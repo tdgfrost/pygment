@@ -559,6 +559,17 @@ class IQLAgent(BaseAgent):
 
         super().train_base(gamma, custom_params=self.custom_params)
 
+        # Create stochastic weight averaged models
+        swa_critic1_main_net = torch.optim.swa_utils.AveragedModel(self.critic1.main_net)
+        swa_critic2_main_net = torch.optim.swa_utils.AveragedModel(self.critic2.main_net)
+        swa_critic1_target_net = torch.optim.swa_utils.AveragedModel(self.critic1.target_net)
+        swa_critic2_target_net = torch.optim.swa_utils.AveragedModel(self.critic2.target_net)
+        # swa_actor = torch.optim.swa_utils.AveragedModel(self.actor)
+        swa_value = torch.optim.swa_utils.AveragedModel(self.value)
+
+        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(self.optimizer, T_max=steps)
+        swa_scheduler = torch.optim.swa_utils.SWALR(self.optimizer, swa_lr=0.001)
+
         # Make save directory if needed
         if save:
             if not os.path.isdir(self.path):
@@ -575,7 +586,6 @@ class IQLAgent(BaseAgent):
         current_loss_v = []
         current_loss_policy = []
         current_best_reward = -10**10
-        current_best_policy_loss = torch.inf
 
         # If evaluating, start ray instance
         # if evaluate:
@@ -589,15 +599,29 @@ class IQLAgent(BaseAgent):
 
             loss_q, loss_qt = self._update_q(batch, gamma) if critic else None
             loss_v = self._update_v(batch, tau) if value else None
-            loss_policy = -1 * self._update_policy(batch, beta, update_iter, ppo_clip) if actor else None
+            # loss_policy = -1 * self._update_policy(batch, beta, update_iter, ppo_clip) if actor else None
             ppo_clip *= ppo_clip_decay
 
             current_loss_q.append(loss_q)
             current_loss_qt.append(loss_qt)
             current_loss_v.append(loss_v)
-            current_loss_policy.append(loss_policy)
+            # current_loss_policy.append(loss_policy)
 
-            if step % 100 == 0:
+            if step > 10 and step % 5 == 0:
+                swa_critic1_main_net.update_parameters(self.critic1.main_net)
+                swa_critic2_main_net.update_parameters(self.critic2.main_net)
+                swa_critic1_target_net.update_parameters(self.critic1.target_net)
+                swa_critic2_target_net.update_parameters(self.critic2.target_net)
+                # swa_actor.update_parameters(self.actor)
+                swa_value.update_parameters(self.value)
+                swa_scheduler.step()
+
+                loss_policy = -1 * self._update_policy(batch, beta, update_iter, ppo_clip) if actor else None
+                current_loss_policy.append(loss_policy)
+            else:
+                scheduler.step()
+
+            if step % 500 == 0:
                 """
                 Experimental weighted sampling code
                 
@@ -634,7 +658,7 @@ class IQLAgent(BaseAgent):
                 CHECKPOINT - not working because (I think) the weighting factor needs to be specific
                 to the length L of each episode
                 """
-                _, _, _, _, total_rewards = self.evaluate(episodes=100, parallel_envs=16,
+                _, _, _, _, total_rewards = self.evaluate(episodes=800, parallel_envs=512,
                                                           verbose=False) if evaluate else None
 
                 print(f'\nSteps completed: {step}\n')
