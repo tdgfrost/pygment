@@ -4,7 +4,7 @@ import numpy as np
 
 #for template_reward in [20, 30, 50, 100, 130, 150, 200, 220]:
 for template_reward in [100]:
-    load_prior_model = False
+    load_prior_model = True
     animate_only = False
     # template_reward = 100
 
@@ -14,10 +14,11 @@ for template_reward in [100]:
 
     agent.add_network(nodes=[64, 64])
     if load_prior_model:
-        agent.load_model(criticpath1='./Experiment 1 - 189/critic1_189.pt',
-                         criticpath2='./Experiment 1 - 189/critic2_189.pt',
-                         valuepath='./Experiment 1 - 189/value_189.pt',
-                         actorpath=None)
+        agent.load_model(criticpath1=None,
+                         criticpath2=None,
+                         valuepath=None,
+                         actorpath=None,
+                         behaviourpolicypath='./BehaviourPolicy/behaviour_policy_0.88427.pt')
 
     agent.compile('adam', learning_rate=0.001, weight_decay=1e-8, clip=1)
 
@@ -40,6 +41,8 @@ for template_reward in [100]:
                           next_action=loaded_data['next_action'][i],
                           cum_reward=loaded_data['all_cum_rewards'][i],
                           done=loaded_data['dones'][i]) for i in range(len(loaded_data['state']))]
+
+    #agent.clone_behaviour(data, batch_size=10240, epochs=1000000, evaluate=True, save=True)
 
     agent.train(data, critic=True, value=True, actor=True, evaluate=True, steps=1e6, batch_size=64,
                 gamma=0.99, tau=0.8, alpha=1, beta=0.3, update_iter=10, ppo_clip=0.01, ppo_clip_decay=1, save=True)

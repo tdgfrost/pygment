@@ -416,6 +416,7 @@ class IQLAgent(BaseAgent):
         self.critic1 = DualNet()
         self.critic2 = DualNet()
         self.actor = ActorNet()
+        self.behaviour_policy = ActorNet()
         self.net = self.critic1
         self._batch_size = None
 
@@ -431,6 +432,7 @@ class IQLAgent(BaseAgent):
             self.critic1 = DualNet()
             self.critic2 = DualNet()
             self.actor = ActorNet()
+            self.behaviour_policy = ActorNet()
             self.net = self.actor
             self._batch_size = None
 
@@ -441,10 +443,12 @@ class IQLAgent(BaseAgent):
         self.critic1.add_layers(nodes, self.env)
         self.critic2.add_layers(nodes, self.env)
         self.actor.add_layers(nodes, self.env)
+        self.behaviour_policy.add_layers(nodes, self.env)
         self.value.has_net = True
         self.critic1.has_net = True
         self.critic2.has_net = True
         self.actor.has_net = True
+        self.behaviour_policy.has_net = True
 
     def compile(self, optimizer, learning_rate=0.001, weight_decay=1e-5, clip=1.0, lower_clip=None, upper_clip=None):
         self._optimizer = optimizer
@@ -458,9 +462,10 @@ class IQLAgent(BaseAgent):
         self.critic2.main_net.to(self.device)
         self.critic2.target_net.to(self.device)
         self.actor.to(self.device)
+        self.behaviour_policy.to(self.device)
 
         for params in [self.value.parameters(), self.critic1.main_net.parameters(), self.critic2.main_net.parameters(),
-                       self.actor.parameters()]:
+                       self.actor.parameters(), self.behaviour_policy.parameters()]:
             for p in params:
                 p.register_hook(lambda grad: torch.clamp(grad,
                                                          lower_clip if lower_clip is not None else -clip,
@@ -470,8 +475,69 @@ class IQLAgent(BaseAgent):
 
     @staticmethod
     def sample(data, batch_size):
-        np.random.default_rng().shuffle(data)
-        return data[:batch_size]
+        idxs = np.random.default_rng().choice(len(data), size=batch_size, replace=False)
+        return [data[idx] for idx in idxs]
+
+    def clone_behaviour(self, data, batch_size=64, epochs=10000, evaluate=False, save=False):
+
+        # Set up optimiser
+        self.custom_params = []
+        self.custom_params.append({'params': self.behaviour_policy.parameters(),
+                                   'lr': self._learning_rate,
+                                   'weight_decay': self._regularisation})
+
+        super().train_base(0.99, custom_params=self.custom_params)
+
+        # Make save directory if needed
+        if save:
+            if not os.path.isdir(self.path):
+                os.makedirs(self.path)
+
+        # Create logs
+        old_policy_loss = torch.inf
+        best_policy_loss = torch.inf
+        current_loss_policy = []
+
+        # Start training
+        print('Beginning training...\n')
+        progress_bar = tqdm(range(1, int(epochs) + 1), file=sys.stdout)
+        for epoch in progress_bar:
+            batch = self.sample(data, batch_size)
+
+            loss = self._update_behaviour_policy(batch)
+
+            current_loss_policy.append(loss)
+
+            if epoch % 100 == 0:
+                if evaluate:
+                    _, _, _, _, total_rewards = self.evaluate(episodes=100, parallel_envs=16,
+                                                              verbose=False, behaviour=True)
+
+                print(f'\nSteps completed: {epoch}\n')
+                print(
+                    f'Behaviour policy loss {"decreased" if np.array(current_loss_policy).mean() < old_policy_loss else "increased"} '
+                    f'from {old_policy_loss} to {round(np.array(current_loss_policy).mean(), 5)}'
+                )
+                print(f'Best policy loss: {best_policy_loss}')
+                if evaluate:
+                    print(f'Average reward: {int(np.array(total_rewards).mean())}')
+
+                if np.array(current_loss_policy).mean() < best_policy_loss:
+                    if save:
+                        for net, name in [
+                            [self.behaviour_policy, 'behaviour_policy']
+                        ]:
+                            old_save_path = os.path.join(self.path, f'{name}_{best_policy_loss}.pt')
+                            new_save_path = os.path.join(self.path, f'{name}_{round(np.array(current_loss_policy).mean(), 5)}.pt')
+
+                            torch.save(net, new_save_path)
+                            if os.path.isfile(old_save_path) and old_save_path != new_save_path:
+                                os.remove(old_save_path)
+
+                    best_policy_loss = round(np.array(current_loss_policy).mean(), 5)
+
+                old_policy_loss = round(np.array(current_loss_policy).mean(), 5)
+                current_loss_policy = []
 
     def train(self, data, critic=True, value=True, actor=True, evaluate=True, steps=1000, batch_size=64,
               gamma=0.99, tau=0.99, alpha=0.01, beta=1, update_iter=4, ppo_clip=0.01, ppo_clip_decay=0.9, save=False):
@@ -527,6 +593,42 @@ class IQLAgent(BaseAgent):
             current_loss_policy.append(loss_policy)
 
             if step % 100 == 0:
+                """
+                Experimental weighted sampling code
+                
+                idxs = [idx for idx, exp in enumerate(data) if exp.done]
+                idxs.insert(0, -1)
+                idxs = [(idx+1, next_idx) for idx, next_idx in zip(idxs[:-1], idxs[1:])]
+                np.random.default_rng().shuffle(idxs)
+                final_importance_ratios = []
+                for idx in tqdm(idxs[:1000], file=sys.stdout, position=0, leave=True):
+                    states = [step.state for step in data[idx[0]:idx[1]]]
+                    
+                    with torch.no_grad():
+                        logits = self.actor.forward(states, device=self.device)
+                        behaviour_logits = self.behaviour_policy.forward(states, device=self.device)
+                    
+                    probs = F.log_softmax(logits, dim=1)
+                    probs = probs.gather(1, torch.tensor([step.action for step in data[idx[0]:idx[1]]]).unsqueeze(1).to(self.device)).squeeze(1)
+                    behaviour_probs = F.log_softmax(behaviour_logits, dim=1)
+                    behaviour_probs = behaviour_probs.gather(1, torch.tensor([step.action for step in data[idx[0]:idx[1]]]).unsqueeze(1).to(self.device)).squeeze(1)
+                    
+                    importance_ratio = probs - behaviour_probs
+                    final_importance_ratio = importance_ratio.sum()
+                    final_importance_ratios.append(final_importance_ratio.item())
+                
+                final_importance_ratios = torch.tensor(np.array(final_importance_ratios))
+                final_importance_ratios_adj = F.softmax(final_importance_ratios, dim=0)
+            
+                cum_rewards = torch.tensor([data[idx[0]].cum_reward for idx in idxs[:1000]])
+                
+                gwis = final_importance_ratios_adj * cum_rewards
+                gwis = gwis.sum()
+                print(f'Predicted reward will be {gwis.item()}')
+                
+                CHECKPOINT - not working because (I think) the weighting factor needs to be specific
+                to the length L of each episode
+                """
                 _, _, _, _, total_rewards = self.evaluate(episodes=100, parallel_envs=16,
                                                           verbose=False) if evaluate else None
 
@@ -661,7 +763,30 @@ class IQLAgent(BaseAgent):
 
         return total_loss_policy
 
-    def evaluate(self, episodes=100, parallel_envs=32, verbose=True):
+    def _update_behaviour_policy(self, batch: list):
+        """
+        Variable 'batch' should be a 1D list of Experiences - sorted or unsorted. The reward value should be the
+        correct Q_s value for that state i.e., the cumulated discounted reward from that state onwards.
+        """
+
+        # Unpack the batch
+        states, actions = zip(*[(exp.state, exp.action) for exp in batch])
+
+        # Calculate the logprobs of the action taken
+        logits = self.behaviour_policy.forward(states, device=self.device)
+        logprobs = torch.log_softmax(logits, dim=1)
+        logprobs = logprobs.gather(1, torch.tensor(actions).to(self.device).unsqueeze(-1)).squeeze(-1)
+
+        # Calculate the loss and backprop
+        loss = -logprobs.mean()
+
+        self.optimizer.zero_grad()
+        loss.backward()
+        self.optimizer.step()
+
+        return loss.item()
+
+    def evaluate(self, episodes=100, parallel_envs=32, verbose=True, behaviour=False):
 
         @ray.remote
         def env_run(actor):
@@ -673,7 +798,39 @@ class IQLAgent(BaseAgent):
                 with torch.no_grad():
                     logits = actor.forward(state, device='cpu')
 
-                action = torch.argmax(logits).item()
+                #action = torch.argmax(logits).item()
+                action_probs = F.softmax(logits, dim=-1)
+                action_distribution = Categorical(action_probs)
+
+                action = action_distribution.sample().item()
+
+                next_state, reward, done, prem_done, _ = self.env.step(action)
+
+                ep_record.append(Experience(state=state,
+                                            action=action,
+                                            reward=reward,
+                                            next_state=next_state))
+
+                state = next_state
+
+            total_reward = sum([exp.reward for exp in ep_record])
+
+            return ep_record, total_reward
+
+        @ray.remote
+        def env_run_behaviour(actor):
+            done = False
+            prem_done = False
+            state = self.env.reset()[0]
+            ep_record = []
+            while not done and not prem_done:
+                with torch.no_grad():
+                    logits = actor.forward(state, device='cpu')
+
+                action_probs = F.softmax(logits, dim=-1)
+                action_distribution = Categorical(action_probs)
+
+                action = action_distribution.sample().item()
 
                 next_state, reward, done, prem_done, _ = self.env.step(action)
 
@@ -696,8 +853,12 @@ class IQLAgent(BaseAgent):
 
         print(f'Beginning evaluation over {episodes} episodes...\n') if verbose else None
         for episode in tqdm(range(episodes // parallel_envs), disable=not verbose, file=sys.stdout):
-            temp_batch_records, temp_total_reward = zip(
-                *ray.get([env_run.remote(self.actor.cpu()) for _ in range(parallel_envs)]))
+            if behaviour:
+                temp_batch_records, temp_total_reward = zip(
+                    *ray.get([env_run_behaviour.remote(self.behaviour_policy.cpu()) for _ in range(parallel_envs)]))
+            else:
+                temp_batch_records, temp_total_reward = zip(
+                    *ray.get([env_run.remote(self.actor.cpu()) for _ in range(parallel_envs)]))
 
             self.actor.to(self.device)
 
@@ -750,11 +911,12 @@ class IQLAgent(BaseAgent):
 
         return action.item()
 
-    def load_model(self, criticpath1=None, criticpath2=None, valuepath=None, actorpath=None):
+    def load_model(self, criticpath1=None, criticpath2=None, valuepath=None, actorpath=None, behaviourpolicypath=None):
         if criticpath1 is not None:
             self.critic1.main_net = torch.load(criticpath1)
             self.critic1.target_net = torch.load(criticpath1)
             self.critic1.has_net = True
+            self.path = os.path.dirname(criticpath1)
         if criticpath2 is not None:
             self.critic2.main_net = torch.load(criticpath2)
             self.critic2.target_net = torch.load(criticpath2)
@@ -765,6 +927,9 @@ class IQLAgent(BaseAgent):
         if actorpath is not None:
             self.actor = torch.load(actorpath)
             self.actor.has_net = True
+        if behaviourpolicypath is not None:
+            self.behaviour_policy = torch.load(behaviourpolicypath)
+            self.behaviour_policy.has_net = True
 
         if self._compiled:
             self._compiled = False
@@ -772,8 +937,6 @@ class IQLAgent(BaseAgent):
             self._learning_rate = None
             self._regularisation = None
             print('Model loaded - recompile agent please')
-
-        self.path = os.path.dirname(criticpath1)
 
 
 class PolicyGradient(BaseAgent):
