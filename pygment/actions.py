@@ -118,8 +118,8 @@ def calc_iql_v_loss_batch(batch, device, actor1, actor2, critic, tau):
 
     # Calculate Q(s',a), Q'(s',a), and V(s) for each state in the batch
     with torch.no_grad():
-        pred_Q1 = actor1.forward(states, target=True, device=device)
-        pred_Q2 = actor2.forward(states, target=True, device=device)
+        pred_Q1 = actor1.forward(states, target=False, device=device)
+        pred_Q2 = actor2.forward(states, target=False, device=device)
         pred_Q = torch.minimum(pred_Q1, pred_Q2).gather(1, torch.tensor(actions).to(device).unsqueeze(-1)).squeeze(-1)
 
     pred_V_s = critic.forward(states, device=device).squeeze(-1)
@@ -141,17 +141,24 @@ def calc_iql_q_loss_batch(batch, device, critic1, critic2, value, gamma):
                                                                                     exp.cum_reward, exp.done)
                                                                                    for exp in batch])
 
-    # Calculate Q(s,a) for each state in the batch
+    # Calculate Q(s,a) for each state in the batch - V(s) is updated from this
     pred_Q1 = critic1.forward(states, target=False, device=device)
     pred_Q1_choice = pred_Q1.gather(1, torch.tensor(actions).to(device).unsqueeze(-1)).squeeze(-1)
     pred_Q2 = critic2.forward(states, target=False, device=device)
     pred_Q2_choice = pred_Q2.gather(1, torch.tensor(actions).to(device).unsqueeze(-1)).squeeze(-1)
 
-    """
+    # Calculate Q_t(s,a) for each state in the batch - this is the 'optimal' Q-function, updated from V(s')
+    pred_Q1_t = critic1.forward(states, target=True, device=device)
+    pred_Q1_t_choice = pred_Q1_t.gather(1, torch.tensor(actions).to(device).unsqueeze(-1)).squeeze(-1)
+    pred_Q2_t = critic2.forward(states, target=True, device=device)
+    pred_Q2_t_choice = pred_Q2_t.gather(1, torch.tensor(actions).to(device).unsqueeze(-1)).squeeze(-1)
+
     # Calculate V(s') for each state in the batch
     with torch.no_grad():
-        pred_V_s = value.forward(next_states, device=device).squeeze(-1)
-        pred_V_s = torch.where(~torch.tensor(dones).to(device), pred_V_s, torch.zeros_like(pred_V_s))
+        pred_V_s_next = value.forward(next_states, device=device).squeeze(-1)
+        pred_V_s_next = torch.where(~torch.tensor(dones).to(device), pred_V_s_next, torch.zeros_like(pred_V_s_next))
+
+    """
     
     # Calculate Q'(s',a') for the next state in the batch
     with torch.no_grad():
@@ -171,23 +178,28 @@ def calc_iql_q_loss_batch(batch, device, critic1, critic2, value, gamma):
     loss_q1 = F.mse_loss(pred_Q1_choice, target_q)
     loss_q2 = F.mse_loss(pred_Q2_choice, target_q)
 
-    return loss_q1, loss_q2
+    # Calculate loss_q1
+    target_q = torch.tensor(reward, dtype=torch.float32).to(device) + gamma * pred_V_s_next
+    loss_qt1 = F.mse_loss(pred_Q1_t_choice, target_q)
+    loss_qt2 = F.mse_loss(pred_Q2_t_choice, target_q)
+
+    return loss_q1, loss_q2, loss_qt1, loss_qt2
 
 
-def calc_iql_policy_loss_batch(batch, device, actor1, actor2, critic, policy, old_action_logprobs, beta,
+def calc_iql_policy_loss_batch(batch, device, critic1, critic2, value, actor, old_action_logprobs, beta,
                                ppo_clip):
     # Unpack the batch
     states, actions = zip(*[(exp.state, exp.action) for exp in batch])
 
-    # Calculate Q(s,a) for each state in the batch
+    # Calculate Qt(s,a) for each state in the batch
     with torch.no_grad():
-        pred_Q1 = actor1.forward(states, target=True, device=device)
-        pred_Q2 = actor2.forward(states, target=True, device=device)
+        pred_Q1 = critic1.forward(states, target=True, device=device)
+        pred_Q2 = critic2.forward(states, target=True, device=device)
         pred_Q = torch.minimum(pred_Q1, pred_Q2)
         pred_Q = pred_Q.gather(1, torch.tensor(actions).to(device).unsqueeze(-1)).squeeze(-1)
 
     # Calculate the logprobs of the action taken
-    action_logits = policy.forward(states, device=device)
+    action_logits = actor.forward(states, device=device)
     action_logprobs = torch.log_softmax(action_logits, dim=1)
     action_logprobs = action_logprobs.gather(1, torch.tensor(actions).to(device).unsqueeze(-1)).squeeze(-1)
     action_logprobs = torch.where(torch.isinf(action_logprobs), -1000, action_logprobs)
@@ -195,7 +207,7 @@ def calc_iql_policy_loss_batch(batch, device, actor1, actor2, critic, policy, ol
 
     # Calculate V(s) for each state in the batch
     with torch.no_grad():
-        pred_V_s = critic.forward(states, device=device).squeeze(1)
+        pred_V_s = value.forward(states, device=device).squeeze(1)
 
     # Calculate Advantage
     advantage = pred_Q - pred_V_s

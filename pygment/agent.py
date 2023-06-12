@@ -551,6 +551,7 @@ class IQLAgent(BaseAgent):
         # Set up optimiser
         self.custom_params = []
         for params in [self.value.parameters(), self.critic1.main_net.parameters(), self.critic2.main_net.parameters(),
+                       self.critic1.target_net.parameters(), self.critic2.target_net.parameters(),
                        self.actor.parameters()]:
             self.custom_params.append({'params': params,
                                        'lr': self._learning_rate,
@@ -565,13 +566,16 @@ class IQLAgent(BaseAgent):
 
         # Create logs
         old_q_loss = torch.inf
+        old_qt_loss = torch.inf
         old_v_loss = torch.inf
         old_policy_loss = torch.inf
         old_average_reward = -10**10
         current_loss_q = []
+        current_loss_qt = []
         current_loss_v = []
         current_loss_policy = []
         current_best_reward = -10**10
+        current_best_policy_loss = torch.inf
 
         # If evaluating, start ray instance
         # if evaluate:
@@ -583,12 +587,13 @@ class IQLAgent(BaseAgent):
         for step in progress_bar:
             batch = self.sample(data, batch_size)
 
-            loss_q = self._update_q(batch, gamma, alpha) if critic else None
+            loss_q, loss_qt = self._update_q(batch, gamma) if critic else None
             loss_v = self._update_v(batch, tau) if value else None
-            loss_policy = self._update_policy(batch, beta, update_iter, ppo_clip) if actor else None
+            loss_policy = -1 * self._update_policy(batch, beta, update_iter, ppo_clip) if actor else None
             ppo_clip *= ppo_clip_decay
 
             current_loss_q.append(loss_q)
+            current_loss_qt.append(loss_qt)
             current_loss_v.append(loss_v)
             current_loss_policy.append(loss_policy)
 
@@ -638,6 +643,10 @@ class IQLAgent(BaseAgent):
                         f'Q_loss {"decreased" if np.array(current_loss_q).mean() < old_q_loss else "increased"} '
                         f'from {round(old_q_loss, 5)} to {round(np.array(current_loss_q).mean(), 5)}'
                     )
+                    print(
+                        f'Qt_loss {"decreased" if np.array(current_loss_qt).mean() < old_qt_loss else "increased"} '
+                        f'from {round(old_qt_loss, 5)} to {round(np.array(current_loss_qt).mean(), 5)}'
+                    )
                 if value:
                     print(
                         f'V_loss {"decreased" if np.array(current_loss_v).mean() < old_v_loss else "increased"} '
@@ -660,8 +669,10 @@ class IQLAgent(BaseAgent):
                 if total_rewards.mean() > current_best_reward:
                     if save:
                         for net, name in [
-                            [self.critic1.target_net, 'critic1'],
-                            [self.critic2.target_net, 'critic2'],
+                            [self.critic1.main_net, 'critic1_main'],
+                            [self.critic2.main_net, 'critic2_main'],
+                            [self.critic1.target_net, 'critic1_target'],
+                            [self.critic2.target_net, 'critic2_target'],
                             [self.value, 'value'],
                             [self.actor, 'actor']
                         ]:
@@ -672,37 +683,40 @@ class IQLAgent(BaseAgent):
                             if os.path.isfile(old_save_path) and old_save_path != new_save_path:
                                 os.remove(old_save_path)
 
-                    current_best_reward = int(total_rewards.mean())
+                current_best_reward = max(current_best_reward, int(total_rewards.mean()))
 
                 old_q_loss = np.array(current_loss_q).mean()
+                old_qt_loss = np.array(current_loss_qt).mean()
                 old_v_loss = np.array(current_loss_v).mean()
                 old_policy_loss = np.array(current_loss_policy).mean()
                 old_average_reward = total_rewards.mean()
                 current_loss_q = []
+                current_loss_qt = []
                 current_loss_v = []
                 current_loss_policy = []
 
-    def _update_q(self, batch: list, gamma, alpha):
+    def _update_q(self, batch: list, gamma):
         """
         Variable 'batch' should be a 1D list of Experiences - sorted or unsorted. The reward value should be the
         correct Q_s value for that state i.e., the cumulated discounted reward from that state onwards.
         """
 
         # Calculate Q loss
-        loss_q1, loss_q2 = calc_iql_q_loss_batch(batch, self.device, self.critic1, self.critic2, self.value,
-                                                 gamma)
+        loss_q1, loss_q2, loss_qt1, loss_qt2 = calc_iql_q_loss_batch(batch, self.device, self.critic1, self.critic2,
+                                                                     self.value, gamma)
 
         # Update Networks
         self.optimizer.zero_grad()
         loss_q1.backward()
         loss_q2.backward()
+        loss_qt1.backward()
+        loss_qt2.backward()
         self.optimizer.step()
 
-        # Soft update of target networks
-        self.critic1.sync(alpha)
-        self.critic2.sync(alpha)
+        loss_q = loss_q1.item() + loss_q2.item()
+        loss_qt = loss_qt1.item(), loss_qt2.item()
 
-        return loss_q1.item() + loss_q2.item()
+        return loss_q, loss_qt
 
     def _update_v(self, batch: list, tau):
         """
@@ -913,13 +927,21 @@ class IQLAgent(BaseAgent):
 
     def load_model(self, criticpath1=None, criticpath2=None, valuepath=None, actorpath=None, behaviourpolicypath=None):
         if criticpath1 is not None:
-            self.critic1.main_net = torch.load(criticpath1)
-            self.critic1.target_net = torch.load(criticpath1)
+            if '_main' in criticpath1:
+                self.critic1.main_net = torch.load(criticpath1)
+                self.critic1.target_net = torch.load(criticpath1.replace('_main', '_target'))
+            else:
+                self.critic1.main_net = torch.load(criticpath1.replace('_target', '_main'))
+                self.critic1.target_net = torch.load(criticpath1)
             self.critic1.has_net = True
             self.path = os.path.dirname(criticpath1)
         if criticpath2 is not None:
-            self.critic2.main_net = torch.load(criticpath2)
-            self.critic2.target_net = torch.load(criticpath2)
+            if '_main' in criticpath1:
+                self.critic2.main_net = torch.load(criticpath2)
+                self.critic2.target_net = torch.load(criticpath2.replace('_main', '_target'))
+            else:
+                self.critic2.main_net = torch.load(criticpath2.replace('_target', '_main'))
+                self.critic2.target_net = torch.load(criticpath2)
             self.critic2.has_net = True
         if valuepath is not None:
             self.value = torch.load(valuepath)
