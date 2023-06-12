@@ -245,13 +245,13 @@ def calc_iql_policy_loss_batch(batch, device, critic1, critic2, value, actor, ol
     4. Negative ratio, negative advantage -> negative loss (which gets inverted i.e., is bad)
     """
     loss = torch.where(advantage > 1,
-                       # When advantage is positive, ratio will be pos or neg.
-                       # If ratio is positive, then loss is positive i.e., ratio * advantage.
-                       # If ratio is negative, clip at -0.2, and loss is negative i.e., clipped(ratio) * advantage
+                       # When advantage is "positive"...
+                       # If ratio is positive, then loss is positive (good) i.e., ratio * advantage.
+                       # If ratio is negative, clip at -0.2, and loss is negative (bad) i.e., clipped(ratio) * advantage
                        torch.max(ratio, clipped_ratio_pos_adv) * advantage,
-                       # When advantage is negative, ratio will be pos or neg.
-                       # If ratio is positive, then loss is positive but clipped i.e., clipped(ratio) * advantage
-                       # If ratio is negative, then loss is negative i.e., ratio * advantage
+                       # When advantage is "negative"...
+                       # If ratio is positive, then loss is positive (bad) but clipped i.e., clipped(ratio) * advantage
+                       # If ratio is negative, then loss is negative (good) i.e., ratio * advantage
                        torch.min(ratio, clipped_ratio_neg_adv) * advantage)
 
     # loss = torch.exp(beta * (pred_Q - pred_V_s)) * action_logprobs
