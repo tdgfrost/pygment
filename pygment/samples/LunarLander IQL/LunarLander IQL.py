@@ -3,7 +3,7 @@ import gymnasium as gym
 import numpy as np
 
 #for template_reward in [20, 30, 50, 100, 130, 150, 200, 220]:
-for template_reward in [100]:
+for template_reward in [50]:
     load_prior_model = True
     animate_only = False
     # template_reward = 100
@@ -20,7 +20,7 @@ for template_reward in [100]:
                          actorpath=None,
                          behaviourpolicypath='./BehaviourPolicy/behaviour_policy_0.88427.pt')
 
-    agent.compile('adam', learning_rate=0.001, weight_decay=1e-8, clip=1)
+    agent.compile('adam', learning_rate=0.005, weight_decay=1e-8, clip=1)
 
     data_path = f'../GenerateStaticDataset/LunarLander/{template_reward} reward'
 
@@ -32,7 +32,16 @@ for template_reward in [100]:
         loaded_data[key] = np.load(data_path + '/' + filename)
 
     # Reduce scale of the rewards
-    # loaded_data['rewards'] = loaded_data['rewards'] / 1000
+    loaded_data['rewards'] = (loaded_data['rewards'] - loaded_data['rewards'].mean()) / loaded_data['rewards'].std()
+    # Temporary code to scale cum_rewards - involves re-calculating cum_rewards
+    idxs = np.where(loaded_data['dones'])[0].tolist()
+    idxs.insert(0, -1)
+    idxs = [(idxs[i] + 1, idxs[i + 1]) for i in range(len(idxs) - 1)]
+    for idx_tuple in idxs:
+        cum_reward = 0
+        for idx in range(idx_tuple[1], idx_tuple[0]-1, -1):
+            cum_reward = loaded_data['rewards'][idx] + 0.99 * cum_reward
+            loaded_data['all_cum_rewards'][idx] = cum_reward
 
     data = [pm.Experience(state=loaded_data['state'][i],
                           action=loaded_data['actions'][i],
@@ -44,10 +53,10 @@ for template_reward in [100]:
 
     #agent.clone_behaviour(data, batch_size=10240, epochs=1000000, evaluate=True, save=True)
 
-    agent.train(data, critic=True, value=True, actor=True, evaluate=True, steps=1e6, batch_size=512,
-                gamma=0.99, tau=0.9, alpha=1, beta=0.3, update_iter=4, ppo_clip=0.1, ppo_clip_decay=1, save=True)
+    agent.train(data, critic=True, value=True, actor=True, evaluate=True, steps=1e6, batch_size=64,
+                gamma=0.99, tau=0.9, alpha=1, beta=0.5, update_iter=4, ppo_clip=0.01, ppo_clip_decay=1, save=True)
 
-    _, _, _, _, rewards = agent.evaluate(episodes=100)
+    _, _, _, _, rewards = agent.evaluate(episodes=800)
     for _ in range(10):
         pm.animate(agent, 'LunarLander-v2', max_episode_steps=500, directory=agent.path+f'/{template_reward}_video',
                    prefix=f'IQL_reward_{int(rewards.mean())}')

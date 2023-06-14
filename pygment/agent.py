@@ -19,6 +19,7 @@ from .net import BaseNet, DualNet, ActorCriticNet, PolicyGradientNet, ActorCriti
 from .env import wrap_env
 from collections import deque
 import ray
+from math import ceil
 
 
 class Experience:
@@ -568,7 +569,7 @@ class IQLAgent(BaseAgent):
         swa_value = torch.optim.swa_utils.AveragedModel(self.value)
 
         scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(self.optimizer, T_max=steps)
-        swa_scheduler = torch.optim.swa_utils.SWALR(self.optimizer, swa_lr=0.001)
+        swa_scheduler = torch.optim.swa_utils.SWALR(self.optimizer, swa_lr=0.005)
 
         # Make save directory if needed
         if save:
@@ -1165,8 +1166,8 @@ class PPO(BaseAgent):
 
         return action, action_logprobs, entropy
 
-    def train(self, target_reward, save_from, save_interval=10, episodes=10000, parallel_envs=32, update_iter=4,
-              update_steps=1000, batch_size=128, gamma=0.99):
+    def train(self, target_reward, save_from, save_interval=10, iterations=10000, sample_episodes=100, parallel_envs=32,
+              update_iter=4, update_steps=1000, batch_size=128, gamma=0.99):
         super().train_base(gamma)
 
         total_rewards = deque([], maxlen=parallel_envs)
@@ -1200,15 +1201,19 @@ class PPO(BaseAgent):
 
             return ep_record, cum_rewards
 
-        for episode in range(episodes):
-            batch_records = []
+        for iteration in range(1, iterations):
             batch_Q_s = []
             batch_states = []
             batch_actions = []
             batch_old_policy_logprobs = []
             while True:
-                temp_batch_records, temp_batch_Q_s = zip(
-                    *ray.get([env_run.remote(self.net.cpu()) for _ in range(parallel_envs)]))
+                temp_batch_records, temp_batch_Q_s = [], []
+                for _ in range(ceil(sample_episodes / parallel_envs)):
+                    current_batch_records, current_batch_Q_s = zip(
+                        *ray.get([env_run.remote(self.net.cpu()) for _ in range(parallel_envs)]))
+
+                    temp_batch_records += list(current_batch_records)
+                    temp_batch_Q_s += list(current_batch_Q_s)
 
                 total_rewards += deque([np.sum([exp.reward for exp in episode]) for episode in temp_batch_records])
 
@@ -1234,7 +1239,6 @@ class PPO(BaseAgent):
                     self.save_model(np.array(total_rewards).mean(), save_from, save_interval, best=True)
                     break
 
-            if (target_reward is not None) & (len(total_rewards) == parallel_envs):
                 self.save_model(np.array(total_rewards).mean(), save_from, save_interval, best=False)
                 if np.array(total_rewards).mean() > self.current_best_reward:
                     self.current_best_reward = np.array(total_rewards).mean()
@@ -1297,7 +1301,7 @@ class PPO(BaseAgent):
                     self.optimizer.step()
 
             print(
-                f'Epoch: {episode}, '
+                f'Epoch: {iteration}, '
                 f'Loss {round(np.array(total_loss).mean(), 2)} '
                 f'(Policy {round(np.array(total_policy_loss).mean(), 2)}, '
                 f'Value {round(np.array(total_value_loss).mean(), 2)}), '
