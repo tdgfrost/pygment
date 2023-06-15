@@ -215,7 +215,7 @@ def calc_iql_policy_loss_batch(batch, device, critic1, critic2, value, actor, ol
     advantage = torch.exp(beta * advantage)
 
     # Calculate the policy loss
-    ratio = torch.exp(action_logprobs - old_action_logprobs) - 1
+    ratio = torch.exp(action_logprobs - old_action_logprobs)
     clipped_ratio = torch.clamp(ratio, max=ppo_clip)
 
     """

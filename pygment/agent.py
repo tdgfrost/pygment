@@ -550,6 +550,27 @@ class IQLAgent(BaseAgent):
             evaluate = True
 
         # Set up optimiser
+        self.method_check(env_loaded=True, net_exists=True, compiled=True)
+        self._gamma = gamma
+
+        self.optimizer = {}
+        scheduler = {}
+
+        for network_name, network in [
+            ['value', self.value],
+            ['critic1_main', self.critic1.main_net],
+            ['critic1_target', self.critic1.target_net],
+            ['critic2_main', self.critic2.main_net],
+            ['critic2_target', self.critic2.target_net],
+            ['actor', self.actor]
+        ]:
+            self.optimizer[network_name] = self._optimizers[self._optimizer](network.parameters(),
+                                                                             lr=self._learning_rate,
+                                                                             weight_decay=self._regularisation)
+
+            scheduler[network_name] = torch.optim.lr_scheduler.CosineAnnealingLR(self.optimizer[network_name],
+                                                                                 T_max=steps)
+        """
         self.custom_params = []
         for params in [self.value.parameters(), self.critic1.main_net.parameters(), self.critic2.main_net.parameters(),
                        self.critic1.target_net.parameters(), self.critic2.target_net.parameters(),
@@ -559,7 +580,8 @@ class IQLAgent(BaseAgent):
                                        'weight_decay': self._regularisation})
 
         super().train_base(gamma, custom_params=self.custom_params)
-
+        """
+        """
         # Create stochastic weight averaged models
         swa_critic1_main_net = torch.optim.swa_utils.AveragedModel(self.critic1.main_net)
         swa_critic2_main_net = torch.optim.swa_utils.AveragedModel(self.critic2.main_net)
@@ -567,10 +589,11 @@ class IQLAgent(BaseAgent):
         swa_critic2_target_net = torch.optim.swa_utils.AveragedModel(self.critic2.target_net)
         # swa_actor = torch.optim.swa_utils.AveragedModel(self.actor)
         swa_value = torch.optim.swa_utils.AveragedModel(self.value)
-
-        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(self.optimizer, T_max=steps)
-        swa_scheduler = torch.optim.swa_utils.SWALR(self.optimizer, swa_lr=0.005)
-
+        """
+        # scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(self.optimizer, T_max=steps)
+        """
+        swa_scheduler = torch.optim.swa_utils.SWALR(self.optimizer, swa_lr=0.01)
+        """
         # Make save directory if needed
         if save:
             if not os.path.isdir(self.path):
@@ -600,15 +623,17 @@ class IQLAgent(BaseAgent):
 
             loss_q, loss_qt = self._update_q(batch, gamma) if critic else None
             loss_v = self._update_v(batch, tau) if value else None
-            # loss_policy = -1 * self._update_policy(batch, beta, update_iter, ppo_clip) if actor else None
+            loss_policy = -1 * self._update_policy(batch, beta, update_iter, ppo_clip) if actor else None
             ppo_clip *= ppo_clip_decay
 
             current_loss_q.append(loss_q)
             current_loss_qt.append(loss_qt)
             current_loss_v.append(loss_v)
-            # current_loss_policy.append(loss_policy)
-
-            if step > 10 and step % 5 == 0:
+            current_loss_policy.append(loss_policy)
+            for network_name in ['value', 'critic1_main', 'critic1_target', 'critic2_main', 'critic2_target', 'actor']:
+                scheduler[network_name].step()
+            """
+            if step > 100000000000 and step % 5 == 0:
                 swa_critic1_main_net.update_parameters(self.critic1.main_net)
                 swa_critic2_main_net.update_parameters(self.critic2.main_net)
                 swa_critic1_target_net.update_parameters(self.critic1.target_net)
@@ -619,8 +644,12 @@ class IQLAgent(BaseAgent):
 
                 loss_policy = -1 * self._update_policy(batch, beta, update_iter, ppo_clip) if actor else None
                 current_loss_policy.append(loss_policy)
+            
             else:
+                loss_policy = -1 * self._update_policy(batch, beta, update_iter, ppo_clip) if actor else None
+                current_loss_policy.append(loss_policy)
                 scheduler.step()
+            """
 
             if step % 500 == 0:
                 """
@@ -731,12 +760,14 @@ class IQLAgent(BaseAgent):
                                                                      self.value, gamma)
 
         # Update Networks
-        self.optimizer.zero_grad()
+        for network_name in ['critic1_main', 'critic2_main', 'critic1_target', 'critic2_target']:
+            self.optimizer[network_name].zero_grad()
         loss_q1.backward()
         loss_q2.backward()
         loss_qt1.backward()
         loss_qt2.backward()
-        self.optimizer.step()
+        for network_name in ['critic1_main', 'critic2_main', 'critic1_target', 'critic2_target']:
+            self.optimizer[network_name].step()
 
         loss_q = loss_q1.item() + loss_q2.item()
         loss_qt = loss_qt1.item(), loss_qt2.item()
@@ -753,9 +784,9 @@ class IQLAgent(BaseAgent):
         loss_v = calc_iql_v_loss_batch(batch, self.device, self.critic1, self.critic2, self.value, tau)
 
         # Update Networks
-        self.optimizer.zero_grad()
+        self.optimizer['value'].zero_grad()
         loss_v.backward()
-        self.optimizer.step()
+        self.optimizer['value'].step()
 
         return loss_v.item()
 
@@ -794,9 +825,9 @@ class IQLAgent(BaseAgent):
                                                                       self.value, self.actor, old_action_logprobs, beta,
                                                                       ppo_clip)
 
-            self.optimizer.zero_grad()
+            self.optimizer['actor'].zero_grad()
             loss_policy.backward()
-            self.optimizer.step()
+            self.optimizer['actor'].step()
 
             total_loss_policy += loss_policy.item()
 
