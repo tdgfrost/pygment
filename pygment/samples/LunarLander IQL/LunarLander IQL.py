@@ -54,7 +54,7 @@ for template_reward in [50]:
     #agent.clone_behaviour(data, batch_size=10240, epochs=1000000, evaluate=True, save=True)
 
     agent.train(data, critic=True, value=True, actor=True, evaluate=True, steps=1e6, batch_size=64,
-                gamma=0.99, tau=0.95, alpha=1, beta=0.3, update_iter=4, ppo_clip=1.02, ppo_clip_decay=1, save=True)
+                gamma=0.99, tau=0.9, alpha=1, beta=5, update_iter=4, ppo_clip=1.2, ppo_clip_decay=1, save=True)
 
     _, _, _, _, rewards = agent.evaluate(episodes=800)
     for _ in range(10):
