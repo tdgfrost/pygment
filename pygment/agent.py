@@ -29,10 +29,13 @@ class Experience:
   '''
 
     def __init__(self, state=None, action=None, reward=None, cum_reward=None, next_state=None, next_action=None,
-                 done=None, action_probs=None, action_logprobs=None, state_value=None):
+                 done=None, action_probs=None, action_logprobs=None, state_value=None, original_reward=None,
+                 original_cumreward=None):
         self.state = state
         self.action = action
         self.reward = reward
+        self.original_reward = original_reward
+        self.original_cumreward = original_cumreward
         self.cum_reward = cum_reward
         self.next_state = next_state
         self.next_action = next_action
@@ -466,6 +469,7 @@ class IQLAgent(BaseAgent):
         self.behaviour_policy.to(self.device)
 
         for params in [self.value.parameters(), self.critic1.main_net.parameters(), self.critic2.main_net.parameters(),
+                       self.critic1.target_net.parameters(), self.critic2.target_net.parameters(),
                        self.actor.parameters(), self.behaviour_policy.parameters()]:
             for p in params:
                 p.register_hook(lambda grad: torch.clamp(grad,
@@ -529,7 +533,8 @@ class IQLAgent(BaseAgent):
                             [self.behaviour_policy, 'behaviour_policy']
                         ]:
                             old_save_path = os.path.join(self.path, f'{name}_{best_policy_loss}.pt')
-                            new_save_path = os.path.join(self.path, f'{name}_{round(np.array(current_loss_policy).mean(), 5)}.pt')
+                            new_save_path = os.path.join(self.path,
+                                                         f'{name}_{round(np.array(current_loss_policy).mean(), 5)}.pt')
 
                             torch.save(net, new_save_path)
                             if os.path.isfile(old_save_path) and old_save_path != new_save_path:
@@ -570,30 +575,18 @@ class IQLAgent(BaseAgent):
 
             scheduler[network_name] = torch.optim.lr_scheduler.CosineAnnealingLR(self.optimizer[network_name],
                                                                                  T_max=steps)
-        """
-        self.custom_params = []
-        for params in [self.value.parameters(), self.critic1.main_net.parameters(), self.critic2.main_net.parameters(),
-                       self.critic1.target_net.parameters(), self.critic2.target_net.parameters(),
-                       self.actor.parameters()]:
-            self.custom_params.append({'params': params,
-                                       'lr': self._learning_rate,
-                                       'weight_decay': self._regularisation})
 
-        super().train_base(gamma, custom_params=self.custom_params)
-        """
-        """
         # Create stochastic weight averaged models
         swa_critic1_main_net = torch.optim.swa_utils.AveragedModel(self.critic1.main_net)
         swa_critic2_main_net = torch.optim.swa_utils.AveragedModel(self.critic2.main_net)
         swa_critic1_target_net = torch.optim.swa_utils.AveragedModel(self.critic1.target_net)
         swa_critic2_target_net = torch.optim.swa_utils.AveragedModel(self.critic2.target_net)
-        # swa_actor = torch.optim.swa_utils.AveragedModel(self.actor)
         swa_value = torch.optim.swa_utils.AveragedModel(self.value)
-        """
-        # scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(self.optimizer, T_max=steps)
-        """
-        swa_scheduler = torch.optim.swa_utils.SWALR(self.optimizer, swa_lr=0.01)
-        """
+
+        swa_scheduler = {}
+        for optim_name in ['critic1_main', 'critic1_target', 'critic2_main', 'critic2_target', 'value']:
+            swa_scheduler[optim_name] = torch.optim.swa_utils.SWALR(self.optimizer[optim_name], swa_lr=0.01)
+
         # Make save directory if needed
         if save:
             if not os.path.isdir(self.path):
@@ -604,92 +597,284 @@ class IQLAgent(BaseAgent):
         old_qt_loss = torch.inf
         old_v_loss = torch.inf
         old_policy_loss = torch.inf
-        old_average_reward = -10**10
+        old_average_reward = -10 ** 10
         current_loss_q = []
         current_loss_qt = []
         current_loss_v = []
         current_loss_policy = []
-        current_best_reward = -10**10
+        current_best_reward = -10 ** 10
 
         # If evaluating, start ray instance
         # if evaluate:
         # ray.init()
 
+        # Experimental - weighted importance sampling - primer code
+        all_idxs = (np.array([idx for idx, exp in enumerate(data) if exp.done]) + 1).tolist()
+        all_idxs.insert(0, 0)
+        all_idxs = [(idx, next_idx) for idx, next_idx in zip(all_idxs[:-1], all_idxs[1:])]
+        np.random.default_rng().shuffle(all_idxs)
+
+        val_data_idxs = all_idxs[5000:]
+        train_data_idxs = all_idxs[:5000]
+        explore_sample_size = len(val_data_idxs)
+        train_data = [data[idx] for start_idx, end_idx in train_data_idxs for idx in range(start_idx, end_idx+1)]
+
         # Start training
         print('Beginning training...\n')
         progress_bar = tqdm(range(1, int(steps) + 1), file=sys.stdout)
         for step in progress_bar:
-            batch = self.sample(data, batch_size)
+            batch = self.sample(train_data, batch_size)
 
             loss_q, loss_qt = self._update_q(batch, gamma) if critic else None
             loss_v = self._update_v(batch, tau) if value else None
-            loss_policy = -1 * self._update_policy(batch, beta, update_iter, ppo_clip) if actor else None
-            ppo_clip *= ppo_clip_decay
+            # loss_policy = -1 * self._update_policy(batch, beta, update_iter, ppo_clip) if actor else None
+            # ppo_clip *= ppo_clip_decay
 
             current_loss_q.append(loss_q)
             current_loss_qt.append(loss_qt)
             current_loss_v.append(loss_v)
-            current_loss_policy.append(loss_policy)
+            # current_loss_policy.append(loss_policy)
+            """
             for network_name in ['value', 'critic1_main', 'critic1_target', 'critic2_main', 'critic2_target', 'actor']:
                 scheduler[network_name].step()
             """
-            if step > 100000000000 and step % 5 == 0:
+
+            if step > 50 and step % 5 == 0:
                 swa_critic1_main_net.update_parameters(self.critic1.main_net)
                 swa_critic2_main_net.update_parameters(self.critic2.main_net)
                 swa_critic1_target_net.update_parameters(self.critic1.target_net)
                 swa_critic2_target_net.update_parameters(self.critic2.target_net)
                 # swa_actor.update_parameters(self.actor)
                 swa_value.update_parameters(self.value)
-                swa_scheduler.step()
+                for optim_name in ['critic1_main', 'critic1_target', 'critic2_main', 'critic2_target', 'value']:
+                    swa_scheduler[optim_name].step()
 
                 loss_policy = -1 * self._update_policy(batch, beta, update_iter, ppo_clip) if actor else None
                 current_loss_policy.append(loss_policy)
-            
+                ppo_clip *= ppo_clip_decay
+
             else:
-                loss_policy = -1 * self._update_policy(batch, beta, update_iter, ppo_clip) if actor else None
-                current_loss_policy.append(loss_policy)
-                scheduler.step()
-            """
+                # loss_policy = -1 * self._update_policy(batch, beta, update_iter, ppo_clip) if actor else None
+                # current_loss_policy.append(loss_policy)
+
+                for network_name in ['value', 'critic1_main', 'critic1_target', 'critic2_main', 'critic2_target',
+                                     'actor']:
+                    scheduler[network_name].step()
 
             if step % 500 == 0:
+
+                # Experimental weighted sampling code
+                action_space = 4
+                all_states = np.zeros((explore_sample_size, 10000) + data[0].state.shape, dtype=np.float32)
+                all_actions = np.zeros((explore_sample_size, 10000), dtype=np.int64)
+
+                logits = torch.zeros((explore_sample_size, 10000, action_space), dtype=torch.float32,
+                                     device=self.device)
+                behaviour_logits = torch.zeros((explore_sample_size, 10000, action_space), dtype=torch.float32,
+                                               device=self.device)
+
+                probs = torch.zeros((explore_sample_size, 10000, action_space), dtype=torch.float32,
+                                    device=self.device)
+                behaviour_probs = torch.zeros((explore_sample_size, 10000, action_space), dtype=torch.float32,
+                                              device=self.device)
+                Q_values = torch.zeros((explore_sample_size, 10000, action_space), device=self.device, dtype=torch.float32)
+                V_values = np.zeros((explore_sample_size, 10000))
+                mask = np.zeros((explore_sample_size, 10000), dtype=bool)
+
+                for row, sample_idxs in enumerate(val_data_idxs):
+                    start_idx, end_idx = sample_idxs
+                    states = np.array([step.state for step in data[start_idx:end_idx]])
+                    actions = np.array([step.action for step in data[start_idx:end_idx]])
+                    all_states[row, :(end_idx - start_idx)] = states
+                    all_actions[row, :(end_idx - start_idx)] = actions
+                    mask[row, :(end_idx - start_idx)] = True
+
+                with torch.no_grad():
+                    logits[mask] = self.actor.forward(all_states[mask], device=self.device)
+                    behaviour_logits[mask] = self.behaviour_policy.forward(all_states[mask], device=self.device)
+                    Q_values_1 = self.critic1.forward(all_states[mask], target=True, device=self.device)
+                    Q_values_2 = self.critic2.forward(all_states[mask], target=True, device=self.device)
+                    Q_values[mask] = torch.minimum(Q_values_1, Q_values_2)
+                    V_values[mask] = self.value.forward(all_states[mask], device=self.device).squeeze(1).cpu().numpy()
+
+                probs[mask] = F.log_softmax(logits[mask], dim=1)
+                behaviour_probs[mask] = F.log_softmax(behaviour_logits[mask], dim=1)
+
+                probs = probs.gather(2, torch.tensor(all_actions).unsqueeze(2).to(self.device)).squeeze(2)
+                behaviour_probs = behaviour_probs.gather(2, torch.tensor(all_actions).unsqueeze(2).to(
+                    self.device)).squeeze(2)
+                Q_values = Q_values.gather(2, torch.tensor(all_actions).unsqueeze(2).to(
+                    self.device)).squeeze(2)
+
+                all_importance_ratios = probs - behaviour_probs
+                all_importance_ratios = torch.cumsum(all_importance_ratios, dim=1)
+                # all_importance_ratios[~mask] = torch.nan
+                all_importance_ratios[~mask] = -100000
+
+                dataset_rewards = np.zeros((explore_sample_size, 10000))
+                temp_rewards = [[step.reward for step in data[start_idx:end_idx]] for start_idx, end_idx
+                                in val_data_idxs]
+                for row, reward in enumerate(temp_rewards):
+                    dataset_rewards[row, :len(reward)] = reward
+
+                dataset_rewards[~mask] = 0
+
+                # Experimental - doubly robust estimator
+                predicted_values = np.zeros((explore_sample_size, 10000))
+                max_t = mask.cumsum(1).argmax(1).max()
+
+                # Convert from torch to numpy
+                all_importance_ratios = F.softmax(all_importance_ratios, 0).cpu().numpy().astype(np.float64)
+                all_importance_ratios = np.log(all_importance_ratios)
+                # all_importance_ratios = all_importance_ratios.cpu().numpy().astype(np.float64)
+                Q_values = Q_values.cpu().numpy().astype(np.float64)
+                Q_values = dataset_rewards - Q_values
                 """
-                Experimental weighted sampling code
+                for t in range(max_t, 0, -1):
+                    current_IS = all_importance_ratios[:, t]
+                    current_V_values = V_values[:, t]
+                    current_Q_values = Q_values[:, t]
+                    next_predicted_values = predicted_values[:, t]
+                    current_sign = np.sign(current_Q_values + 0.99 * next_predicted_values)
+                    IS_estimator = current_IS + np.log(np.abs(current_Q_values + 0.99 * next_predicted_values))
+                    predicted_values[:, t-1] = current_V_values + current_sign * np.exp(IS_estimator)
+                """
+                """
+                gamma_array = np.ones((explore_sample_size, 10000)) * 0.99
+                gamma_array[:, 0] = 1
+                gamma_array = np.log(gamma_array.cumprod(1))
+                Q_sign = np.sign(Q_values)
+                Q_values = np.log(np.abs(Q_values))
+                V_sign = np.sign(V_values)
+                V_values = np.log(np.abs(V_values))
+                reward_sign = np.sign(dataset_rewards)
+                dataset_rewards = np.log(np.abs(dataset_rewards))
+                for t in range(max_t, 0, -1):
+                    current_gamma = gamma_array[:, t]
+                    current_IS = all_importance_ratios[:, t]
+                    previous_IS = all_importance_ratios[:, t-1] if t>=0 else 0
+                    current_rewards = dataset_rewards[:, t]
+                    first_term = current_gamma + current_IS + current_rewards
+                    first_term = np.exp(first_term) * reward_sign[:, t]
+
+                    current_Q_values = Q_values[:, t]
+                    current_V_values = V_values[:, t]
+
+                    second_term = np.exp(current_IS + current_Q_values) * Q_sign[:, t]
+                    second_term -= np.exp(previous_IS + current_V_values) * V_sign[:, t]
+                    second_term_sign = np.sign(second_term)
+                    second_term = np.exp(current_gamma + np.log(np.abs(second_term))) * second_term_sign
+
+                    predicted_values[:, t] = first_term - second_term
+                """
+                # gwis = predicted_values[:, 0].mean()
+                # gwis = V_values[:, 0].mean()
+                gwis = Q_values[:, 0].mean()
+                # gamma_array = np.ones(10000, dtype=np.float64) * 1.0
+                # gamma_array[0] = 1
+                # gamma_array = np.cumprod(gamma_array).reshape(1, -1)
+                # behaviour_rewards = (gamma_array * dataset_rewards).sum(1).mean()
+
+                dataset_cum_rewards = np.zeros((explore_sample_size, 10000))
+                for t in range(max_t, -1, -1):
+                    dataset_cum_rewards[:, t] = dataset_rewards[:, t] + 0.99 * dataset_cum_rewards[:, t+1]
+                behaviour_rewards = dataset_cum_rewards[:, 0].mean()
+
+                """
+                # Scale episode Rt to [0-1]
+                dataset_rewards = np.array([data[start_idx].cum_reward for start_idx, _ in all_idxs[:explore_sample_size]])
+                dataset_rewards = (dataset_rewards - dataset_rewards.min()) / (dataset_rewards.max() - dataset_rewards.min())
                 
-                idxs = [idx for idx, exp in enumerate(data) if exp.done]
-                idxs.insert(0, -1)
-                idxs = [(idx+1, next_idx) for idx, next_idx in zip(idxs[:-1], idxs[1:])]
-                np.random.default_rng().shuffle(idxs)
-                final_importance_ratios = []
-                for idx in tqdm(idxs[:1000], file=sys.stdout, position=0, leave=True):
-                    states = [step.state for step in data[idx[0]:idx[1]]]
-                    
-                    with torch.no_grad():
-                        logits = self.actor.forward(states, device=self.device)
-                        behaviour_logits = self.behaviour_policy.forward(states, device=self.device)
-                    
-                    probs = F.log_softmax(logits, dim=1)
-                    probs = probs.gather(1, torch.tensor([step.action for step in data[idx[0]:idx[1]]]).unsqueeze(1).to(self.device)).squeeze(1)
-                    behaviour_probs = F.log_softmax(behaviour_logits, dim=1)
-                    behaviour_probs = behaviour_probs.gather(1, torch.tensor([step.action for step in data[idx[0]:idx[1]]]).unsqueeze(1).to(self.device)).squeeze(1)
-                    
-                    importance_ratio = probs - behaviour_probs
-                    final_importance_ratio = importance_ratio.sum()
-                    final_importance_ratios.append(final_importance_ratio.item())
+                episode_ratio = F.softmax(all_importance_ratios, 0)
                 
-                final_importance_ratios = torch.tensor(np.array(final_importance_ratios))
-                final_importance_ratios_adj = F.softmax(final_importance_ratios, dim=0)
-            
-                cum_rewards = torch.tensor([data[idx[0]].cum_reward for idx in idxs[:1000]])
+                episode_ratio_idx = torch.tensor(mask.cumsum(1).argmax(1), device=self.device).unsqueeze(1)
+                episode_ratio = episode_ratio.gather(1, episode_ratio_idx).squeeze(1)
                 
-                gwis = final_importance_ratios_adj * cum_rewards
+                episode_ratio *= torch.tensor(mask.cumsum(0)[-1, :], device=self.device).gather(0, episode_ratio_idx.squeeze(1))
+                
+                p_weighted = episode_ratio.cpu().numpy() * dataset_rewards
+                
+                def lower_bound_calculator(c=100., delta=0.05, n_episodes=explore_sample_size):
+                    c_threshold = c
+                    
+                    norm_term = 1 / (n_episodes / c_threshold)
+                    log_term = np.log(2 / delta)
+                    Y_term = np.minimum(p_weighted, c_threshold) / c_threshold
+                    
+                    empirical_mean = Y_term.sum()
+                    first_term = (7 * n_episodes * log_term) / (3 * (n_episodes - 1))
+                    
+                    squared_error_term = n_episodes * (Y_term**2).sum() - Y_term.sum()**2
+                    
+                    second_term = np.sqrt(2 * log_term / (n_episodes - 1) * squared_error_term)
+                    
+                    predicted_mean = norm_term * (empirical_mean - first_term - second_term)
+                    
+                    return predicted_mean
+                
+                def gradient_descent(learning_rate=0.1, iterations=100):
+                    c = 0.5
+                    
+                    for _ in tqdm(range(iterations), file=sys.stdout, position=0):
+                        gradient = (lower_bound_calculator(c+0.0001) - lower_bound_calculator(c)) / 0.0001
+                        
+                        c += learning_rate * gradient
+                    
+                    return c
+                    
+                gwis = lower_bound_calculator(c=gradient_descent(learning_rate=1, iterations=10000), delta=0.05)
+                behaviour_rewards = dataset_rewards.mean()
+                
+                # Checkpoint
+                all_importance_ratios = all_importance_ratios * mask.sum(0).reshape(1,-1)
+                p_weighted = np.nansum(behaviour_rewards * all_importance_ratios, 1)
+                
+                """
+                """
+                dataset_rewards = np.zeros((explore_sample_size, 10000), dtype=np.float32)
+                temp_rewards = [[step.reward for step in data[start_idx:end_idx]] for start_idx, end_idx
+                                in all_idxs[:explore_sample_size]]
+                for row, reward in enumerate(temp_rewards):
+                    dataset_rewards[row, :len(reward)] = reward
+
+                dataset_rewards[~mask] = np.nan
+
+                # Step-wise Importance Sampling - Calculating discounted reward at each step
+                
+                gamma_array = np.ones(10000, dtype=np.float32) * 1.0
+                gamma_array[0] = 1
+                gamma_array = np.cumprod(gamma_array).reshape(1, -1)
+
+                all_importance_ratios = F.softmax(all_importance_ratios, 0)
+                all_importance_ratios = all_importance_ratios.cpu().numpy() # * mask.sum(0).reshape(1, -1)
+                all_importance_ratios[~mask] = np.nan
+
+                behaviour_rewards = dataset_rewards * gamma_array
+                gwis = np.nansum(behaviour_rewards * all_importance_ratios, 1).mean()
+                behaviour_rewards = np.nansum(behaviour_rewards, 1).mean()
+                """
+                """
+                behaviour_rewards = np.nansum(behaviour_rewards, 1)
+                gwis = np.nansum(gwis, 1)
+
+                behaviour_rewards = behaviour_rewards.mean()
                 gwis = gwis.sum()
-                print(f'Predicted reward will be {gwis.item()}')
-                
-                CHECKPOINT - not working because (I think) the weighting factor needs to be specific
-                to the length L of each episode
+
+                # Step-wise WIS without discounting
+
+                behaviour_rewards = np.nansum(dataset_rewards, axis=1)
+                behaviour_rewards = behaviour_rewards.mean()
+
+                gwis = dataset_rewards * all_importance_ratios
+                gwis = np.nansum(gwis, 1)
+                gwis = gwis.mean()
                 """
-                _, _, _, _, total_rewards = self.evaluate(episodes=800, parallel_envs=512,
-                                                          verbose=False) if evaluate else None
+
+                if evaluate:
+                    _, _, _, _, total_rewards = self.evaluate(episodes=800, parallel_envs=512,
+                                                              verbose=False)
+                else:
+                    total_rewards = np.array([0])
 
                 print(f'\nSteps completed: {step}\n')
                 if critic:
@@ -716,6 +901,8 @@ class IQLAgent(BaseAgent):
                         f'Average reward {"decreased" if total_rewards.mean() < old_average_reward else "increased"} '
                         f'from {int(old_average_reward)} to {int(total_rewards.mean())}'
                     )
+                    print(f'Behaviour offline reward is {behaviour_rewards}')
+                    print(f'Predicted offline reward is {gwis}')
                     print(
                         f'Best reward {max(current_best_reward, int(total_rewards.mean()))}'
                     )
@@ -813,7 +1000,8 @@ class IQLAgent(BaseAgent):
             old_action_logits = self.actor.forward(states, device=self.device)
             old_action_logprobs = torch.log_softmax(old_action_logits, dim=1)
             old_action_logprobs = old_action_logprobs.gather(1,
-                                                             torch.tensor(actions).to(self.device).unsqueeze(-1)).squeeze(
+                                                             torch.tensor(actions).to(self.device).unsqueeze(
+                                                                 -1)).squeeze(
                 -1)
             old_action_logprobs = torch.where(torch.isinf(old_action_logprobs), -1000, old_action_logprobs)
             old_action_logprobs = torch.where(old_action_logprobs == 0, -1e-8, old_action_logprobs)
@@ -868,7 +1056,7 @@ class IQLAgent(BaseAgent):
                 with torch.no_grad():
                     logits = actor.forward(state, device='cpu')
 
-                #action = torch.argmax(logits).item()
+                # action = torch.argmax(logits).item()
                 action_probs = F.softmax(logits, dim=-1)
                 action_distribution = Categorical(action_probs)
 

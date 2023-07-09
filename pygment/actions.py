@@ -111,7 +111,7 @@ def calc_loss_actor_critic(batch_Q_s, batch_actions, batch_entropy, batch_action
 
     return policy_loss, value_loss, entropy_loss
 
-
+"""
 def calc_iql_v_loss_batch(batch, device, actor1, actor2, critic, tau):
     # Unpack the batch
     states, actions, reward, dones = zip(*[(exp.state, exp.action, exp.reward, exp.done) for exp in batch])
@@ -126,6 +126,21 @@ def calc_iql_v_loss_batch(batch, device, actor1, actor2, critic, tau):
 
     # Calculate loss_v
     loss_v = pred_V_s - pred_Q
+    mask = loss_v > 0
+    loss_v = loss_v ** 2
+    loss_v[mask] = loss_v[mask] * (1 - tau)
+    loss_v[~mask] = loss_v[~mask] * tau
+
+    return loss_v.mean()
+"""
+def calc_iql_v_loss_batch(batch, device, actor1, actor2, critic, tau):
+    # Unpack the batch
+    states, actions, reward, cum_rewards, dones = zip(*[(exp.state, exp.action, exp.reward, exp.cum_reward, exp.done) for exp in batch])
+
+    pred_V_s = critic.forward(states, device=device).squeeze(-1)
+
+    # Calculate loss_v
+    loss_v = pred_V_s - torch.tensor(cum_rewards, device=device, dtype=torch.float32)
     mask = loss_v > 0
     loss_v = loss_v ** 2
     loss_v[mask] = loss_v[mask] * (1 - tau)
@@ -233,6 +248,9 @@ def calc_iql_policy_loss_batch(batch, device, critic1, critic2, value, actor, ol
     """
 
     loss = torch.min(ratio, clipped_ratio) * advantage
+    #loss1 = torch.min(ratio, clipped_ratio) * advantage
+    #loss2 = torch.nn.functional.relu(1 - ratio) * advantage
+    #loss = -loss1.mean() + loss2.sum()
 
     # loss = torch.exp(beta * (pred_Q - pred_V_s)) * action_logprobs
     loss = -loss.mean()
