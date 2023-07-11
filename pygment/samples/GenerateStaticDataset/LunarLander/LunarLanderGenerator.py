@@ -3,12 +3,12 @@ import gymnasium as gym
 import numpy as np
 import os
 
-for target_reward in [50, 100, 150, 200]:
+for target_reward in [80, 110, 150, 180]:
     env = gym.make('LunarLander-v2', max_episode_steps=500)
     agent = pm.create_agent('PPO', 'cpu')
     agent.load_env(env)
     agent.load_model(
-        f'/Users/thomasfrost/Documents/Github/pygment/pygment/pygment/samples/LunarLander PPO/2023_6_01_120242/model_{target_reward}.pt')
+        f'/Users/thomasfrost/Documents/Github/pygment/pygment/pygment/samples/LunarLander PPO/2023_6_13_162432/model_{target_reward}.pt')
 
     agent.compile('adam', learning_rate=0.001)
 
