@@ -1089,3 +1089,117 @@ pygment/samples/LunarLander IQL/2023_7_08_204146/critic2_main_-107.pt
 pygment/samples/LunarLander IQL/2023_7_08_204146/critic2_target_-107.pt
 pygment/samples/LunarLander IQL/2023_7_08_204146/value_-107.pt
 pygment/samples/LunarLander IQL/BehaviourPolicy/behaviour_policy_180.pt
+pygment/samples/GenerateStaticDataset/LunarLander backup/-100 reward/all_actions.npy
+pygment/samples/GenerateStaticDataset/LunarLander backup/-100 reward/all_cum_rewards.npy
+pygment/samples/GenerateStaticDataset/LunarLander backup/-100 reward/all_dones.npy
+pygment/samples/GenerateStaticDataset/LunarLander backup/-100 reward/all_next_actions.npy
+pygment/samples/GenerateStaticDataset/LunarLander backup/-100 reward/all_next_states.npy
+pygment/samples/GenerateStaticDataset/LunarLander backup/-100 reward/all_rewards.npy
+pygment/samples/GenerateStaticDataset/LunarLander backup/-100 reward/all_states.npy
+pygment/samples/GenerateStaticDataset/LunarLander backup/-40 reward/all_actions.npy
+pygment/samples/GenerateStaticDataset/LunarLander backup/-40 reward/all_cum_rewards.npy
+pygment/samples/GenerateStaticDataset/LunarLander backup/-40 reward/all_dones.npy
+pygment/samples/GenerateStaticDataset/LunarLander backup/-40 reward/all_next_actions.npy
+pygment/samples/GenerateStaticDataset/LunarLander backup/-40 reward/all_next_states.npy
+pygment/samples/GenerateStaticDataset/LunarLander backup/-40 reward/all_rewards.npy
+pygment/samples/GenerateStaticDataset/LunarLander backup/-40 reward/all_states.npy
+pygment/samples/GenerateStaticDataset/LunarLander backup/0 reward/all_actions.npy
+pygment/samples/GenerateStaticDataset/LunarLander backup/0 reward/all_cum_rewards.npy
+pygment/samples/GenerateStaticDataset/LunarLander backup/0 reward/all_dones.npy
+pygment/samples/GenerateStaticDataset/LunarLander backup/0 reward/all_next_actions.npy
+pygment/samples/GenerateStaticDataset/LunarLander backup/0 reward/all_next_states.npy
+pygment/samples/GenerateStaticDataset/LunarLander backup/0 reward/all_rewards.npy
+pygment/samples/GenerateStaticDataset/LunarLander backup/0 reward/all_states.npy
+pygment/samples/GenerateStaticDataset/LunarLander backup/110 reward/all_actions.npy
+pygment/samples/GenerateStaticDataset/LunarLander backup/110 reward/all_cum_rewards.npy
+pygment/samples/GenerateStaticDataset/LunarLander backup/110 reward/all_dones.npy
+pygment/samples/GenerateStaticDataset/LunarLander backup/110 reward/all_next_actions.npy
+pygment/samples/GenerateStaticDataset/LunarLander backup/110 reward/all_next_states.npy
+pygment/samples/GenerateStaticDataset/LunarLander backup/110 reward/all_rewards.npy
+pygment/samples/GenerateStaticDataset/LunarLander backup/110 reward/all_states.npy
+pygment/samples/GenerateStaticDataset/LunarLander backup/150 reward/all_actions.npy
+pygment/samples/GenerateStaticDataset/LunarLander backup/150 reward/all_cum_rewards.npy
+pygment/samples/GenerateStaticDataset/LunarLander backup/150 reward/all_dones.npy
+pygment/samples/GenerateStaticDataset/LunarLander backup/150 reward/all_next_actions.npy
+pygment/samples/GenerateStaticDataset/LunarLander backup/150 reward/all_next_states.npy
+pygment/samples/GenerateStaticDataset/LunarLander backup/150 reward/all_rewards.npy
+pygment/samples/GenerateStaticDataset/LunarLander backup/150 reward/all_states.npy
+pygment/samples/GenerateStaticDataset/LunarLander backup/180 reward/all_actions.npy
+pygment/samples/GenerateStaticDataset/LunarLander backup/180 reward/all_cum_rewards.npy
+pygment/samples/GenerateStaticDataset/LunarLander backup/180 reward/all_dones.npy
+pygment/samples/GenerateStaticDataset/LunarLander backup/180 reward/all_next_actions.npy
+pygment/samples/GenerateStaticDataset/LunarLander backup/180 reward/all_next_states.npy
+pygment/samples/GenerateStaticDataset/LunarLander backup/180 reward/all_rewards.npy
+pygment/samples/GenerateStaticDataset/LunarLander backup/180 reward/all_states.npy
+pygment/samples/GenerateStaticDataset/LunarLander backup/30 reward/all_actions.npy
+pygment/samples/GenerateStaticDataset/LunarLander backup/30 reward/all_cum_rewards.npy
+pygment/samples/GenerateStaticDataset/LunarLander backup/30 reward/all_dones.npy
+pygment/samples/GenerateStaticDataset/LunarLander backup/30 reward/all_next_actions.npy
+pygment/samples/GenerateStaticDataset/LunarLander backup/30 reward/all_next_states.npy
+pygment/samples/GenerateStaticDataset/LunarLander backup/30 reward/all_rewards.npy
+pygment/samples/GenerateStaticDataset/LunarLander backup/30 reward/all_states.npy
+pygment/samples/GenerateStaticDataset/LunarLander backup/50 reward/all_actions.npy
+pygment/samples/GenerateStaticDataset/LunarLander backup/50 reward/all_cum_rewards.npy
+pygment/samples/GenerateStaticDataset/LunarLander backup/50 reward/all_dones.npy
+pygment/samples/GenerateStaticDataset/LunarLander backup/50 reward/all_next_actions.npy
+pygment/samples/GenerateStaticDataset/LunarLander backup/50 reward/all_next_states.npy
+pygment/samples/GenerateStaticDataset/LunarLander backup/50 reward/all_rewards.npy
+pygment/samples/GenerateStaticDataset/LunarLander backup/50 reward/all_states.npy
+pygment/samples/GenerateStaticDataset/LunarLander backup/80 reward/all_actions.npy
+pygment/samples/GenerateStaticDataset/LunarLander backup/80 reward/all_cum_rewards.npy
+pygment/samples/GenerateStaticDataset/LunarLander backup/80 reward/all_dones.npy
+pygment/samples/GenerateStaticDataset/LunarLander backup/80 reward/all_next_actions.npy
+pygment/samples/GenerateStaticDataset/LunarLander backup/80 reward/all_next_states.npy
+pygment/samples/GenerateStaticDataset/LunarLander backup/80 reward/all_rewards.npy
+pygment/samples/GenerateStaticDataset/LunarLander backup/80 reward/all_states.npy
+pygment/samples/GenerateStaticDataset/LunarLander backup/LunarLanderGenerator.py
+pygment/samples/GenerateStaticDataset/LunarLander/-95 reward/all_actions.npy
+pygment/samples/GenerateStaticDataset/LunarLander/-95 reward/all_cum_rewards.npy
+pygment/samples/GenerateStaticDataset/LunarLander/-95 reward/all_dones.npy
+pygment/samples/GenerateStaticDataset/LunarLander/-95 reward/all_next_actions.npy
+pygment/samples/GenerateStaticDataset/LunarLander/-95 reward/all_next_states.npy
+pygment/samples/GenerateStaticDataset/LunarLander/-95 reward/all_rewards.npy
+pygment/samples/GenerateStaticDataset/LunarLander/-95 reward/all_states.npy
+pygment/samples/GenerateStaticDataset/LunarLander/10 reward/all_actions.npy
+pygment/samples/GenerateStaticDataset/LunarLander/10 reward/all_cum_rewards.npy
+pygment/samples/GenerateStaticDataset/LunarLander/10 reward/all_dones.npy
+pygment/samples/GenerateStaticDataset/LunarLander/10 reward/all_next_actions.npy
+pygment/samples/GenerateStaticDataset/LunarLander/10 reward/all_next_states.npy
+pygment/samples/GenerateStaticDataset/LunarLander/10 reward/all_rewards.npy
+pygment/samples/GenerateStaticDataset/LunarLander/10 reward/all_states.npy
+pygment/samples/GenerateStaticDataset/LunarLander/125 reward/all_actions.npy
+pygment/samples/GenerateStaticDataset/LunarLander/125 reward/all_cum_rewards.npy
+pygment/samples/GenerateStaticDataset/LunarLander/125 reward/all_dones.npy
+pygment/samples/GenerateStaticDataset/LunarLander/125 reward/all_next_actions.npy
+pygment/samples/GenerateStaticDataset/LunarLander/125 reward/all_next_states.npy
+pygment/samples/GenerateStaticDataset/LunarLander/125 reward/all_rewards.npy
+pygment/samples/GenerateStaticDataset/LunarLander/125 reward/all_states.npy
+pygment/samples/GenerateStaticDataset/LunarLander/135 reward/all_actions.npy
+pygment/samples/GenerateStaticDataset/LunarLander/135 reward/all_cum_rewards.npy
+pygment/samples/GenerateStaticDataset/LunarLander/135 reward/all_dones.npy
+pygment/samples/GenerateStaticDataset/LunarLander/135 reward/all_next_actions.npy
+pygment/samples/GenerateStaticDataset/LunarLander/135 reward/all_next_states.npy
+pygment/samples/GenerateStaticDataset/LunarLander/135 reward/all_rewards.npy
+pygment/samples/GenerateStaticDataset/LunarLander/135 reward/all_states.npy
+pygment/samples/GenerateStaticDataset/LunarLander/155 reward/all_actions.npy
+pygment/samples/GenerateStaticDataset/LunarLander/155 reward/all_cum_rewards.npy
+pygment/samples/GenerateStaticDataset/LunarLander/155 reward/all_dones.npy
+pygment/samples/GenerateStaticDataset/LunarLander/155 reward/all_next_actions.npy
+pygment/samples/GenerateStaticDataset/LunarLander/155 reward/all_next_states.npy
+pygment/samples/GenerateStaticDataset/LunarLander/155 reward/all_rewards.npy
+pygment/samples/GenerateStaticDataset/LunarLander/155 reward/all_states.npy
+pygment/samples/GenerateStaticDataset/LunarLander/45 reward/all_actions.npy
+pygment/samples/GenerateStaticDataset/LunarLander/45 reward/all_cum_rewards.npy
+pygment/samples/GenerateStaticDataset/LunarLander/45 reward/all_dones.npy
+pygment/samples/GenerateStaticDataset/LunarLander/45 reward/all_next_actions.npy
+pygment/samples/GenerateStaticDataset/LunarLander/45 reward/all_next_states.npy
+pygment/samples/GenerateStaticDataset/LunarLander/45 reward/all_rewards.npy
+pygment/samples/GenerateStaticDataset/LunarLander/45 reward/all_states.npy
+pygment/samples/GenerateStaticDataset/LunarLander/70 reward/all_actions.npy
+pygment/samples/GenerateStaticDataset/LunarLander/70 reward/all_cum_rewards.npy
+pygment/samples/GenerateStaticDataset/LunarLander/70 reward/all_dones.npy
+pygment/samples/GenerateStaticDataset/LunarLander/70 reward/all_next_actions.npy
+pygment/samples/GenerateStaticDataset/LunarLander/70 reward/all_next_states.npy
+pygment/samples/GenerateStaticDataset/LunarLander/70 reward/all_rewards.npy
+pygment/samples/GenerateStaticDataset/LunarLander/70 reward/all_states.npy
+pygment/samples/LunarLander IQL/BehaviourPolicy/behaviour_policy_155.pt

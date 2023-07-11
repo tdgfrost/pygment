@@ -3,7 +3,7 @@ import gymnasium as gym
 import numpy as np
 
 #for template_reward in [20, 30, 50, 100, 130, 150, 200, 220]:
-for template_reward in [180]:
+for template_reward in [155]:
     load_prior_model = True
     animate_only = False
     # template_reward = 100
@@ -18,7 +18,7 @@ for template_reward in [180]:
                          criticpath2=None,
                          valuepath=None,
                          actorpath=None,
-                         behaviourpolicypath='./BehaviourPolicy/behaviour_policy_180.pt')
+                         behaviourpolicypath='./BehaviourPolicy/behaviour_policy_155.pt')
 
     agent.compile('adam', learning_rate=0.01, weight_decay=1e-8, clip=1)
 
@@ -60,8 +60,8 @@ for template_reward in [180]:
 
     # agent.clone_behaviour(data, batch_size=10240, epochs=1000000, evaluate=True, save=True)
 
-    agent.train(data, critic=True, value=True, actor=True, evaluate=True, steps=1e6, batch_size=64,
-                gamma=0.99, tau=0.9, alpha=1, beta=0.5, update_iter=4, ppo_clip=1.2, ppo_clip_decay=1, save=False)
+    agent.train(data, critic=True, value=True, actor=True, evaluate=True, steps=1e6, batch_size=256,
+                gamma=0.99, tau=0.6, alpha=1, beta=0, update_iter=4, ppo_clip=1.2, ppo_clip_decay=1, save=False)
 
     _, _, _, _, rewards = agent.evaluate(episodes=800)
     for _ in range(10):

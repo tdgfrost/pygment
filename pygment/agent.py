@@ -513,9 +513,9 @@ class IQLAgent(BaseAgent):
 
             current_loss_policy.append(loss)
 
-            if epoch % 100 == 0:
+            if epoch % 500 == 0:
                 if evaluate:
-                    _, _, _, _, total_rewards = self.evaluate(episodes=100, parallel_envs=16,
+                    _, _, _, _, total_rewards = self.evaluate(episodes=800, parallel_envs=512,
                                                               verbose=False, behaviour=True)
 
                 print(f'\nSteps completed: {epoch}\n')
@@ -523,7 +523,7 @@ class IQLAgent(BaseAgent):
                     f'Behaviour policy loss {"decreased" if np.array(current_loss_policy).mean() < old_policy_loss else "increased"} '
                     f'from {old_policy_loss} to {round(np.array(current_loss_policy).mean(), 5)}'
                 )
-                print(f'Best policy loss: {best_policy_loss}')
+                print(f'Best policy loss: {min(best_policy_loss, round(np.array(current_loss_policy).mean(), 5))}')
                 if evaluate:
                     print(f'Average reward: {int(np.array(total_rewards).mean())}')
 
@@ -617,7 +617,7 @@ class IQLAgent(BaseAgent):
         val_data_idxs = all_idxs[5000:]
         train_data_idxs = all_idxs[:5000]
         explore_sample_size = len(val_data_idxs)
-        train_data = [data[idx] for start_idx, end_idx in train_data_idxs for idx in range(start_idx, end_idx+1)]
+        train_data = [data[idx] for start_idx, end_idx in train_data_idxs for idx in range(start_idx, end_idx)]
 
         # Start training
         print('Beginning training...\n')
@@ -625,12 +625,12 @@ class IQLAgent(BaseAgent):
         for step in progress_bar:
             batch = self.sample(train_data, batch_size)
 
-            loss_q, loss_qt = self._update_q(batch, gamma) if critic else None
+            loss_qt = self._update_q(batch, gamma) if critic else None
             loss_v = self._update_v(batch, tau) if value else None
             # loss_policy = -1 * self._update_policy(batch, beta, update_iter, ppo_clip) if actor else None
             # ppo_clip *= ppo_clip_decay
 
-            current_loss_q.append(loss_q)
+            current_loss_q.append(loss_qt) #<- temporarily changed to loss_qt instead of loss_q
             current_loss_qt.append(loss_qt)
             current_loss_v.append(loss_v)
             # current_loss_policy.append(loss_policy)
@@ -700,13 +700,13 @@ class IQLAgent(BaseAgent):
                 probs[mask] = F.log_softmax(logits[mask], dim=1)
                 behaviour_probs[mask] = F.log_softmax(behaviour_logits[mask], dim=1)
 
-                probs = probs.gather(2, torch.tensor(all_actions).unsqueeze(2).to(self.device)).squeeze(2)
+                probs_choice = probs.gather(2, torch.tensor(all_actions).unsqueeze(2).to(self.device)).squeeze(2)
                 behaviour_probs = behaviour_probs.gather(2, torch.tensor(all_actions).unsqueeze(2).to(
                     self.device)).squeeze(2)
-                Q_values = Q_values.gather(2, torch.tensor(all_actions).unsqueeze(2).to(
+                Q_values_choice = Q_values.gather(2, torch.tensor(all_actions).unsqueeze(2).to(
                     self.device)).squeeze(2)
 
-                all_importance_ratios = probs - behaviour_probs
+                all_importance_ratios = probs_choice # - behaviour_probs
                 all_importance_ratios = torch.cumsum(all_importance_ratios, dim=1)
                 # all_importance_ratios[~mask] = torch.nan
                 all_importance_ratios[~mask] = -100000
@@ -717,18 +717,96 @@ class IQLAgent(BaseAgent):
                 for row, reward in enumerate(temp_rewards):
                     dataset_rewards[row, :len(reward)] = reward
 
-                dataset_rewards[~mask] = 0
+                dataset_cum_rewards = np.zeros((explore_sample_size, 10000))
+                temp_rewards = [[step.cum_reward for step in data[start_idx:end_idx]] for start_idx, end_idx
+                                in val_data_idxs]
+                for row, reward in enumerate(temp_rewards):
+                    dataset_cum_rewards[row, :len(reward)] = reward
 
+                gamma_array = np.ones(10000, dtype=np.float32) * 1.0
+                gamma_array[0] = 1
+                gamma_array = np.cumprod(gamma_array).reshape(1, -1)
+
+                # all_importance_ratios = F.softmax(all_importance_ratios, 0).cpu().numpy()  # * mask.sum(0).reshape(1, -1)
+                all_importance_ratios = np.exp(all_importance_ratios.cpu().numpy())
+                all_importance_ratios[~mask] = 0
+                rolled_importance_ratios = np.roll(all_importance_ratios, 1)
+                rolled_importance_ratios[:, 0] = 1
+
+                behaviour_rewards = dataset_rewards * gamma_array
+
+                first_term = behaviour_rewards * all_importance_ratios
+                first_term = first_term[mask].sum()
+
+                V_values = (torch.exp(probs) * Q_values).sum(2).cpu().numpy()
+
+                q_term = all_importance_ratios * Q_values_choice.cpu().numpy()
+                v_term = rolled_importance_ratios * V_values
+                second_term = q_term - v_term
+                second_term = second_term * gamma_array
+                second_term = second_term[mask].sum()
+
+                gwis = first_term - second_term
+
+                behaviour_rewards = np.nansum(behaviour_rewards, 1).mean()
+                """
+                # all_importance_ratios = F.softmax(all_importance_ratios, 0).cpu().numpy().astype(np.float64)
+                # all_importance_ratios *= mask.sum(0).reshape(1, -1)
+                # all_importance_ratios = np.log(all_importance_ratios)
+                # all_importance_ratios[~mask] = 0
+                # all_importance_ratios = all_importance_ratios.cpu().numpy().astype(np.float64)
+                dataset_rewards_sign = np.sign(dataset_rewards)
+                dataset_rewards = np.log(np.abs(dataset_rewards))
+
+                gamma_array = np.ones((explore_sample_size, 10000)) * 0.99
+                gamma_array[:, 0] = 1
+                gamma_array = np.log(gamma_array).cumsum(1)
+
+                reward_term = np.exp(all_importance_ratios + gamma_array + dataset_rewards)
+                reward_term *= dataset_rewards_sign
+
+                Q_term = np.exp(all_importance_ratios) * Q_values_choice.cpu().numpy()
+
+                V_term = (torch.exp(probs) * Q_values).sum(2).cpu().numpy()
+                V_term = V_term * np.exp(np.roll(all_importance_ratios, 1))
+
+                predicted_values = reward_term - (Q_term - V_term)
+                gwis = predicted_values.sum(1).mean()
+                behaviour_rewards = dataset_cum_rewards[:, 0].mean()
+                """
+                """
+                new_mask = mask.copy()
+                new_mask[np.arange(mask.cumsum(1).argmax(1).shape[0]), (mask.cumsum(1).argmax(1)+1)] = True
+
+                dataset_rewards_sign = np.sign(dataset_rewards)
+                dataset_rewards = np.log(np.abs(dataset_rewards))
+                gamma_array = np.ones((explore_sample_size, 10000)) * 0.99
+                gamma_array[:, 0] = 1
+                gamma_array = np.log(gamma_array).cumsum(1)
+                rewards_till_now = np.exp(dataset_rewards + gamma_array + all_importance_ratios)
+                rewards_till_now *= dataset_rewards_sign
+                rewards_till_now = rewards_till_now.cumsum(1)
+                rewards_till_now[~new_mask] = 0
+                rewards_till_now = np.roll(rewards_till_now, 1)
+                expected_rewards = V_values * np.exp(gamma_array)
+                predicted_rewards = rewards_till_now + expected_rewards
+
+                gwis = (predicted_rewards.sum(1) / new_mask.sum(1)).mean()
+                behaviour_rewards = dataset_cum_rewards[:, 0].mean()
+                """
+                """
                 # Experimental - doubly robust estimator
                 predicted_values = np.zeros((explore_sample_size, 10000))
+                
                 max_t = mask.cumsum(1).argmax(1).max()
-
+                
                 # Convert from torch to numpy
                 all_importance_ratios = F.softmax(all_importance_ratios, 0).cpu().numpy().astype(np.float64)
                 all_importance_ratios = np.log(all_importance_ratios)
                 # all_importance_ratios = all_importance_ratios.cpu().numpy().astype(np.float64)
                 Q_values = Q_values.cpu().numpy().astype(np.float64)
                 Q_values = dataset_rewards - Q_values
+                """
                 """
                 for t in range(max_t, 0, -1):
                     current_IS = all_importance_ratios[:, t]
@@ -767,6 +845,7 @@ class IQLAgent(BaseAgent):
 
                     predicted_values[:, t] = first_term - second_term
                 """
+                """
                 # gwis = predicted_values[:, 0].mean()
                 # gwis = V_values[:, 0].mean()
                 gwis = Q_values[:, 0].mean()
@@ -779,7 +858,7 @@ class IQLAgent(BaseAgent):
                 for t in range(max_t, -1, -1):
                     dataset_cum_rewards[:, t] = dataset_rewards[:, t] + 0.99 * dataset_cum_rewards[:, t+1]
                 behaviour_rewards = dataset_cum_rewards[:, 0].mean()
-
+                """
                 """
                 # Scale episode Rt to [0-1]
                 dataset_rewards = np.array([data[start_idx].cum_reward for start_idx, _ in all_idxs[:explore_sample_size]])
@@ -831,14 +910,6 @@ class IQLAgent(BaseAgent):
                 
                 """
                 """
-                dataset_rewards = np.zeros((explore_sample_size, 10000), dtype=np.float32)
-                temp_rewards = [[step.reward for step in data[start_idx:end_idx]] for start_idx, end_idx
-                                in all_idxs[:explore_sample_size]]
-                for row, reward in enumerate(temp_rewards):
-                    dataset_rewards[row, :len(reward)] = reward
-
-                dataset_rewards[~mask] = np.nan
-
                 # Step-wise Importance Sampling - Calculating discounted reward at each step
                 
                 gamma_array = np.ones(10000, dtype=np.float32) * 1.0
@@ -943,23 +1014,18 @@ class IQLAgent(BaseAgent):
         """
 
         # Calculate Q loss
-        loss_q1, loss_q2, loss_qt1, loss_qt2 = calc_iql_q_loss_batch(batch, self.device, self.critic1, self.critic2,
-                                                                     self.value, gamma)
+        loss_qt = calc_iql_q_loss_batch(batch, self.device, self.critic1, self.critic2, self.value, gamma)
 
         # Update Networks
-        for network_name in ['critic1_main', 'critic2_main', 'critic1_target', 'critic2_target']:
+        for network_name in ['critic1_target', 'critic2_target']:
             self.optimizer[network_name].zero_grad()
-        loss_q1.backward()
-        loss_q2.backward()
-        loss_qt1.backward()
-        loss_qt2.backward()
-        for network_name in ['critic1_main', 'critic2_main', 'critic1_target', 'critic2_target']:
+        loss_qt.backward()
+        for network_name in ['critic1_target', 'critic2_target']:
             self.optimizer[network_name].step()
 
-        loss_q = loss_q1.item() + loss_q2.item()
-        loss_qt = loss_qt1.item(), loss_qt2.item()
+        loss_qt = loss_qt.item()
 
-        return loss_q, loss_qt
+        return loss_qt
 
     def _update_v(self, batch: list, tau):
         """
@@ -968,7 +1034,7 @@ class IQLAgent(BaseAgent):
         """
 
         # Calculate V loss
-        loss_v = calc_iql_v_loss_batch(batch, self.device, self.critic1, self.critic2, self.value, tau)
+        loss_v = calc_iql_v_loss_batch(batch, self.device, self.value, tau)
 
         # Update Networks
         self.optimizer['value'].zero_grad()
@@ -982,15 +1048,16 @@ class IQLAgent(BaseAgent):
         Variable 'batch' should be a 1D list of Experiences - sorted or unsorted. The reward value should be the
         correct Q_s value for that state i.e., the cumulated discounted reward from that state onwards.
         """
-        """
+
         loss_policy = calc_iql_policy_loss_batch(batch, self.device, self.critic1, self.critic2, self.value,
                                                  self.actor, beta)
 
-        self.optimizer.zero_grad()
+        self.optimizer['actor'].zero_grad()
         loss_policy.backward()
-        self.optimizer.step()
+        self.optimizer['actor'].step()
 
         return loss_policy.item()
+
         """
         # Unpack the batch
         states, actions = zip(*[(exp.state, exp.action) for exp in batch])
@@ -1020,6 +1087,7 @@ class IQLAgent(BaseAgent):
             total_loss_policy += loss_policy.item()
 
         return total_loss_policy
+        """
 
     def _update_behaviour_policy(self, batch: list):
         """
