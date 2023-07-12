@@ -563,9 +563,9 @@ class IQLAgent(BaseAgent):
 
         for network_name, network in [
             ['value', self.value],
-            ['critic1_main', self.critic1.main_net],
+            #['critic1_main', self.critic1.main_net],
             ['critic1_target', self.critic1.target_net],
-            ['critic2_main', self.critic2.main_net],
+            #['critic2_main', self.critic2.main_net],
             ['critic2_target', self.critic2.target_net],
             ['actor', self.actor]
         ]:
@@ -577,14 +577,15 @@ class IQLAgent(BaseAgent):
                                                                                  T_max=steps)
 
         # Create stochastic weight averaged models
-        swa_critic1_main_net = torch.optim.swa_utils.AveragedModel(self.critic1.main_net)
-        swa_critic2_main_net = torch.optim.swa_utils.AveragedModel(self.critic2.main_net)
+        #swa_critic1_main_net = torch.optim.swa_utils.AveragedModel(self.critic1.main_net)
+        #swa_critic2_main_net = torch.optim.swa_utils.AveragedModel(self.critic2.main_net)
         swa_critic1_target_net = torch.optim.swa_utils.AveragedModel(self.critic1.target_net)
         swa_critic2_target_net = torch.optim.swa_utils.AveragedModel(self.critic2.target_net)
         swa_value = torch.optim.swa_utils.AveragedModel(self.value)
 
         swa_scheduler = {}
-        for optim_name in ['critic1_main', 'critic1_target', 'critic2_main', 'critic2_target', 'value']:
+        #for optim_name in ['critic1_main', 'critic1_target', 'critic2_main', 'critic2_target', 'value']:
+        for optim_name in ['critic1_target', 'critic2_target', 'value']:
             swa_scheduler[optim_name] = torch.optim.swa_utils.SWALR(self.optimizer[optim_name], swa_lr=0.01)
 
         # Make save directory if needed
@@ -593,12 +594,12 @@ class IQLAgent(BaseAgent):
                 os.makedirs(self.path)
 
         # Create logs
-        old_q_loss = torch.inf
+        #old_q_loss = torch.inf
         old_qt_loss = torch.inf
         old_v_loss = torch.inf
         old_policy_loss = torch.inf
         old_average_reward = -10 ** 10
-        current_loss_q = []
+        #current_loss_q = []
         current_loss_qt = []
         current_loss_v = []
         current_loss_policy = []
@@ -630,7 +631,7 @@ class IQLAgent(BaseAgent):
             # loss_policy = -1 * self._update_policy(batch, beta, update_iter, ppo_clip) if actor else None
             # ppo_clip *= ppo_clip_decay
 
-            current_loss_q.append(loss_qt) #<- temporarily changed to loss_qt instead of loss_q
+            #current_loss_q.append(loss_q)
             current_loss_qt.append(loss_qt)
             current_loss_v.append(loss_v)
             # current_loss_policy.append(loss_policy)
@@ -640,13 +641,14 @@ class IQLAgent(BaseAgent):
             """
 
             if step > 50 and step % 5 == 0:
-                swa_critic1_main_net.update_parameters(self.critic1.main_net)
-                swa_critic2_main_net.update_parameters(self.critic2.main_net)
+                #swa_critic1_main_net.update_parameters(self.critic1.main_net)
+                #swa_critic2_main_net.update_parameters(self.critic2.main_net)
                 swa_critic1_target_net.update_parameters(self.critic1.target_net)
                 swa_critic2_target_net.update_parameters(self.critic2.target_net)
                 # swa_actor.update_parameters(self.actor)
                 swa_value.update_parameters(self.value)
-                for optim_name in ['critic1_main', 'critic1_target', 'critic2_main', 'critic2_target', 'value']:
+                #for optim_name in ['critic1_main', 'critic1_target', 'critic2_main', 'critic2_target', 'value']:
+                for optim_name in ['critic1_target', 'critic2_target', 'value']:
                     swa_scheduler[optim_name].step()
 
                 loss_policy = -1 * self._update_policy(batch, beta, update_iter, ppo_clip) if actor else None
@@ -657,12 +659,13 @@ class IQLAgent(BaseAgent):
                 # loss_policy = -1 * self._update_policy(batch, beta, update_iter, ppo_clip) if actor else None
                 # current_loss_policy.append(loss_policy)
 
-                for network_name in ['value', 'critic1_main', 'critic1_target', 'critic2_main', 'critic2_target',
+                #for network_name in ['value', 'critic1_main', 'critic1_target', 'critic2_main', 'critic2_target',
+                for network_name in ['value', 'critic1_target', 'critic2_target',
                                      'actor']:
                     scheduler[network_name].step()
 
-            if step % 500 == 0:
-
+            if step % 100 == 0:
+                """
                 # Experimental weighted sampling code
                 action_space = 4
                 all_states = np.zeros((explore_sample_size, 10000) + data[0].state.shape, dtype=np.float32)
@@ -749,6 +752,8 @@ class IQLAgent(BaseAgent):
                 gwis = first_term - second_term
 
                 behaviour_rewards = np.nansum(behaviour_rewards, 1).mean()
+                """
+
                 """
                 # all_importance_ratios = F.softmax(all_importance_ratios, 0).cpu().numpy().astype(np.float64)
                 # all_importance_ratios *= mask.sum(0).reshape(1, -1)
@@ -942,17 +947,26 @@ class IQLAgent(BaseAgent):
                 """
 
                 if evaluate:
-                    _, _, _, _, total_rewards = self.evaluate(episodes=800, parallel_envs=512,
+                    _, _, _, _, total_rewards = self.evaluate(episodes=1000, parallel_envs=512,
                                                               verbose=False)
+
+                    with open('/Users/thomasfrost/Documents/Github/pygment/all_rewards_tau_0.5.txt', 'a') as f:
+                        f.write(f'{int(np.array(total_rewards.mean()))} ')
+                        f.close()
+                    with open('/Users/thomasfrost/Documents/Github/pygment/all_steps_tau_0.5.txt', 'a') as f:
+                        f.write(f'{int(step*64)} ')
+                        f.close()
                 else:
                     total_rewards = np.array([0])
 
                 print(f'\nSteps completed: {step}\n')
                 if critic:
+                    """
                     print(
                         f'Q_loss {"decreased" if np.array(current_loss_q).mean() < old_q_loss else "increased"} '
                         f'from {round(old_q_loss, 5)} to {round(np.array(current_loss_q).mean(), 5)}'
                     )
+                    """
                     print(
                         f'Qt_loss {"decreased" if np.array(current_loss_qt).mean() < old_qt_loss else "increased"} '
                         f'from {round(old_qt_loss, 5)} to {round(np.array(current_loss_qt).mean(), 5)}'
@@ -972,8 +986,8 @@ class IQLAgent(BaseAgent):
                         f'Average reward {"decreased" if total_rewards.mean() < old_average_reward else "increased"} '
                         f'from {int(old_average_reward)} to {int(total_rewards.mean())}'
                     )
-                    print(f'Behaviour offline reward is {behaviour_rewards}')
-                    print(f'Predicted offline reward is {gwis}')
+                    #print(f'Behaviour offline reward is {behaviour_rewards}')
+                    #print(f'Predicted offline reward is {gwis}')
                     print(
                         f'Best reward {max(current_best_reward, int(total_rewards.mean()))}'
                     )
@@ -981,8 +995,8 @@ class IQLAgent(BaseAgent):
                 if total_rewards.mean() > current_best_reward:
                     if save:
                         for net, name in [
-                            [self.critic1.main_net, 'critic1_main'],
-                            [self.critic2.main_net, 'critic2_main'],
+                            #[self.critic1.main_net, 'critic1_main'],
+                            #[self.critic2.main_net, 'critic2_main'],
                             [self.critic1.target_net, 'critic1_target'],
                             [self.critic2.target_net, 'critic2_target'],
                             [self.value, 'value'],
@@ -997,12 +1011,12 @@ class IQLAgent(BaseAgent):
 
                 current_best_reward = max(current_best_reward, int(total_rewards.mean()))
 
-                old_q_loss = np.array(current_loss_q).mean()
+                #old_q_loss = np.array(current_loss_q).mean()
                 old_qt_loss = np.array(current_loss_qt).mean()
                 old_v_loss = np.array(current_loss_v).mean()
                 old_policy_loss = np.array(current_loss_policy).mean()
                 old_average_reward = total_rewards.mean()
-                current_loss_q = []
+                #current_loss_q = []
                 current_loss_qt = []
                 current_loss_v = []
                 current_loss_policy = []
@@ -1023,9 +1037,7 @@ class IQLAgent(BaseAgent):
         for network_name in ['critic1_target', 'critic2_target']:
             self.optimizer[network_name].step()
 
-        loss_qt = loss_qt.item()
-
-        return loss_qt
+        return loss_qt.item()
 
     def _update_v(self, batch: list, tau):
         """
@@ -1056,7 +1068,7 @@ class IQLAgent(BaseAgent):
         loss_policy.backward()
         self.optimizer['actor'].step()
 
-        return loss_policy.item()
+        return -1 * loss_policy.item()
 
         """
         # Unpack the batch

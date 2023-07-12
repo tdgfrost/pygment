@@ -12,7 +12,7 @@ for template_reward in [155]:
     agent = pm.create_agent('iql', device='mps')
     agent.load_env(env)
 
-    agent.add_network(nodes=[64, 64])
+    agent.add_network(nodes=[256, 256])
     if load_prior_model:
         agent.load_model(criticpath1=None,
                          criticpath2=None,
@@ -60,8 +60,11 @@ for template_reward in [155]:
 
     # agent.clone_behaviour(data, batch_size=10240, epochs=1000000, evaluate=True, save=True)
 
-    agent.train(data, critic=True, value=True, actor=True, evaluate=True, steps=1e6, batch_size=256,
-                gamma=0.99, tau=0.6, alpha=1, beta=0, update_iter=4, ppo_clip=1.2, ppo_clip_decay=1, save=False)
+    tau = 0.5
+    desired_batch = int(256 / (1-tau))
+
+    agent.train(data, critic=True, value=True, actor=True, evaluate=True, steps=1e6, batch_size=desired_batch,
+                gamma=0.5, tau=tau, alpha=1, beta=0, update_iter=4, ppo_clip=1.2, ppo_clip_decay=1, save=False)
 
     _, _, _, _, rewards = agent.evaluate(episodes=800)
     for _ in range(10):
