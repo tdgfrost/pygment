@@ -461,16 +461,20 @@ class IQLAgent(BaseAgent):
         super().compile_check()
 
         self.value.to(self.device)
-        self.critic1.main_net.to(self.device)
+        # self.critic1.main_net.to(self.device)
         self.critic1.target_net.to(self.device)
-        self.critic2.main_net.to(self.device)
+        # self.critic2.main_net.to(self.device)
         self.critic2.target_net.to(self.device)
         self.actor.to(self.device)
         self.behaviour_policy.to(self.device)
-
+        """
         for params in [self.value.parameters(), self.critic1.main_net.parameters(), self.critic2.main_net.parameters(),
                        self.critic1.target_net.parameters(), self.critic2.target_net.parameters(),
                        self.actor.parameters(), self.behaviour_policy.parameters()]:
+        """
+        for params in [self.value.parameters(), self.critic1.target_net.parameters(),
+                       self.critic2.target_net.parameters(), self.actor.parameters(),
+                       self.behaviour_policy.parameters()]:
             for p in params:
                 p.register_hook(lambda grad: torch.clamp(grad,
                                                          lower_clip if lower_clip is not None else -clip,
@@ -513,10 +517,18 @@ class IQLAgent(BaseAgent):
 
             current_loss_policy.append(loss)
 
-            if epoch % 500 == 0:
+            if epoch % 1 == 0:
                 if evaluate:
-                    _, _, _, _, total_rewards = self.evaluate(episodes=800, parallel_envs=512,
+                    _, _, _, _, total_rewards = self.evaluate(episodes=1000, parallel_envs=512,
                                                               verbose=False, behaviour=True)
+
+                    with open('/Users/thomasfrost/Documents/Github/pygment/Informal experiments/clone_behaviour/all_rewards.txt', 'a') as f:
+                        f.write(f'{int(np.array(total_rewards.mean()))} ')
+                        f.close()
+
+                    with open('/Users/thomasfrost/Documents/Github/pygment/Informal experiments/clone_behaviour/policy_loss.txt', 'a') as f:
+                        f.write(f'{round(np.array(current_loss_policy).mean(), 6)} ')
+                        f.close()
 
                 print(f'\nSteps completed: {epoch}\n')
                 print(
@@ -950,11 +962,20 @@ class IQLAgent(BaseAgent):
                     _, _, _, _, total_rewards = self.evaluate(episodes=1000, parallel_envs=512,
                                                               verbose=False)
 
-                    with open('/Users/thomasfrost/Documents/Github/pygment/all_rewards_tau_0.5.txt', 'a') as f:
+                    with open('/Users/thomasfrost/Documents/Github/pygment/Informal experiments/mse_loss/all_rewards.txt', 'a') as f:
                         f.write(f'{int(np.array(total_rewards.mean()))} ')
                         f.close()
-                    with open('/Users/thomasfrost/Documents/Github/pygment/all_steps_tau_0.5.txt', 'a') as f:
-                        f.write(f'{int(step*64)} ')
+                    with open('/Users/thomasfrost/Documents/Github/pygment/Informal experiments/mse_loss/all_steps.txt', 'a') as f:
+                        f.write(f'{int(step*batch_size)} ')
+                        f.close()
+                    with open('/Users/thomasfrost/Documents/Github/pygment/Informal experiments/mse_loss/policy_loss.txt', 'a') as f:
+                        f.write(f'{round(np.array(current_loss_policy).mean(), 6)} ')
+                        f.close()
+                    with open('/Users/thomasfrost/Documents/Github/pygment/Informal experiments/mse_loss/Q_loss.txt', 'a') as f:
+                        f.write(f'{round(np.array(current_loss_qt).mean(), 6)} ')
+                        f.close()
+                    with open('/Users/thomasfrost/Documents/Github/pygment/Informal experiments/mse_loss/V_loss.txt', 'a') as f:
+                        f.write(f'{round(np.array(current_loss_v).mean(), 6)} ')
                         f.close()
                 else:
                     total_rewards = np.array([0])
@@ -1060,9 +1081,9 @@ class IQLAgent(BaseAgent):
         Variable 'batch' should be a 1D list of Experiences - sorted or unsorted. The reward value should be the
         correct Q_s value for that state i.e., the cumulated discounted reward from that state onwards.
         """
-
+        """
         loss_policy = calc_iql_policy_loss_batch(batch, self.device, self.critic1, self.critic2, self.value,
-                                                 self.actor, beta)
+                                                 self.actor)
 
         self.optimizer['actor'].zero_grad()
         loss_policy.backward()
@@ -1088,9 +1109,9 @@ class IQLAgent(BaseAgent):
         total_loss_policy = 0
 
         for _ in range(update_iter):
-            loss_policy, action_logprobs = calc_iql_policy_loss_batch(batch, self.device, self.critic1, self.critic2,
-                                                                      self.value, self.actor, old_action_logprobs, beta,
-                                                                      ppo_clip)
+            loss_policy = calc_iql_policy_loss_batch(batch, self.device, self.critic1, self.critic2,
+                                                     self.value, self.actor, old_action_logprobs, beta,
+                                                     ppo_clip)
 
             self.optimizer['actor'].zero_grad()
             loss_policy.backward()
@@ -1099,7 +1120,7 @@ class IQLAgent(BaseAgent):
             total_loss_policy += loss_policy.item()
 
         return total_loss_policy
-        """
+
 
     def _update_behaviour_policy(self, batch: list):
         """
@@ -1631,7 +1652,7 @@ class PPO(BaseAgent):
 
                 if not done and not prem_done:
                     with torch.no_grad():
-                        next_action_logits, _ = predict_net.forward(state, device='cpu')
+                        next_action_logits, _ = predict_net.forward(next_state, device='cpu')
 
                     next_action, _, _ = self.get_action_and_logprobs(next_action_logits)
 

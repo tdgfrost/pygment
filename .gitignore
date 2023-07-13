@@ -1219,3 +1219,9 @@ pygment/samples/LunarLander PPO/2023_6_01_120242/model_30.pt
 pygment/samples/LunarLander PPO/2023_6_01_120242/model_50.pt
 pygment/samples/LunarLander PPO/2023_6_01_120242/model_60.pt
 pygment/samples/LunarLander PPO/2023_6_01_120242/model_70.pt
+pygment/samples/LunarLander IQL/2023_7_13_072844/behaviour_policy_0.71505.pt
+pygment/samples/LunarLander IQL/2023_7_13_074912/behaviour_policy_0.71605.pt
+pygment/samples/LunarLander IQL/2023_7_13_075625/behaviour_policy_0.73183.pt
+pygment/samples/LunarLander IQL/2023_7_13_080245/behaviour_policy_0.72597.pt
+pygment/samples/LunarLander IQL/2023_7_13_104834/behaviour_policy_0.65919.pt
+pygment/samples/LunarLander IQL/2023_7_13_112942/behaviour_policy_0.71648.pt

@@ -3,7 +3,7 @@ import gymnasium as gym
 import numpy as np
 import os
 
-for target_reward in [80, 110, 150, 180]:
+for target_reward in [150]:
     env = gym.make('LunarLander-v2', max_episode_steps=500)
     agent = pm.create_agent('PPO', 'cpu')
     agent.load_env(env)

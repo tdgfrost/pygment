@@ -3,8 +3,8 @@ import gymnasium as gym
 import numpy as np
 
 #for template_reward in [20, 30, 50, 100, 130, 150, 200, 220]:
-for template_reward in [155]:
-    load_prior_model = True
+for template_reward in [150]:
+    load_prior_model = False
     animate_only = False
     # template_reward = 100
 
@@ -12,19 +12,26 @@ for template_reward in [155]:
     agent = pm.create_agent('iql', device='mps')
     agent.load_env(env)
 
-    agent.add_network(nodes=[256, 256])
+    agent.add_network(nodes=[64, 64])
     if load_prior_model:
         agent.load_model(criticpath1=None,
                          criticpath2=None,
                          valuepath=None,
                          actorpath=None,
-                         behaviourpolicypath='./BehaviourPolicy/behaviour_policy_155.pt')
+                         behaviourpolicypath=None)
 
     agent.compile('adam', learning_rate=0.01, weight_decay=1e-8, clip=1)
 
     data_path = f'../GenerateStaticDataset/LunarLander/{template_reward} reward'
 
     loaded_data = {}
+    """
+    for key, filename in [['state', 'all_states.npy'], ['actions', 'all_actions.npy'],
+                          ['rewards', 'all_rewards.npy'], ['next_state', 'all_next_states.npy'],
+                          ['next_action', 'all_next_actions.npy'], ['dones', 'all_dones.npy'],
+                          ['all_cum_rewards', 'all_cum_rewards.npy']]:
+        loaded_data[key] = np.load(data_path + '/' + filename)
+    """
     for key, filename in [['state', 'all_states.npy'], ['actions', 'all_actions.npy'],
                           ['original_rewards', 'all_rewards.npy'], ['next_state', 'all_next_states.npy'],
                           ['next_action', 'all_next_actions.npy'], ['dones', 'all_dones.npy'],
@@ -32,16 +39,17 @@ for template_reward in [155]:
         loaded_data[key] = np.load(data_path + '/' + filename)
 
     # Scale to mean = 0, std = 1
+    
     loaded_data['rewards'] = (loaded_data['original_rewards'] - loaded_data['original_rewards'].mean()) / loaded_data['original_rewards'].std()
 
     # Re-calculate the cum_rewards
-    idxs = np.where(loaded_data['dones'])[0].tolist()
-    idxs.insert(0, -1)
-    idxs = [(idxs[i] + 1, idxs[i + 1]) for i in range(len(idxs) - 1)]
+    idxs = (np.where(loaded_data['dones'])[0]+1).tolist()
+    idxs.insert(0, 0)
+    idxs = np.array([(start_idx, end_idx) for start_idx, end_idx in zip(idxs[:-1], idxs[1:])])
     loaded_data['all_cum_rewards'] = loaded_data['original_cum_rewards'].copy()
-    for idx_tuple in idxs:
+    for start_idx, end_idx in idxs:
         cum_reward = 0
-        for idx in range(idx_tuple[1], idx_tuple[0]-1, -1):
+        for idx in range(end_idx-1, start_idx-1, -1):
             cum_reward = loaded_data['rewards'][idx] + 0.99 * cum_reward
             loaded_data['all_cum_rewards'][idx] = cum_reward
 
@@ -54,17 +62,17 @@ for template_reward in [155]:
                           next_state=loaded_data['next_state'][i],
                           next_action=loaded_data['next_action'][i],
                           cum_reward=loaded_data['all_cum_rewards'][i],
-                          done=loaded_data['dones'][i],
-                          original_reward=loaded_data['original_rewards'][i],
-                          original_cumreward=loaded_data['original_cum_rewards'][i]) for i in range(len(loaded_data['state']))]
+                          done=loaded_data['dones'][i]) for i in range(len(loaded_data['state']))]
+                          #original_reward=loaded_data['original_rewards'][i],
+                          #original_cumreward=loaded_data['original_cum_rewards'][i]) for i in range(len(loaded_data['state']))]
 
-    # agent.clone_behaviour(data, batch_size=10240, epochs=1000000, evaluate=True, save=True)
+    #agent.clone_behaviour(data, batch_size=100000, epochs=1000000, evaluate=True, save=True)
 
-    tau = 0.5
-    desired_batch = int(256 / (1-tau))
+    tau = 0.8
+    desired_batch = 100000
 
     agent.train(data, critic=True, value=True, actor=True, evaluate=True, steps=1e6, batch_size=desired_batch,
-                gamma=0.5, tau=tau, alpha=1, beta=0, update_iter=4, ppo_clip=1.2, ppo_clip_decay=1, save=False)
+                gamma=0.99, tau=tau, alpha=1, beta=0, update_iter=4, ppo_clip=1.2, ppo_clip_decay=1, save=False)
 
     _, _, _, _, rewards = agent.evaluate(episodes=800)
     for _ in range(10):

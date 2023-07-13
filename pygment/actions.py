@@ -142,13 +142,19 @@ def calc_iql_v_loss_batch(batch, device, critic, tau):
     pred_V_s = critic.forward(states, device=device).squeeze(-1)
 
     # Calculate loss_v
+
     loss_v = pred_V_s - torch.tensor(cum_rewards, device=device, dtype=torch.float32)
     mask = loss_v > 0
     loss_v = loss_v ** 2
     loss_v[mask] = loss_v[mask] * (1 - tau)
     loss_v[~mask] = loss_v[~mask] * tau
-
-    return loss_v.mean()
+    loss_v = loss_v.mean()
+    """
+    loss_v = torch.tensor(cum_rewards, device=device, dtype=torch.float32) - pred_V_s
+    loss_v = torch.maximum(tau * loss_v, (tau - 1) * loss_v)
+    loss_v = loss_v.mean()
+    """
+    return loss_v
 
 
 def calc_iql_q_loss_batch(batch, device, critic1, critic2, value, gamma):
@@ -173,6 +179,8 @@ def calc_iql_q_loss_batch(batch, device, critic1, critic2, value, gamma):
     target_q = torch.tensor(reward, dtype=torch.float32).to(device) + gamma * pred_V_s_next
     loss_qt1 = F.mse_loss(pred_Q1_t_choice, target_q)
     loss_qt2 = F.mse_loss(pred_Q2_t_choice, target_q)
+    # loss_qt1 = F.l1_loss(pred_Q1_t_choice, target_q)
+    # loss_qt2 = F.l1_loss(pred_Q2_t_choice, target_q)
 
     loss_qt = loss_qt1 + loss_qt2
 
@@ -231,8 +239,42 @@ def calc_iql_q_loss_batch(batch, device, critic1, critic2, value, gamma):
     return loss_q1, loss_q2, loss_qt1, loss_qt2
 """
 
+"""
+def calc_iql_policy_loss_batch(batch, device, critic1, critic2, value, actor):
+    # Unpack the batch
+    states, actions = zip(*[(exp.state, exp.action) for exp in batch])
 
-def calc_iql_policy_loss_batch(batch, device, critic1, critic2, value, actor, beta):
+    # Calculate Qt(s,a) for each state in the batch
+    with torch.no_grad():
+        pred_Q1 = critic1.forward(states, target=True, device=device)
+        pred_Q2 = critic2.forward(states, target=True, device=device)
+        pred_Q = torch.minimum(pred_Q1, pred_Q2)
+        pred_Q = pred_Q.gather(1, torch.tensor(actions).to(device).unsqueeze(-1)).squeeze(-1)
+
+    # Calculate the logprobs of the action taken
+    action_logits = actor.forward(states, device=device)
+    action_logprobs = torch.log_softmax(action_logits, dim=1)
+    action_logprobs = action_logprobs.gather(1, torch.tensor(actions).to(device).unsqueeze(-1)).squeeze(-1)
+    action_logprobs = torch.where(torch.isinf(action_logprobs), -1000, action_logprobs)
+    action_logprobs = torch.where(action_logprobs == 0, -1e-8, action_logprobs)
+
+    # Calculate V(s) for each state in the batch
+    with torch.no_grad():
+        pred_V_s = value.forward(states, device=device).squeeze(1)
+
+    # Calculate Advantage filter
+    advantage = pred_Q - pred_V_s
+    advantage = torch.relu(torch.sign(advantage)).type(torch.bool)
+
+    #loss = action_logprobs[advantage][:128]
+    loss = action_logprobs[advantage]
+    loss = -loss.mean()
+
+    return loss
+"""
+
+
+def calc_iql_policy_loss_batch(batch, device, critic1, critic2, value, actor, old_action_logprobs, beta, ppo_clip):
     # Unpack the batch
     states, actions = zip(*[(exp.state, exp.action) for exp in batch])
 
@@ -259,7 +301,7 @@ def calc_iql_policy_loss_batch(batch, device, critic1, critic2, value, actor, be
     # advantage = (advantage - advantage.mean()) / torch.max(advantage.std(), torch.tensor(1e-8, device=device))
     # advantage = torch.exp(beta * advantage)
     advantage = torch.relu(torch.sign(advantage)).type(torch.bool)
-    """
+
     # Calculate the policy loss
     ratio = torch.exp(action_logprobs - old_action_logprobs)
     clipped_ratio = torch.clamp(ratio, max=ppo_clip)
@@ -278,12 +320,8 @@ def calc_iql_policy_loss_batch(batch, device, critic1, critic2, value, actor, be
     or will be small (negative ratio with small advantage).
     '''
 
-    loss = torch.min(ratio, clipped_ratio) * advantage
-    #loss1 = torch.min(ratio, clipped_ratio) * advantage
-    #loss2 = torch.nn.functional.relu(1 - ratio) * advantage
-    #loss = -loss1.mean() + loss2.sum()
-    """
-    loss = (advantage * action_logprobs)[:64]
+    #loss = torch.min(ratio, clipped_ratio)[advantage][:128]
+    loss = torch.min(ratio, clipped_ratio)[advantage]
     loss = -loss.mean()
 
     return loss
