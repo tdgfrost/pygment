@@ -1,6 +1,7 @@
 import pygment as pm
 import gymnasium as gym
 import numpy as np
+import os
 
 #for template_reward in [20, 30, 50, 100, 130, 150, 200, 220]:
 for template_reward in [150]:
@@ -9,7 +10,7 @@ for template_reward in [150]:
     # template_reward = 100
 
     env = gym.make('LunarLander-v2')
-    agent = pm.create_agent('iql', device='mps')
+    agent = pm.create_agent('iql', device='mps', path=os.path.abspath(os.path.join('../../../..', 'Informal experiments/mse_loss')))
     agent.load_env(env)
 
     agent.add_network(nodes=[64, 64])
@@ -71,8 +72,8 @@ for template_reward in [150]:
     tau = 0.8
     desired_batch = 100000
 
-    agent.train(data, critic=True, value=True, actor=True, evaluate=True, steps=1e6, batch_size=desired_batch,
-                gamma=0.99, tau=tau, alpha=1, beta=1, update_iter=4, ppo_clip=1.2, ppo_clip_decay=1, save=False)
+    agent.train(data, critic=True, value=True, actor=True, evaluate=False, steps=1e6, batch_size=desired_batch,
+                gamma=0.99, tau=tau, alpha=1, beta=1, update_iter=4, ppo_clip=1.2, ppo_clip_decay=1, save=True)
 
     _, _, _, _, rewards = agent.evaluate(episodes=800)
     for _ in range(10):

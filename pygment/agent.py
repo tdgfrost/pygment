@@ -20,6 +20,7 @@ from .env import wrap_env
 from collections import deque
 import ray
 from math import ceil
+import matplotlib.pyplot as plt
 
 
 class Experience:
@@ -50,14 +51,18 @@ class BaseAgent:
     Base Agent stores universal attributes and super() methods across the agents.
     """
 
-    def __init__(self, device='cpu'):
+    def __init__(self, device='cpu', path=None):
         self.net = None
         self.device = device
         self.optimizer = None
         self.env = None
         self.current_best_reward = -10 ** 100
         now = dt.datetime.now()
-        self.path = f'./{now.year}_{now.month}_{now.day:02}_{now.hour:02}{now.minute:02}{now.second:02}'
+        if path is None:
+            self.path = f'./{now.year}_{now.month}_{now.day:02}_{now.hour:02}{now.minute:02}{now.second:02}'
+        else:
+            self.path = os.path.join(path,
+                                     f'{now.year}_{now.month}_{now.day:02}_{now.hour:02}{now.minute:02}{now.second:02}')
         self._optimizer = None
         self._learning_rate = None
         self._compiled = False
@@ -223,8 +228,8 @@ class DQNAgent(BaseAgent):
     current network and an intermittently synchronised target network).
     """
 
-    def __init__(self, device):
-        super().__init__(device)
+    def __init__(self, device, path=None):
+        super().__init__(device, path)
         self._buffer_size = None
         self.net = DualNet()
         self.replay_buffer = None
@@ -410,8 +415,8 @@ class IQLAgent(BaseAgent):
     IQLAgent is an implementation of the Implicit Q-Learning algorithm, a completely off-line RL algorithm.
     """
 
-    def __init__(self, device):
-        super().__init__(device)
+    def __init__(self, device, path=None):
+        super().__init__(device, path)
         self._alpha = None
         self.custom_params = None
         self._beta = None
@@ -522,11 +527,15 @@ class IQLAgent(BaseAgent):
                     _, _, _, _, total_rewards = self.evaluate(episodes=1000, parallel_envs=512,
                                                               verbose=False, behaviour=True)
 
-                    with open('/Users/thomasfrost/Documents/Github/pygment/Informal experiments/clone_behaviour/all_rewards.txt', 'a') as f:
+                    with open(
+                            '/Users/thomasfrost/Documents/Github/pygment/Informal experiments/clone_behaviour/all_rewards.txt',
+                            'a') as f:
                         f.write(f'{int(np.array(total_rewards.mean()))} ')
                         f.close()
 
-                    with open('/Users/thomasfrost/Documents/Github/pygment/Informal experiments/clone_behaviour/policy_loss.txt', 'a') as f:
+                    with open(
+                            '/Users/thomasfrost/Documents/Github/pygment/Informal experiments/clone_behaviour/policy_loss.txt',
+                            'a') as f:
                         f.write(f'{round(np.array(current_loss_policy).mean(), 6)} ')
                         f.close()
 
@@ -558,13 +567,13 @@ class IQLAgent(BaseAgent):
                 current_loss_policy = []
 
     def train(self, data, critic=True, value=True, actor=True, evaluate=True, steps=1000, batch_size=64,
-              gamma=0.99, tau=0.99, alpha=0.01, beta=1, update_iter=4, ppo_clip=0.01, ppo_clip_decay=0.9, save=False):
+              gamma=0.99, tau=0.5, alpha=0.01, beta=.1, update_iter=4, ppo_clip=0.01, ppo_clip_decay=0.9, save=False):
         """
         Variable 'data' should be a 1D list of Experiences - sorted or unsorted. The reward value should be the
         correct Q_s value for that state i.e., the cumulated discounted reward from that state onwards.
         """
-        if save:
-            evaluate = True
+        # if save:
+        # evaluate = True
 
         # Set up optimiser
         self.method_check(env_loaded=True, net_exists=True, compiled=True)
@@ -609,6 +618,16 @@ class IQLAgent(BaseAgent):
         current_loss_v = []
         current_loss_policy = []
         current_best_reward = -10 ** 10
+        best_val_loss_qt = torch.inf
+        val_counter_qt = 1
+        best_val_loss_v = torch.inf
+        val_counter_v = 1
+        best_val_loss_policy = torch.inf
+        val_counter_policy = 1
+        plot_v_lim_min = 12
+        plot_v_lim_max = 15
+        plot_q_lim_min = 0
+        plot_q_lim_max = 5
 
         # If evaluating, start ray instance
         # if evaluate:
@@ -628,12 +647,52 @@ class IQLAgent(BaseAgent):
         print('Beginning training...\n')
         progress_bar = tqdm(range(1, int(steps) + 1), file=sys.stdout)
         for step in progress_bar:
+            if not val_counter_policy:
+                break
             batch = self.sample(train_data, batch_size)
 
-            loss_v = self._update_v(batch, tau) if value else None
-            val_loss_v = self._validate_v(val_data, tau) if value else None
-            loss_qt = self._update_q(batch, gamma) if critic else None
-            val_loss_qt = self._validate_q(val_data, gamma) if critic else None
+            if value:
+                if val_counter_v:
+                    loss_v = self._update_v(batch, tau)
+
+                val_loss_v = self._validate_v(val_data, tau) if value else None
+
+                with open(
+                        '/Users/thomasfrost/Documents/Github/pygment/Informal experiments/mse_loss/val_V_loss.txt',
+                        'a') as f:
+                    f.write(f'{round(val_loss_v, 6)} ')
+                    f.close()
+
+                if val_loss_v < best_val_loss_v:
+                    best_val_loss_v = val_loss_v
+                    val_counter_v = 1
+                else:
+                    val_counter_v += 1
+                    if val_counter_v > 30:
+                        print('Validation loss for value network has not improved for 30 steps. Stopping training.')
+                        val_counter_v = False
+
+            if critic:
+                if val_counter_qt:
+                    loss_qt = self._update_q(batch, gamma)
+
+                val_loss_qt = self._validate_q(val_data, gamma) if critic else None
+
+                with open(
+                        '/Users/thomasfrost/Documents/Github/pygment/Informal experiments/mse_loss/val_Q_loss.txt',
+                        'a') as f:
+                    f.write(f'{round(val_loss_qt, 6)} ')
+                    f.close()
+
+                if not val_counter_v:
+                    if val_loss_qt < best_val_loss_qt:
+                        best_val_loss_qt = val_loss_qt
+                        val_counter_qt = 1
+                    else:
+                        val_counter_qt += 1
+                        if val_counter_qt > 30:
+                            print('Validation loss for critic networks has not improved for 30 steps. Stopping training.')
+                            val_counter_qt = False
 
             current_loss_qt.append(loss_qt)
             current_loss_v.append(loss_v)
@@ -644,15 +703,40 @@ class IQLAgent(BaseAgent):
             """
 
             if step > 50 and step % 5 == 0:
-                swa_critic1_target_net.update_parameters(self.critic1.target_net)
-                swa_critic2_target_net.update_parameters(self.critic2.target_net)
-                swa_value.update_parameters(self.value)
+                if val_counter_v:
+                    swa_value.update_parameters(self.value)
+                if val_counter_qt:
+                    swa_critic1_target_net.update_parameters(self.critic1.target_net)
+                    swa_critic2_target_net.update_parameters(self.critic2.target_net)
+
                 for optim_name in ['critic1_target', 'critic2_target', 'value']:
                     swa_scheduler[optim_name].step()
 
-                loss_policy = -1 * self._update_policy(batch, beta, update_iter, ppo_clip) if actor else None
+                if actor:
+                    if val_counter_policy:
+                        loss_policy = self._update_policy(batch, beta, update_iter, ppo_clip)
+
+                    val_loss_policy = self._validate_policy(val_data, beta)
+
+                    with open(
+                            '/Users/thomasfrost/Documents/Github/pygment/Informal experiments/mse_loss/val_policy_loss.txt',
+                            'a') as f:
+                        f.write(f'{round(val_loss_policy, 6)} ')
+                        f.close()
+
+                    if not val_counter_qt:
+                        if val_loss_policy < best_val_loss_policy:
+                            best_val_loss_policy = val_loss_policy
+                            val_counter_policy = 1
+                        else:
+                            val_counter_policy += 1
+                            if val_counter_policy > 30 and not val_counter_v and not val_counter_qt:
+                                print(
+                                    'Validation loss for critic networks has not improved for 30 steps. Stopping training.')
+                                val_counter_qt = False
+
                 current_loss_policy.append(loss_policy)
-                ppo_clip *= ppo_clip_decay
+                # ppo_clip *= ppo_clip_decay
 
             else:
                 for network_name in ['value', 'critic1_target', 'critic2_target',
@@ -665,23 +749,30 @@ class IQLAgent(BaseAgent):
                     _, _, _, _, total_rewards = self.evaluate(episodes=1000, parallel_envs=512,
                                                               verbose=False)
 
-                    with open('/Users/thomasfrost/Documents/Github/pygment/Informal experiments/mse_loss/all_rewards.txt', 'a') as f:
+                    with open(
+                            '/Users/thomasfrost/Documents/Github/pygment/Informal experiments/mse_loss/all_rewards.txt',
+                            'a') as f:
                         f.write(f'{int(np.array(total_rewards.mean()))} ')
-                        f.close()
-                    with open('/Users/thomasfrost/Documents/Github/pygment/Informal experiments/mse_loss/all_steps.txt', 'a') as f:
-                        f.write(f'{int(step)} ')
-                        f.close()
-                    with open('/Users/thomasfrost/Documents/Github/pygment/Informal experiments/mse_loss/policy_loss.txt', 'a') as f:
-                        f.write(f'{round(np.array(current_loss_policy).mean(), 6)} ')
-                        f.close()
-                    with open('/Users/thomasfrost/Documents/Github/pygment/Informal experiments/mse_loss/Q_loss.txt', 'a') as f:
-                        f.write(f'{round(np.array(current_loss_qt).mean(), 6)} ')
-                        f.close()
-                    with open('/Users/thomasfrost/Documents/Github/pygment/Informal experiments/mse_loss/V_loss.txt', 'a') as f:
-                        f.write(f'{round(np.array(current_loss_v).mean(), 6)} ')
                         f.close()
                 else:
                     total_rewards = np.array([0])
+
+                with open('/Users/thomasfrost/Documents/Github/pygment/Informal experiments/mse_loss/all_steps.txt',
+                          'a') as f:
+                    f.write(f'{int(step)} ')
+                    f.close()
+                with open('/Users/thomasfrost/Documents/Github/pygment/Informal experiments/mse_loss/policy_loss.txt',
+                          'a') as f:
+                    f.write(f'{round(np.array(current_loss_policy).mean(), 6)} ')
+                    f.close()
+                with open('/Users/thomasfrost/Documents/Github/pygment/Informal experiments/mse_loss/Q_loss.txt',
+                          'a') as f:
+                    f.write(f'{round(np.array(current_loss_qt).mean(), 6)} ')
+                    f.close()
+                with open('/Users/thomasfrost/Documents/Github/pygment/Informal experiments/mse_loss/V_loss.txt',
+                          'a') as f:
+                    f.write(f'{round(np.array(current_loss_v).mean(), 6)} ')
+                    f.close()
 
                 print(f'\nSteps completed: {step}\n')
                 if critic:
@@ -710,40 +801,76 @@ class IQLAgent(BaseAgent):
                         f'Average reward {"decreased" if total_rewards.mean() < old_average_reward else "increased"} '
                         f'from {int(old_average_reward)} to {int(total_rewards.mean())}'
                     )
-                    #print(f'Behaviour offline reward is {behaviour_rewards}')
-                    #print(f'Predicted offline reward is {gwis}')
+                    # print(f'Behaviour offline reward is {behaviour_rewards}')
+                    # print(f'Predicted offline reward is {gwis}')
                     print(
                         f'Best reward {max(current_best_reward, int(total_rewards.mean()))}'
                     )
 
-                if total_rewards.mean() > current_best_reward:
-                    if save:
-                        for net, name in [
-                            #[self.critic1.main_net, 'critic1_main'],
-                            #[self.critic2.main_net, 'critic2_main'],
-                            [self.critic1.target_net, 'critic1_target'],
-                            [self.critic2.target_net, 'critic2_target'],
-                            [self.value, 'value'],
-                            [self.actor, 'actor']
-                        ]:
-                            old_save_path = os.path.join(self.path, f'{name}_{int(current_best_reward)}.pt')
-                            new_save_path = os.path.join(self.path, f'{name}_{int(total_rewards.mean())}.pt')
+                if save:
+                    for net, name, best_loss, current_loss in [
+                        [self.critic1.target_net, 'critic1_target', best_val_loss_qt, val_loss_qt],
+                        [self.critic2.target_net, 'critic2_target', best_val_loss_qt, val_loss_qt],
+                        [self.value, 'value', best_val_loss_v, val_loss_v],
+                        [self.actor, 'actor', best_val_loss_policy, val_loss_policy]
+                    ]:
+                        if current_loss > best_loss:
+                            continue
 
-                            torch.save(net, new_save_path)
-                            if os.path.isfile(old_save_path) and old_save_path != new_save_path:
-                                os.remove(old_save_path)
+                        new_save_path = os.path.join(self.path, f'{name}_{round(best_loss, 5)}.pt')
+                        old_save_path = new_save_path
 
-                current_best_reward = max(current_best_reward, int(total_rewards.mean()))
+                        for file in os.listdir(self.path):
+                            if name in file:
+                                old_save_path = os.path.join(self.path, file)
 
-                #old_q_loss = np.array(current_loss_q).mean()
+                        torch.save(net, new_save_path)
+                        if os.path.isfile(old_save_path) and old_save_path != new_save_path:
+                            os.remove(old_save_path)
+
+                if evaluate:
+                    current_best_reward = max(current_best_reward, int(total_rewards.mean()))
+
+                # old_q_loss = np.array(current_loss_q).mean()
                 old_qt_loss = np.array(current_loss_qt).mean()
                 old_v_loss = np.array(current_loss_v).mean()
                 old_policy_loss = np.array(current_loss_policy).mean()
                 old_average_reward = total_rewards.mean()
-                #current_loss_q = []
+                # current_loss_q = []
                 current_loss_qt = []
                 current_loss_v = []
                 current_loss_policy = []
+
+                history_steps = np.loadtxt(
+                    '/Users/thomasfrost/Documents/Github/pygment/Informal experiments/mse_loss/all_steps.txt', ndmin=1)
+                history_val_v_loss = np.loadtxt(
+                    '/Users/thomasfrost/Documents/Github/pygment/Informal experiments/mse_loss/val_V_loss.txt', ndmin=1)
+                history_val_q_loss = np.loadtxt(
+                    '/Users/thomasfrost/Documents/Github/pygment/Informal experiments/mse_loss/val_Q_loss.txt', ndmin=1)
+                history_val_policy_loss = np.loadtxt(
+                    '/Users/thomasfrost/Documents/Github/pygment/Informal experiments/mse_loss/val_policy_loss.txt', ndmin=1)
+                fig, ax1 = plt.subplots()
+                ax2 = ax1.twinx()
+                for axes, x_value, y_value, colour, label, linestyle in [
+                    [ax1, [(i + 1) for i in range(len(history_val_v_loss))], history_val_v_loss, 'cornflowerblue',
+                     'Val V-loss', '--'],
+                    [ax2, [(i + 1) for i in range(len(history_val_q_loss))], history_val_q_loss, 'violet', 'Val Q Loss',
+                     '--'],
+                    [ax2, history_steps[:len(history_val_policy_loss)], history_val_policy_loss, 'darkseagreen', 'Val Policy Loss',
+                     '--']
+                ]:
+                    axes.plot(x_value, y_value, color=colour, label=label, linestyle=linestyle)
+                lines, labels = ax1.get_legend_handles_labels()
+                lines2, labels2 = ax2.get_legend_handles_labels()
+                ax2.legend(lines + lines2, labels + labels2, loc=(0.05, 0.75))
+                plt.title('Offline learning, tau = 0.8')
+                ax1.set_xlabel('Gradient Steps')
+                ax1.set_ylabel('V-loss')
+                ax2.set_ylabel('Policy & Q-loss')
+                ax1.set_ylim(plot_v_lim_min, plot_v_lim_max)
+                ax2.set_ylim(plot_q_lim_min, plot_q_lim_max)
+                plt.savefig('/Users/thomasfrost/Documents/Github/pygment/Informal experiments/mse_loss/figure.png')
+                plt.show()
 
     def _update_q(self, batch: list, gamma):
         """
@@ -779,7 +906,7 @@ class IQLAgent(BaseAgent):
 
         return loss_v.item()
 
-    def _update_policy(self, batch: list, beta=1, update_iter=4, ppo_clip=0.01):
+    def _update_policy(self, batch: list, beta=1., update_iter=4, ppo_clip=0.01):
         """
         Variable 'batch' should be a 1D list of Experiences - sorted or unsorted. The reward value should be the
         correct Q_s value for that state i.e., the cumulated discounted reward from that state onwards.
@@ -852,10 +979,11 @@ class IQLAgent(BaseAgent):
 
     def _validate_q(self, val_data: list, gamma):
         # Unpack the batch
-        states, actions, reward, next_states, next_actions, cum_rewards, dones = zip(*[(exp.state, exp.action, exp.reward,
-                                                                                        exp.next_state, exp.next_action,
-                                                                                        exp.cum_reward, exp.done)
-                                                                                       for exp in val_data])
+        states, actions, reward, next_states, next_actions, cum_rewards, dones = zip(
+            *[(exp.state, exp.action, exp.reward,
+               exp.next_state, exp.next_action,
+               exp.cum_reward, exp.done)
+              for exp in val_data])
 
         with torch.no_grad():
             # Calculate Q_t(s,a) for each state in the batch - this is the 'optimal' Q-function, updated from V(s')
@@ -867,7 +995,8 @@ class IQLAgent(BaseAgent):
 
             # Calculate V(s') for each state in the batch
             pred_V_s_next = self.value.forward(next_states, device=self.device).squeeze(-1)
-            pred_V_s_next = torch.where(~torch.tensor(dones).to(self.device), pred_V_s_next, torch.zeros_like(pred_V_s_next))
+            pred_V_s_next = torch.where(~torch.tensor(dones).to(self.device), pred_V_s_next,
+                                        torch.zeros_like(pred_V_s_next))
 
         # Calculate loss_qt
         target_q = torch.tensor(reward, dtype=torch.float32).to(self.device) + gamma * pred_V_s_next
@@ -899,11 +1028,10 @@ class IQLAgent(BaseAgent):
         # Calculate Advantage filter
         advantage = pred_Q - pred_V_s
 
-        # loss = action_logprobs[advantage]
-        loss = action_logprobs * torch.exp(beta * advantage)
-        loss = -loss.mean()
+        loss_policy = action_logprobs * torch.exp(beta * advantage)
+        loss_policy = -loss_policy.mean()
 
-        return loss
+        return loss_policy.item()
 
     def _update_behaviour_policy(self, batch: list):
         """
@@ -1319,7 +1447,7 @@ class IQLVariableAgent(BaseAgent):
                 for optim_name in ['critic_main', 'critic_target', 'value']:
                     swa_scheduler[optim_name].step()
 
-                loss_policy = -1 * self._update_policy(batch, beta, update_iter, ppo_clip) if actor else None
+                loss_policy = self._update_policy(batch, beta, update_iter, ppo_clip) if actor else None
                 current_loss_policy.append(loss_policy)
                 ppo_clip *= ppo_clip_decay
 
@@ -1449,14 +1577,14 @@ class IQLVariableAgent(BaseAgent):
         correct Q_s value for that state i.e., the cumulated discounted reward from that state onwards.
         """
 
-        loss_policy = calc_iql_policy_loss_batch(batch, self.device, self.critic,self.value,
+        loss_policy = calc_iql_policy_loss_batch(batch, self.device, self.critic, self.value,
                                                  self.actor)
 
         self.optimizer['actor'].zero_grad()
         loss_policy.backward()
         self.optimizer['actor'].step()
 
-        return -1 * loss_policy.item()
+        return loss_policy.item()
 
         """
         # Unpack the batch
@@ -1488,6 +1616,7 @@ class IQLVariableAgent(BaseAgent):
 
         return total_loss_policy
         """
+
     def _update_behaviour_policy(self, batch: list):
         """
         Variable 'batch' should be a 1D list of Experiences - sorted or unsorted. The reward value should be the
@@ -1677,8 +1806,8 @@ class PolicyGradient(BaseAgent):
     PolicyGradient is a neural network based on REINFORCE
     """
 
-    def __init__(self, device):
-        super().__init__(device)
+    def __init__(self, device, path):
+        super().__init__(device, path)
         self.net = PolicyGradientNet()
 
     def reset(self):
@@ -1785,8 +1914,8 @@ class PPO(BaseAgent):
     ActorCritic uses the actor-critic neural network to solve environments with a discrete action space.
     """
 
-    def __init__(self, device):
-        super().__init__(device)
+    def __init__(self, device, path):
+        super().__init__(device, path)
         self.net = ActorCriticNet()
 
     def reset(self):
@@ -2073,8 +2202,8 @@ class PPOContinuous(BaseAgent):
   PPOContinuous uses the actor-critic neural network to solve environments with a continuous action space.
   """
 
-    def __init__(self, device):
-        super().__init__(device)
+    def __init__(self, device, path):
+        super().__init__(device, path)
         self.net = ActorCriticNetContinuous()
 
     def reset(self):

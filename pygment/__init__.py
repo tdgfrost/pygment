@@ -6,12 +6,12 @@ import os
 os.environ["IMAGEIO_FFMPEG_EXE"] = "/opt/homebrew/bin/ffmpeg"
 
 
-def create_agent(agent_type='doubledqn', device='mps'):
-    agent_dict = {'doubledqn': DQNAgent(device),
-                  'ppo': PPO(device),
-                  'policy': PolicyGradient(device),
-                  'ppocontinuous': PPOContinuous(device),
-                  'iql': IQLAgent(device)}
+def create_agent(agent_type='doubledqn', device='mps', path=None):
+    agent_dict = {'doubledqn': DQNAgent(device, path),
+                  'ppo': PPO(device, path),
+                  'policy': PolicyGradient(device, path),
+                  'ppocontinuous': PPOContinuous(device, path),
+                  'iql': IQLAgent(device, path)}
 
     if agent_type.lower() not in agent_dict.keys():
         error = 'type must be one of: '
