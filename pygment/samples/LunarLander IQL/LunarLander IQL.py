@@ -72,7 +72,7 @@ for template_reward in [150]:
     desired_batch = 100000
 
     agent.train(data, critic=True, value=True, actor=True, evaluate=True, steps=1e6, batch_size=desired_batch,
-                gamma=0.99, tau=tau, alpha=1, beta=0, update_iter=4, ppo_clip=1.2, ppo_clip_decay=1, save=False)
+                gamma=0.99, tau=tau, alpha=1, beta=1, update_iter=4, ppo_clip=1.2, ppo_clip_decay=1, save=False)
 
     _, _, _, _, rewards = agent.evaluate(episodes=800)
     for _ in range(10):
