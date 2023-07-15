@@ -263,10 +263,10 @@ def calc_iql_policy_loss_batch(batch, device, critic1, critic2, value, actor, be
 
     # Calculate Advantage filter
     advantage = pred_Q - pred_V_s
-    #advantage = torch.relu(torch.sign(advantage)).type(torch.bool)
+    advantage = torch.relu(torch.sign(advantage)).type(torch.bool)
 
-    #loss = action_logprobs[advantage]
-    loss = action_logprobs * torch.exp(beta * advantage)
+    loss = action_logprobs[advantage]
+    #loss = action_logprobs * torch.exp(beta * advantage)
     loss = -loss.mean()
 
     return loss

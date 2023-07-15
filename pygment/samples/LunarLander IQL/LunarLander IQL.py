@@ -5,19 +5,19 @@ import os
 
 #for template_reward in [20, 30, 50, 100, 130, 150, 200, 220]:
 for template_reward in [150]:
-    load_prior_model = False
+    load_prior_model = True
     animate_only = False
     # template_reward = 100
 
     env = gym.make('LunarLander-v2')
-    agent = pm.create_agent('iql', device='mps', path=os.path.abspath(os.path.join('../../../..', 'Informal experiments/mse_loss')))
+    agent = pm.create_agent('iql', device='cpu', path=os.path.abspath(os.path.join('../../../..', 'Informal experiments/mse_loss')))
     agent.load_env(env)
 
     agent.add_network(nodes=[64, 64])
     if load_prior_model:
-        agent.load_model(criticpath1=None,
-                         criticpath2=None,
-                         valuepath=None,
+        agent.load_model(criticpath1='/Users/thomasfrost/Documents/Github/pygment/Informal experiments/mse_loss/temp/2023_7_14_230259/critic1_target_1.07761.pt',
+                         criticpath2='/Users/thomasfrost/Documents/Github/pygment/Informal experiments/mse_loss/temp/2023_7_14_230259/critic2_target_1.07761.pt',
+                         valuepath='/Users/thomasfrost/Documents/Github/pygment/Informal experiments/mse_loss/temp/2023_7_14_230259/value_12.64941.pt',
                          actorpath=None,
                          behaviourpolicypath=None)
 
@@ -70,12 +70,16 @@ for template_reward in [150]:
     #agent.clone_behaviour(data, batch_size=100000, epochs=1000000, evaluate=True, save=True)
 
     tau = 0.8
-    desired_batch = 10240
+    desired_batch = 100000
 
-    agent.train(data, evaluate=True, steps=1e6, batch_size=desired_batch,
-                gamma=0.99, tau=tau, alpha=1, beta=1, update_iter=4, ppo_clip=1.2, ppo_clip_decay=1, save=True)
+    agent.train(data, evaluate=True, steps=1e6, batch_size=desired_batch, stop_early_counter=100,
+                gamma=0.99, tau=tau, alpha=1, beta=0.5, update_iter=4, ppo_clip=1.2, ppo_clip_decay=1, save=True)
 
-    _, _, _, _, rewards = agent.evaluate(episodes=800)
+    _, _, _, _, rewards = agent.evaluate(episodes=1000)
+    print('Average rewards: ', np.array(rewards).mean())
+    """
     for _ in range(10):
-        pm.animate(agent, 'LunarLander-v2', max_episode_steps=500, directory=agent.path+f'/{template_reward}_video',
-                   prefix=f'IQL_reward_{int(rewards.mean())}')
+        pm.animate(agent, 'LunarLander-v2',
+                   max_episode_steps=500, directory=agent.path+f'/{template_reward}_video',
+                   prefix=f'IQL_reward_{int(rewards.mean())}', target_reward=None)
+    """
