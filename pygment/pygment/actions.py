@@ -142,6 +142,7 @@ def calc_iql_v_loss_batch(batch, device, value, tau):
     pred_V_s = value.forward(states, device=device).squeeze(-1)
 
     # Calculate loss_v
+
     loss_v = pred_V_s - torch.tensor(cum_rewards, device=device, dtype=torch.float32)
     mask = loss_v > 0
     loss_v = loss_v ** 2

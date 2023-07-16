@@ -624,9 +624,9 @@ class IQLAgent(BaseAgent):
                 os.makedirs(self.path)
 
         # Create logs
-        val_counter_v = 0
+        val_counter_v = 1
         val_counter_qt = 0
-        val_counter_policy = 1
+        val_counter_policy = 0
         best_val_loss_v = torch.inf
         best_val_loss_qt = torch.inf
         best_val_loss_policy = torch.inf
@@ -641,11 +641,11 @@ class IQLAgent(BaseAgent):
         backup_policy_network = deepcopy(self.actor.state_dict())
 
         plot_loss_lim_min = 0
-        plot_loss_lim_max = 15
+        plot_loss_lim_max = 20
         plot_rewards_lim_min = 100
         plot_rewards_lim_max = 250
-        plot_legend_x = 0.1
-        plot_legend_y = 0.1
+        plot_legend_x = 0.55
+        plot_legend_y = 0.75
 
         # If evaluating, start ray instance
         # if evaluate:
@@ -811,37 +811,39 @@ class IQLAgent(BaseAgent):
             history_val_q_loss = np.array([]) if val_counter_v else np.loadtxt(os.path.join(self.path, 'metadata/val_Q_loss.txt'), ndmin=1)
             history_val_policy_loss = np.array([]) if any(all_val_counters[:2]) else np.loadtxt(os.path.join(self.path, 'metadata/val_policy_loss.txt'), ndmin=1)
             history_policy_rewards = np.array([]) if any(all_val_counters[:2]) else np.loadtxt(os.path.join(self.path, 'metadata/all_rewards.txt'), ndmin=1)
-            fig, ax1 = plt.subplots(num=1, clear=True)
-            ax2 = ax1.twinx()
-            for axes, x_value, y_value, colour, label, linestyle, alpha in [
-                [ax1, [(i + 1) for i in range(len(history_val_v_loss))], history_val_v_loss, 'cornflowerblue',
-                 'Val V-loss', '-', 1],
-                [ax1, [(i + 1) for i in range(len(history_val_q_loss))], history_val_q_loss, 'violet', 'Val Q Loss',
-                 '-', 1],
-                [ax1, [(i + 1) for i in range(len(history_val_policy_loss))], history_val_policy_loss, 'darkseagreen',
-                 'Val Policy Loss', '-', 1],
-                [ax2, [(i + 1) for i in range(len(history_policy_rewards))], history_policy_rewards, 'indigo',
-                 'Online Reward', 'dotted', 0.4]
-            ]:
-                axes.plot(x_value, y_value, color=colour, label=label, linestyle=linestyle, alpha=alpha)
+            for plot_number in [1, 2]:
+                fig, ax1 = plt.subplots(num=1, clear=True)
+                ax2 = ax1.twinx()
+                for axes, x_value, y_value, colour, label, linestyle, alpha, which_plots in [
+                    [ax1, [(i + 1) for i in range(len(history_val_v_loss))], history_val_v_loss, 'cornflowerblue',
+                     'Val V-loss', '-', 1, 1],
+                    [ax1, [(i + 1) for i in range(len(history_val_q_loss))], history_val_q_loss, 'violet', 'Val Q Loss',
+                     '-', 1, 1],
+                    [ax1, [(i + 1) for i in range(len(history_val_policy_loss))], history_val_policy_loss, 'darkseagreen',
+                     'Val Policy Loss', '-', 1, 2],
+                    [ax2, [(i + 1) for i in range(len(history_policy_rewards))], history_policy_rewards, 'indigo',
+                     'Online Reward', 'dotted', 0.4, 2]
+                ]:
+                    if which_plots >= plot_number:
+                        axes.plot(x_value, y_value, color=colour, label=label, linestyle=linestyle, alpha=alpha)
 
-            max_steps_plot = max(len(history_val_v_loss), len(history_val_q_loss), len(history_val_policy_loss))
-            ax2.hlines(150, xmin=0, xmax=max_steps_plot, color='red', linestyle='--', label='Behaviour Policy Reward',
-                       alpha=0.2)
-            ax2.hlines(200, xmin=0, xmax=max_steps_plot, color='darkred', linestyle='--', label='Solved',
-                       alpha=0.2)
-            lines, labels = ax1.get_legend_handles_labels()
-            lines2, labels2 = ax2.get_legend_handles_labels()
-            ax2.legend(lines + lines2, labels + labels2, loc=(plot_legend_x, plot_legend_y))
-            plt.title('Offline learning, tau = 0.8')
-            ax1.set_xlabel('Gradient Steps')
-            ax1.set_ylabel('Loss')
-            ax2.set_ylabel('Rewards')
-            ax1.set_ylim(plot_loss_lim_min, plot_loss_lim_max)
-            ax2.set_ylim(plot_rewards_lim_min, plot_rewards_lim_max)
-            if not os.path.isdir(os.path.join(self.path, 'metadata')):
-                os.makedirs(os.path.join(self.path, 'metadata'))
-            fig.savefig(os.path.join(self.path, 'metadata/figure.png'))
+                max_steps_plot = max(len(history_val_v_loss), len(history_val_q_loss), len(history_val_policy_loss)) if plot_number == 1 else len(history_val_policy_loss)
+                ax2.hlines(200, xmin=0, xmax=max_steps_plot, color='darkred', linestyle='--', label='Solved',
+                           alpha=0.4)
+                ax2.hlines(150, xmin=0, xmax=max_steps_plot, color='orange', linestyle='--', label='Behaviour Policy Reward',
+                           alpha=0.4)
+                lines, labels = ax1.get_legend_handles_labels()
+                lines2, labels2 = ax2.get_legend_handles_labels()
+                ax2.legend(lines + lines2, labels + labels2, loc=(plot_legend_x, plot_legend_y))
+                plt.title(f'Offline learning, tau = {tau}')
+                ax1.set_xlabel('Gradient Steps')
+                ax1.set_ylabel('Loss')
+                ax2.set_ylabel('Rewards')
+                #ax1.set_ylim(plot_loss_lim_min, plot_loss_lim_max)
+                ax2.set_ylim(plot_rewards_lim_min, plot_rewards_lim_max)
+                if not os.path.isdir(os.path.join(self.path, 'metadata')):
+                    os.makedirs(os.path.join(self.path, 'metadata'))
+                fig.savefig(os.path.join(self.path, 'metadata/figure.png' if plot_number==1 else 'metadata/figure_rewards_only.png'))
 
     def _update_q(self, batch: list, gamma):
         """

@@ -5,7 +5,7 @@ import os
 
 #for template_reward in [20, 30, 50, 100, 130, 150, 200, 220]:
 for template_reward in [150]:
-    load_prior_model = True
+    load_prior_model = False
     animate_only = False
     # template_reward = 100
 
@@ -15,9 +15,9 @@ for template_reward in [150]:
 
     agent.add_network(nodes=[64, 64])
     if load_prior_model:
-        agent.load_model(criticpath1='/Users/thomasfrost/Documents/Github/pygment/Informal experiments/mse_loss/temp/2023_7_14_230259/critic1_target_1.07761.pt',
-                         criticpath2='/Users/thomasfrost/Documents/Github/pygment/Informal experiments/mse_loss/temp/2023_7_14_230259/critic2_target_1.07761.pt',
-                         valuepath='/Users/thomasfrost/Documents/Github/pygment/Informal experiments/mse_loss/temp/2023_7_14_230259/value_12.64941.pt',
+        agent.load_model(criticpath1=None,
+                         criticpath2=None,
+                         valuepath='/Users/thomasfrost/Documents/Github/pygment/Informal experiments/mse_loss/2023_7_15_134716/value_13.83346.pt',
                          actorpath=None,
                          behaviourpolicypath=None)
 
@@ -51,7 +51,7 @@ for template_reward in [150]:
     for start_idx, end_idx in idxs:
         cum_reward = 0
         for idx in range(end_idx-1, start_idx-1, -1):
-            cum_reward = loaded_data['rewards'][idx] + 0.99 * cum_reward
+            cum_reward = loaded_data['rewards'][idx] + 0.99999 * cum_reward
             loaded_data['all_cum_rewards'][idx] = cum_reward
 
     # Find the correct scale
@@ -69,13 +69,13 @@ for template_reward in [150]:
 
     #agent.clone_behaviour(data, batch_size=100000, epochs=1000000, evaluate=True, save=True)
 
-    tau = 0.8
+    tau = 0.95
     desired_batch = 100000
 
     agent.train(data, evaluate=True, steps=1e6, batch_size=desired_batch, stop_early_counter=100,
-                gamma=0.99, tau=tau, alpha=1, beta=0.5, update_iter=4, ppo_clip=1.2, ppo_clip_decay=1, save=True)
+                gamma=0.99999, tau=tau, alpha=1, beta=0.5, update_iter=4, ppo_clip=1.2, ppo_clip_decay=1, save=True)
 
-    _, _, _, _, rewards = agent.evaluate(episodes=1000)
+    _, _, _, _, rewards = agent.evaluate(episodes=10000)
     print('Average rewards: ', np.array(rewards).mean())
     """
     for _ in range(10):
