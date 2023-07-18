@@ -23,7 +23,7 @@ def create_agent(agent_type='doubledqn', device='mps', path=None):
     return agent_dict[agent_type.lower()]
 
 
-def animate(agent_instance, env_name, max_episode_steps=500, directory=None, prefix='', target_reward=None):
+def animate(agent_instance, env_name, max_episode_steps=1000, directory=None, prefix='', target_reward=None):
     if directory is None:
         directory = agent_instance.path + '/videos'
 

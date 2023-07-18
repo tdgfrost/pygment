@@ -1255,3 +1255,12 @@ pygment/pygment/__pycache__/env.cpython-39.pyc
 pygment/pygment/__pycache__/net.cpython-310.pyc
 pygment/pygment/__pycache__/net.cpython-39.pyc
 pygment/samples/LunarLander Actor Critic/.DS_Store
+pygment/samples/GenerateStaticDataset/LunarLander/140 reward/all_actions.npy
+pygment/samples/GenerateStaticDataset/LunarLander/140 reward/all_cum_rewards.npy
+pygment/samples/GenerateStaticDataset/LunarLander/140 reward/all_dones.npy
+pygment/samples/GenerateStaticDataset/LunarLander/140 reward/all_next_actions.npy
+pygment/samples/GenerateStaticDataset/LunarLander/140 reward/all_next_states.npy
+pygment/samples/GenerateStaticDataset/LunarLander/140 reward/all_rewards.npy
+pygment/samples/GenerateStaticDataset/LunarLander/140 reward/all_states.npy
+pygment/samples/LunarLander PPO/2023_6_12_164457/model_175.pt
+pygment/samples/LunarLander PPO/2023_6_12_164457/model_190.pt

@@ -773,7 +773,7 @@ class IQLAgent(BaseAgent):
             EVALUATE POLICY ON ENVIRONMENT - OPTIONAL
             """
             if val_counter_policy and evaluate:
-                _, _, _, _, total_rewards = self.evaluate(episodes=1000, parallel_envs=512,
+                _, _, _, _, total_rewards = self.evaluate(episodes=2000, parallel_envs=1024,
                                                           verbose=False)
 
                 self.write_to_txt(f'{int(np.array(total_rewards.mean()))} ', 'metadata/all_rewards')
@@ -812,6 +812,8 @@ class IQLAgent(BaseAgent):
             history_val_policy_loss = np.array([]) if any(all_val_counters[:2]) else np.loadtxt(os.path.join(self.path, 'metadata/val_policy_loss.txt'), ndmin=1)
             history_policy_rewards = np.array([]) if any(all_val_counters[:2]) else np.loadtxt(os.path.join(self.path, 'metadata/all_rewards.txt'), ndmin=1)
             for plot_number in [1, 2]:
+                if plot_number == 2 and not val_counter_v:
+                    continue
                 fig, ax1 = plt.subplots(num=1, clear=True)
                 ax2 = ax1.twinx()
                 for axes, x_value, y_value, colour, label, linestyle, alpha, which_plots in [
@@ -829,8 +831,10 @@ class IQLAgent(BaseAgent):
 
                 max_steps_plot = max(len(history_val_v_loss), len(history_val_q_loss), len(history_val_policy_loss)) if plot_number == 1 else len(history_val_policy_loss)
                 ax2.hlines(200, xmin=0, xmax=max_steps_plot, color='darkred', linestyle='--', label='Solved',
+                           alpha=0.4) if plot_number == 2 else ax2.hlines(200, xmin=0, xmax=max_steps_plot, color='darkred', linestyle='--',
                            alpha=0.4)
-                ax2.hlines(150, xmin=0, xmax=max_steps_plot, color='orange', linestyle='--', label='Behaviour Policy Reward',
+                ax2.hlines(140, xmin=0, xmax=max_steps_plot, color='orange', linestyle='--', label='Behaviour Policy Reward',
+                           alpha=0.4) if plot_number == 2 else ax2.hlines(140, xmin=0, xmax=max_steps_plot, color='orange', linestyle='--',
                            alpha=0.4)
                 lines, labels = ax1.get_legend_handles_labels()
                 lines2, labels2 = ax2.get_legend_handles_labels()
@@ -843,7 +847,7 @@ class IQLAgent(BaseAgent):
                 ax2.set_ylim(plot_rewards_lim_min, plot_rewards_lim_max)
                 if not os.path.isdir(os.path.join(self.path, 'metadata')):
                     os.makedirs(os.path.join(self.path, 'metadata'))
-                fig.savefig(os.path.join(self.path, 'metadata/figure.png' if plot_number==1 else 'metadata/figure_rewards_only.png'))
+                fig.savefig(os.path.join(self.path, 'metadata/figure.png' if plot_number == 1 else 'metadata/figure_rewards_only.png'))
 
     def _update_q(self, batch: list, gamma):
         """
@@ -2096,7 +2100,7 @@ class PPO(BaseAgent):
                                             reward=reward,
                                             next_state=next_state,
                                             next_action=next_action,
-                                            done=done))
+                                            done=done or prem_done))
 
                 state = next_state
                 action = next_action
