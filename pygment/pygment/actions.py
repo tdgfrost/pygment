@@ -142,7 +142,9 @@ def calc_iql_v_loss_batch(batch, device, value, tau):
     pred_V_s = value.forward(states, device=device).squeeze(-1)
 
     # Calculate loss_v
-
+    """
+    MSE - expectile regression
+    
     loss_v = pred_V_s - torch.tensor(cum_rewards, device=device, dtype=torch.float32)
     mask = loss_v > 0
     loss_v = loss_v ** 2
@@ -150,10 +152,31 @@ def calc_iql_v_loss_batch(batch, device, value, tau):
     loss_v[~mask] = loss_v[~mask] * tau
     loss_v = loss_v.mean()
     """
+    """
+    MAE - quantile regression
     loss_v = torch.tensor(cum_rewards, device=device, dtype=torch.float32) - pred_V_s
     loss_v = torch.maximum(tau * loss_v, (tau - 1) * loss_v)
     loss_v = loss_v.mean()
     """
+    """
+    # Barron et al adaptive robust loss function - specifically, alpha = 0 -> Cauchy distribution for residuals??
+    loss_v = pred_V_s - torch.tensor(cum_rewards, device=device, dtype=torch.float32)
+    mask = loss_v > 0
+    loss_v = loss_v ** 2 / 2
+    loss_v[mask] = loss_v[mask] * (1 - tau)
+    loss_v[~mask] = loss_v[~mask] * tau
+    loss_v = loss_v.mean()
+    
+    # Best reward performance so far (140 -> 200)
+    """
+    # True Cauchy distribution for residuals - not sure about the expectile regression though...
+    loss_v = pred_V_s - torch.tensor(cum_rewards, device=device, dtype=torch.float32)
+    mask = loss_v > 0
+    loss_v = torch.log(loss_v ** 2 / 2 + 1)
+    loss_v[mask] = loss_v[mask] * (1 - tau)
+    loss_v[~mask] = loss_v[~mask] * tau
+    loss_v = loss_v.mean()
+
     return loss_v
 
 
@@ -264,7 +287,7 @@ def calc_iql_policy_loss_batch(batch, device, critic1, critic2, value, actor, be
 
     # Calculate Advantage filter
     advantage = pred_Q - pred_V_s
-    #advantage = torch.relu(torch.sign(advantage)).type(torch.bool)
+    advantage = torch.relu(torch.sign(advantage)).type(torch.bool)
 
     loss = action_logprobs[advantage]
     #loss = action_logprobs * torch.exp(beta * advantage)

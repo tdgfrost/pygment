@@ -624,15 +624,15 @@ class IQLAgent(BaseAgent):
                 os.makedirs(self.path)
 
         # Create logs
-        val_counter_v = 1
-        val_counter_qt = 0
-        val_counter_policy = 0
-        best_val_loss_v = torch.inf
-        best_val_loss_qt = torch.inf
-        best_val_loss_policy = torch.inf
-        val_loss_qt = torch.inf
-        val_loss_v = torch.inf
-        val_loss_policy = torch.inf
+        counter_v = 1
+        counter_qt = 0
+        counter_policy = 0
+        best_loss_v = torch.inf
+        best_loss_qt = torch.inf
+        best_loss_policy = torch.inf
+        loss_qt = torch.inf
+        loss_v = torch.inf
+        loss_policy = torch.inf
         swa_steps = 0
 
         backup_v_network = deepcopy(self.value.state_dict())
@@ -656,83 +656,76 @@ class IQLAgent(BaseAgent):
         all_idxs = [(idx, next_idx) for idx, next_idx in zip(all_idxs[:-1], all_idxs[1:])]
         np.random.default_rng().shuffle(all_idxs)
 
-        train_data_idxs = all_idxs[:7000]
-        val_data_idxs = all_idxs[7000:]
-        train_data = [data[idx] for start_idx, end_idx in train_data_idxs for idx in range(start_idx, end_idx)]
-        val_data = [data[idx] for start_idx, end_idx in val_data_idxs for idx in range(start_idx, end_idx)]
-
         # Start training
         print('Beginning training...\n')
         progress_bar = tqdm(range(1, int(steps) + 1), file=sys.stdout)
         for step in progress_bar:
-            if not any([val_counter_v, val_counter_qt, val_counter_policy]):
+            if not any([counter_v, counter_qt, counter_policy]):
                 break
-            batch = self.sample(train_data, batch_size)
+            batch = self.sample(data, batch_size)
             """
             UPDATE VALUE NETWORK
             """
-            if val_counter_v:
+            if counter_v:
                 swa_steps += 1
                 loss_v = self._update_v(batch, tau)
-                val_loss_v = self._validate_v(val_data, tau)
 
-                self.write_to_txt(f'{round(val_loss_v, 6)} ', 'metadata/val_V_loss')
+                self.write_to_txt(f'{round(loss_v, 6)} ', 'metadata/V_loss')
 
                 if swa_steps <= 50:
                     scheduler['value'].step()
 
                 elif swa_steps % 5 == 0:
-                    if val_counter_v:
+                    if counter_v:
                         swa_value.update_parameters(self.value)
 
                     swa_scheduler['value'].step()
 
-                if val_loss_v < best_val_loss_v:
-                    best_val_loss_v = val_loss_v
-                    val_counter_v = 1
+                if loss_v < best_loss_v:
+                    best_loss_v = loss_v
+                    counter_v = 1
                     backup_v_network = self.value.state_dict()
                 else:
-                    val_counter_v += 1
-                    if val_counter_v > stop_early_counter:
+                    counter_v += 1
+                    if counter_v > stop_early_counter:
                         print('Validation loss for value network has not improved for 30 steps. Stopping training.')
-                        val_counter_v = False
-                        val_counter_qt = 1
+                        counter_v = False
+                        counter_qt = 1
                         swa_steps = 0
                         self.value.load_state_dict(backup_v_network)
 
             """
             UPDATE CRITIC NETWORKS
             """
-            if val_counter_qt:
+            if counter_qt:
                 swa_steps += 1
                 loss_qt = self._update_q(batch, gamma)
-                val_loss_qt = self._validate_q(val_data, gamma)
 
-                self.write_to_txt(f'{round(val_loss_qt, 6)} ', 'metadata/val_Q_loss')
+                self.write_to_txt(f'{round(loss_qt, 6)} ', 'metadata/Q_loss')
 
                 if swa_steps <= 50:
                     scheduler['critic1_target'].step()
                     scheduler['critic2_target'].step()
 
                 elif swa_steps % 5 == 0:
-                    if val_counter_qt:
+                    if counter_qt:
                         swa_critic1_target_net.update_parameters(self.critic1.target_net)
                         swa_critic2_target_net.update_parameters(self.critic2.target_net)
 
                     swa_scheduler['critic1_target'].step()
                     swa_scheduler['critic2_target'].step()
 
-                if val_loss_qt < best_val_loss_qt:
-                    best_val_loss_qt = val_loss_qt
-                    val_counter_qt = 1
+                if loss_qt < best_loss_qt:
+                    best_loss_qt = loss_qt
+                    counter_qt = 1
                     backup_q1_network = self.critic1.target_net.state_dict()
                     backup_q2_network = self.critic2.target_net.state_dict()
                 else:
-                    val_counter_qt += 1
-                    if val_counter_qt > stop_early_counter:
+                    counter_qt += 1
+                    if counter_qt > stop_early_counter:
                         print('Validation loss for critic networks has not improved for 30 steps. Stopping training.')
-                        val_counter_qt = False
-                        val_counter_policy = 1
+                        counter_qt = False
+                        counter_policy = 1
                         self.critic1.target_net.load_state_dict(backup_q1_network)
                         self.critic2.target_net.load_state_dict(backup_q2_network)
                         swa_steps = 0
@@ -740,39 +733,38 @@ class IQLAgent(BaseAgent):
             """
             UPDATE ACTOR NETWORK
             """
-            if val_counter_policy:
+            if counter_policy:
                 swa_steps += 1
                 loss_policy = self._update_policy(batch, beta, update_iter, ppo_clip)
-                val_loss_policy = self._validate_policy(val_data, beta)
 
-                self.write_to_txt(f'{round(val_loss_policy, 6)} ', 'metadata/val_policy_loss')
+                self.write_to_txt(f'{round(loss_policy, 6)} ', 'metadata/policy_loss')
 
                 if swa_steps <= 50:
                     scheduler['actor'].step()
 
                 elif swa_steps % 5 == 0:
-                    if val_counter_policy:
+                    if counter_policy:
                         swa_actor.update_parameters(self.actor)
 
                     swa_scheduler['actor'].step()
 
-                if val_loss_policy < best_val_loss_policy:
-                    best_val_loss_policy = val_loss_policy
-                    val_counter_policy = 1
+                if loss_policy < best_loss_policy:
+                    best_loss_policy = loss_policy
+                    counter_policy = 1
                     backup_policy_network = self.actor.state_dict()
                 else:
-                    val_counter_policy += 1
-                    if val_counter_policy > stop_early_counter:
+                    counter_policy += 1
+                    if counter_policy > stop_early_counter:
                         print(
                             'Validation loss for actor network has not improved for 30 steps. Stopping training.')
-                        val_counter_policy = False
+                        counter_policy = False
                         self.actor.load_state_dict(backup_policy_network)
                         swa_steps = 0
 
             """
             EVALUATE POLICY ON ENVIRONMENT - OPTIONAL
             """
-            if val_counter_policy and evaluate:
+            if counter_policy and evaluate:
                 _, _, _, _, total_rewards = self.evaluate(episodes=2000, parallel_envs=1024,
                                                           verbose=False)
 
@@ -780,10 +772,10 @@ class IQLAgent(BaseAgent):
 
             if save:
                 for net, name, best_loss, current_loss, trigger in [
-                    [self.critic1.target_net, 'critic1_target', best_val_loss_qt, val_loss_qt, val_counter_qt],
-                    [self.critic2.target_net, 'critic2_target', best_val_loss_qt, val_loss_qt, val_counter_qt],
-                    [self.value, 'value', best_val_loss_v, val_loss_v, val_counter_v],
-                    [self.actor, 'actor', best_val_loss_policy, val_loss_policy, val_counter_policy]
+                    [self.critic1.target_net, 'critic1_target', best_loss_qt, loss_qt, counter_qt],
+                    [self.critic2.target_net, 'critic2_target', best_loss_qt, loss_qt, counter_qt],
+                    [self.value, 'value', best_loss_v, loss_v, counter_v],
+                    [self.actor, 'actor', best_loss_policy, loss_policy, counter_policy]
                 ]:
                     if not trigger:
                         continue
@@ -806,22 +798,22 @@ class IQLAgent(BaseAgent):
             PLOT LOSS
             """
             
-            all_val_counters = [val_counter_v, val_counter_qt, val_counter_policy]
-            history_val_v_loss = np.loadtxt(os.path.join(self.path, 'metadata/val_V_loss.txt'), ndmin=1)
-            history_val_q_loss = np.array([]) if val_counter_v else np.loadtxt(os.path.join(self.path, 'metadata/val_Q_loss.txt'), ndmin=1)
-            history_val_policy_loss = np.array([]) if any(all_val_counters[:2]) else np.loadtxt(os.path.join(self.path, 'metadata/val_policy_loss.txt'), ndmin=1)
-            history_policy_rewards = np.array([]) if any(all_val_counters[:2]) else np.loadtxt(os.path.join(self.path, 'metadata/all_rewards.txt'), ndmin=1)
+            all_counters = [counter_v, counter_qt, counter_policy]
+            history_v_loss = np.loadtxt(os.path.join(self.path, 'metadata/V_loss.txt'), ndmin=1)
+            history_q_loss = np.array([]) if counter_v else np.loadtxt(os.path.join(self.path, 'metadata/Q_loss.txt'), ndmin=1)
+            history_policy_loss = np.array([]) if any(all_counters[:2]) else np.loadtxt(os.path.join(self.path, 'metadata/policy_loss.txt'), ndmin=1)
+            history_policy_rewards = np.array([]) if any(all_counters[:2]) else np.loadtxt(os.path.join(self.path, 'metadata/all_rewards.txt'), ndmin=1)
             for plot_number in [1, 2]:
-                if plot_number == 2 and not val_counter_v:
+                if plot_number == 2 and any(all_counters[:2]):
                     continue
                 fig, ax1 = plt.subplots(num=1, clear=True)
                 ax2 = ax1.twinx()
                 for axes, x_value, y_value, colour, label, linestyle, alpha, which_plots in [
-                    [ax1, [(i + 1) for i in range(len(history_val_v_loss))], history_val_v_loss, 'cornflowerblue',
+                    [ax1, [(i + 1) for i in range(len(history_v_loss))], history_v_loss, 'cornflowerblue',
                      'Val V-loss', '-', 1, 1],
-                    [ax1, [(i + 1) for i in range(len(history_val_q_loss))], history_val_q_loss, 'violet', 'Val Q Loss',
+                    [ax1, [(i + 1) for i in range(len(history_q_loss))], history_q_loss, 'violet', 'Val Q Loss',
                      '-', 1, 1],
-                    [ax1, [(i + 1) for i in range(len(history_val_policy_loss))], history_val_policy_loss, 'darkseagreen',
+                    [ax1, [(i + 1) for i in range(len(history_policy_loss))], history_policy_loss, 'darkseagreen',
                      'Val Policy Loss', '-', 1, 2],
                     [ax2, [(i + 1) for i in range(len(history_policy_rewards))], history_policy_rewards, 'indigo',
                      'Online Reward', 'dotted', 0.4, 2]
@@ -829,7 +821,7 @@ class IQLAgent(BaseAgent):
                     if which_plots >= plot_number:
                         axes.plot(x_value, y_value, color=colour, label=label, linestyle=linestyle, alpha=alpha)
 
-                max_steps_plot = max(len(history_val_v_loss), len(history_val_q_loss), len(history_val_policy_loss)) if plot_number == 1 else len(history_val_policy_loss)
+                max_steps_plot = max(len(history_v_loss), len(history_q_loss), len(history_policy_loss)) if plot_number == 1 else len(history_policy_loss)
                 ax2.hlines(200, xmin=0, xmax=max_steps_plot, color='darkred', linestyle='--', label='Solved',
                            alpha=0.4) if plot_number == 2 else ax2.hlines(200, xmin=0, xmax=max_steps_plot, color='darkred', linestyle='--',
                            alpha=0.4)
@@ -901,114 +893,6 @@ class IQLAgent(BaseAgent):
 
         else:
             return -1 * torch.inf
-        """
-        # Unpack the batch
-        states, actions = zip(*[(exp.state, exp.action) for exp in batch])
-
-        # Calculate the logprobs of the action taken
-        with torch.no_grad():
-            old_action_logits = self.actor.forward(states, device=self.device)
-            old_action_logprobs = torch.log_softmax(old_action_logits, dim=1)
-            old_action_logprobs = old_action_logprobs.gather(1,
-                                                             torch.tensor(actions).to(self.device).unsqueeze(
-                                                                 -1)).squeeze(
-                -1)
-            old_action_logprobs = torch.where(torch.isinf(old_action_logprobs), -1000, old_action_logprobs)
-            old_action_logprobs = torch.where(old_action_logprobs == 0, -1e-8, old_action_logprobs)
-
-        total_loss_policy = 0
-
-        for _ in range(update_iter):
-            loss_policy = calc_iql_policy_loss_batch(batch, self.device, self.critic1, self.critic2,
-                                                     self.value, self.actor, old_action_logprobs, beta,
-                                                     ppo_clip)
-
-            self.optimizer['actor'].zero_grad()
-            loss_policy.backward()
-            self.optimizer['actor'].step()
-
-            total_loss_policy += loss_policy.item()
-
-        return total_loss_policy
-        """
-
-    def _validate_v(self, val_data: list, tau):
-        """
-        Variable 'batch' should be a 1D list of Experiences - sorted or unsorted. The reward value should be the
-        correct Q_s value for that state i.e., the cumulated discounted reward from that state onwards.
-        """
-
-        # Unpack the batch
-        states, cum_rewards = zip(*[(exp.state, exp.cum_reward) for exp in val_data])
-
-        with torch.no_grad():
-            pred_V_s = self.value.forward(states, device=self.device).squeeze(-1)
-
-        # Calculate loss_v
-        loss_v = pred_V_s - torch.tensor(cum_rewards, device=self.device, dtype=torch.float32)
-        mask = loss_v > 0
-        loss_v = loss_v ** 2
-        loss_v[mask] = loss_v[mask] * (1 - tau)
-        loss_v[~mask] = loss_v[~mask] * tau
-        loss_v = loss_v.mean()
-
-        return loss_v.item()
-
-    def _validate_q(self, val_data: list, gamma):
-        # Unpack the batch
-        states, actions, reward, next_states, next_actions, cum_rewards, dones = zip(
-            *[(exp.state, exp.action, exp.reward,
-               exp.next_state, exp.next_action,
-               exp.cum_reward, exp.done)
-              for exp in val_data])
-
-        with torch.no_grad():
-            # Calculate Q_t(s,a) for each state in the batch - this is the 'optimal' Q-function, updated from V(s')
-            pred_Q1_t = self.critic1.forward(states, target=True, device=self.device)
-            pred_Q1_t_choice = pred_Q1_t.gather(1, torch.tensor(actions).to(self.device).unsqueeze(-1)).squeeze(-1)
-            pred_Q2_t = self.critic2.forward(states, target=True, device=self.device)
-            pred_Q2_t_choice = pred_Q2_t.gather(1, torch.tensor(actions).to(self.device).unsqueeze(-1)).squeeze(-1)
-            pred_Q_t = torch.minimum(pred_Q1_t_choice, pred_Q2_t_choice)
-
-            # Calculate V(s') for each state in the batch
-            pred_V_s_next = self.value.forward(next_states, device=self.device).squeeze(-1)
-            pred_V_s_next = torch.where(~torch.tensor(dones).to(self.device), pred_V_s_next,
-                                        torch.zeros_like(pred_V_s_next))
-
-        # Calculate loss_qt
-        target_q = torch.tensor(reward, dtype=torch.float32).to(self.device) + gamma * pred_V_s_next
-        loss_qt = F.mse_loss(pred_Q_t, target_q)
-
-        return loss_qt.item()
-
-    def _validate_policy(self, val_data: list, beta):
-        # Unpack the batch
-        states, actions = zip(*[(exp.state, exp.action) for exp in val_data])
-
-        # Calculate Qt(s,a) for each state in the batch
-        with torch.no_grad():
-            pred_Q1 = self.critic1.forward(states, target=True, device=self.device)
-            pred_Q2 = self.critic2.forward(states, target=True, device=self.device)
-            pred_Q = torch.minimum(pred_Q1, pred_Q2)
-            pred_Q = pred_Q.gather(1, torch.tensor(actions).to(self.device).unsqueeze(-1)).squeeze(-1)
-
-            # Calculate V(s) for each state in the batch
-            pred_V_s = self.value.forward(states, device=self.device).squeeze(1)
-
-            # Calculate the logprobs of the action taken
-            action_logits = self.actor.forward(states, device=self.device)
-            action_logprobs = torch.log_softmax(action_logits, dim=1)
-            action_logprobs = action_logprobs.gather(1, torch.tensor(actions).to(self.device).unsqueeze(-1)).squeeze(-1)
-            action_logprobs = torch.where(torch.isinf(action_logprobs), -1000, action_logprobs)
-            action_logprobs = torch.where(action_logprobs == 0, -1e-8, action_logprobs)
-
-        # Calculate Advantage filter
-        advantage = pred_Q - pred_V_s
-
-        loss_policy = action_logprobs * torch.exp(beta * advantage)
-        loss_policy = -loss_policy.mean()
-
-        return loss_policy.item()
 
     def _update_behaviour_policy(self, batch: list):
         """
@@ -1125,36 +1009,15 @@ class IQLAgent(BaseAgent):
         return np.array(all_states), np.array(all_actions), np.array(all_rewards), \
             np.array(all_next_states), np.array(all_total_rewards)
 
-    def evaluate_offline(self, data, episodes=100, parallel_envs=32, verbose=True):
-
-        dones = np.array([exp.done for exp in data])
-        episode_idxs = np.where(dones)[0] + 1
-        episode_idxs = episode_idxs.tolist()
-        episode_idxs.insert(0, 0)
-        episode_idxs = np.array(episode_idxs)
-        episode_idxs = [slice(i, j) for i, j in zip(episode_idxs[:-1], episode_idxs[1:])]
-        np.random.default_rng().shuffle(episode_idxs)
-
-        for ep_idx in episode_idxs[:episodes]:
-            p = 1.0
-            h = []
-            t = 0
-            r = 0
-            for exp in data[ep_idx]:
-                h.append(exp.state)
-                logits = self.actor.forward(exp.state, device='cpu')
-                actionprobs = F.softmax(logits)[exp.action]
-                p *= actionprobs
-
-        # return np.array(all_states), np.array(all_actions), np.array(all_rewards), \
-        # np.array(all_next_states), np.array(all_total_rewards)
-        return
 
     def choose_action(self, state, device='cpu'):
         with torch.no_grad():
             logits = self.actor.forward(state, device=device)
 
-        action = torch.argmax(logits)
+        action_probs = F.softmax(logits, dim=-1)
+        action_distribution = Categorical(action_probs)
+
+        action = action_distribution.sample()
 
         return action.item()
 
@@ -1431,7 +1294,7 @@ class IQLVariableAgent(BaseAgent):
                                                               verbose=False)
 
                     with open(
-                            '/Users/thomasfrost/Documents/Github/pygment/Informal experiments/mse_loss/all_rewards.txt',
+                            '/Users/thomasfrost/Documents/Github/pygment/Informal experiments/cauchy_loss/all_rewards.txt',
                             'a') as f:
                         f.write(f'{int(np.array(total_rewards.mean()))} ')
                         f.close()

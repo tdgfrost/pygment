@@ -10,15 +10,15 @@ for template_reward in [140]:
     # template_reward = 100
 
     env = gym.make('LunarLander-v2', max_episode_steps=1000)
-    agent = pm.create_agent('iql', device='cpu', path=os.path.abspath(os.path.join('../../../..', 'Informal experiments/mse_loss')))
+    agent = pm.create_agent('iql', device='cpu', path=os.path.abspath(os.path.join('../../../..', 'Informal experiments/cauchy_loss')))
     agent.load_env(env)
 
     agent.add_network(nodes=[64, 64])
     if load_prior_model:
-        agent.load_model(criticpath1=None,
-                         criticpath2=None,
-                         valuepath=None,
-                         actorpath=None,
+        agent.load_model(criticpath1='/Users/thomasfrost/Documents/Github/pygment/Informal experiments/cauchy_loss/2023_7_18_111048/critic1_target_3.40518.pt',
+                         criticpath2='/Users/thomasfrost/Documents/Github/pygment/Informal experiments/cauchy_loss/2023_7_18_111048/critic2_target_3.40518.pt',
+                         valuepath='/Users/thomasfrost/Documents/Github/pygment/Informal experiments/cauchy_loss/2023_7_18_111048/value_128.15388.pt',
+                         actorpath='/Users/thomasfrost/Documents/Github/pygment/Informal experiments/cauchy_loss/2023_7_18_111048/actor_1.05333.pt',
                          behaviourpolicypath=None)
 
     agent.compile('adam', learning_rate=0.01, weight_decay=1e-8, clip=1)
@@ -72,7 +72,7 @@ for template_reward in [140]:
     tau = 0.5
     desired_batch = 100000
 
-    agent.train(data, evaluate=True, steps=1e6, batch_size=desired_batch, stop_early_counter=100,
+    agent.train(data, evaluate=True, steps=1e6, batch_size=desired_batch, stop_early_counter=50,
                 gamma=0.9999, tau=tau, alpha=1, beta=0.5, update_iter=4, ppo_clip=1.2, ppo_clip_decay=1, save=True)
 
     _, _, _, _, rewards = agent.evaluate(episodes=10000, parallel_envs=512)
@@ -80,6 +80,6 @@ for template_reward in [140]:
     """
     for _ in range(10):
         pm.animate(agent, 'LunarLander-v2',
-                   max_episode_steps=1000, directory=agent.path+f'/{170}_video',
-                   prefix=f'IQL_reward_{170}', target_reward=170)
+                   max_episode_steps=1000, directory=agent.path+f'/{210}_video',
+                   prefix=f'IQL_reward_{210}', target_reward=210)
     """
