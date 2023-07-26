@@ -15,10 +15,10 @@ for template_reward in [140]:
 
     agent.add_network(nodes=[64, 64])
     if load_prior_model:
-        agent.load_model(criticpath1='/Users/thomasfrost/Documents/Github/pygment/Informal experiments/cauchy_loss/2023_7_18_111048/critic1_target_3.40518.pt',
-                         criticpath2='/Users/thomasfrost/Documents/Github/pygment/Informal experiments/cauchy_loss/2023_7_18_111048/critic2_target_3.40518.pt',
-                         valuepath='/Users/thomasfrost/Documents/Github/pygment/Informal experiments/cauchy_loss/2023_7_18_111048/value_128.15388.pt',
-                         actorpath='/Users/thomasfrost/Documents/Github/pygment/Informal experiments/cauchy_loss/2023_7_18_111048/actor_1.05333.pt',
+        agent.load_model(criticpath1=None,
+                         criticpath2=None,
+                         valuepath=None,
+                         actorpath=None,
                          behaviourpolicypath=None)
 
     agent.compile('adam', learning_rate=0.01, weight_decay=1e-8, clip=1)

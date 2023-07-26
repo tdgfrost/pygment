@@ -810,22 +810,22 @@ class IQLAgent(BaseAgent):
                 ax2 = ax1.twinx()
                 for axes, x_value, y_value, colour, label, linestyle, alpha, which_plots in [
                     [ax1, [(i + 1) for i in range(len(history_v_loss))], history_v_loss, 'cornflowerblue',
-                     'Val V-loss', '-', 1, 1],
-                    [ax1, [(i + 1) for i in range(len(history_q_loss))], history_q_loss, 'violet', 'Val Q Loss',
+                     'V-loss', '-', 1, 1],
+                    [ax1, [(i + 1) for i in range(len(history_q_loss))], history_q_loss, 'violet', 'Q Loss',
                      '-', 1, 1],
                     [ax1, [(i + 1) for i in range(len(history_policy_loss))], history_policy_loss, 'darkseagreen',
-                     'Val Policy Loss', '-', 1, 2],
+                     'Policy Loss', '-', 1, 2],
                     [ax2, [(i + 1) for i in range(len(history_policy_rewards))], history_policy_rewards, 'indigo',
-                     'Online Reward', 'dotted', 0.4, 2]
+                     'Online Reward', {1: 'dotted', 2: '-'}[plot_number], {1: 0.4, 2: 1}[plot_number], 2]
                 ]:
                     if which_plots >= plot_number:
                         axes.plot(x_value, y_value, color=colour, label=label, linestyle=linestyle, alpha=alpha)
 
                 max_steps_plot = max(len(history_v_loss), len(history_q_loss), len(history_policy_loss)) if plot_number == 1 else len(history_policy_loss)
-                ax2.hlines(200, xmin=0, xmax=max_steps_plot, color='darkred', linestyle='--', label='Solved',
-                           alpha=0.4) if plot_number == 2 else ax2.hlines(200, xmin=0, xmax=max_steps_plot, color='darkred', linestyle='--',
+                ax2.hlines(200, xmin=0, xmax=max_steps_plot, color='green', linestyle='--', label='Solved',
+                           alpha=0.4) if plot_number == 2 else ax2.hlines(200, xmin=0, xmax=max_steps_plot, color='green', linestyle='--',
                            alpha=0.4)
-                ax2.hlines(140, xmin=0, xmax=max_steps_plot, color='orange', linestyle='--', label='Behaviour Policy Reward',
+                ax2.hlines(140, xmin=0, xmax=max_steps_plot, color='orange', linestyle='-', label='Behaviour Policy Reward',
                            alpha=0.4) if plot_number == 2 else ax2.hlines(140, xmin=0, xmax=max_steps_plot, color='orange', linestyle='--',
                            alpha=0.4)
                 lines, labels = ax1.get_legend_handles_labels()
@@ -889,10 +889,12 @@ class IQLAgent(BaseAgent):
             loss_policy.backward()
             self.optimizer['actor'].step()
 
-            return -1 * loss_policy.item()
+            #return -1 * loss_policy.item()
+            return loss_policy.item()
 
         else:
-            return -1 * torch.inf
+            #return -1 * torch.inf
+            return torch.inf
 
     def _update_behaviour_policy(self, batch: list):
         """

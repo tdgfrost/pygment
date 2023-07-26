@@ -169,6 +169,7 @@ def calc_iql_v_loss_batch(batch, device, value, tau):
     
     # Best reward performance so far (140 -> 200)
     """
+    """
     # True Cauchy distribution for residuals - not sure about the expectile regression though...
     loss_v = pred_V_s - torch.tensor(cum_rewards, device=device, dtype=torch.float32)
     mask = loss_v > 0
@@ -176,6 +177,10 @@ def calc_iql_v_loss_batch(batch, device, value, tau):
     loss_v[mask] = loss_v[mask] * (1 - tau)
     loss_v[~mask] = loss_v[~mask] * tau
     loss_v = loss_v.mean()
+    """
+    # Huber Loss
+    # loss_v = pred_V_s - torch.tensor(cum_rewards, device=device, dtype=torch.float32)
+    loss_v = F.huber_loss(pred_V_s, torch.tensor(cum_rewards, device=device, dtype=torch.float32))
 
     return loss_v
 
@@ -290,7 +295,7 @@ def calc_iql_policy_loss_batch(batch, device, critic1, critic2, value, actor, be
     advantage = torch.relu(torch.sign(advantage)).type(torch.bool)
 
     loss = action_logprobs[advantage]
-    #loss = action_logprobs * torch.exp(beta * advantage)
+    # loss = action_logprobs * torch.exp(beta * advantage)
     loss = -loss.mean()
 
     return loss
