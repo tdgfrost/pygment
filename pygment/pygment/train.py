@@ -4,11 +4,13 @@ import jax
 import numpy as np
 from gymnasium import envs
 
+# Set jax to CPU
+#jax.config.update('jax_platform_name', 'cpu')
+
 # Define config file - could change to FLAGS at some point
-config = {'device': 'cpu',  # vs 'METAL'
-          'seed': 42,
+config = {'seed': 42,
           'epochs': int(1e6),
-          'batch_size': 512,
+          'batch_size': 100000,
           'tau': 0.5,
           'expectile': 0.8,
           'temperature': 0.1,
@@ -18,9 +20,6 @@ config = {'device': 'cpu',  # vs 'METAL'
           'critic_lr': 3e-4,
           'hidden_dims': (256, 256),
           }
-
-# Set jax to CPU
-jax.config.update('jax_platform_name', config['device'])
 
 if __name__ == "__main__":
     from agent import IQLAgent
