@@ -63,23 +63,27 @@ class ValueNet(nn.Module):
 
     Has attributes:
         - hidden_dims: the number of hidden units in each layer
+        - activations: the activation function to use between layers
     """
 
     hidden_dims: Sequence[int]
+    activations: Callable[[jnp.ndarray], jnp.ndarray] = nn.relu
 
     @nn.compact
     def __call__(self, observations: jnp.ndarray) -> jnp.ndarray:
         """
         Value network forward pass.
+
         :param observations: input data for the forward pass
         :return: output of the value network
         """
 
         # Do a forward pass with the MLP
-        critic = MLP((*self.hidden_dims, 1))(observations)
+        value = MLP((*self.hidden_dims, 1),
+                    activations=self.activations)(observations)
 
         # Return the output
-        return jnp.squeeze(critic, -1)
+        return jnp.squeeze(value, -1)
 
 
 class CriticNet(nn.Module):
@@ -158,12 +162,18 @@ class ActorNet(nn.Module):
 
     Has attributes:
         - hidden_dims: the number of hidden units in each layer
+        - activations: the activation function to use between layers
+        - dropout_rate: the dropout rate to apply between layers
+        - action_dims: the number of dimensions in the action space
     """
 
     hidden_dims: Sequence[int]
+    action_dims: int
+    dropout_rate: Optional[float] = None
+    activations: Callable[[jnp.ndarray], jnp.ndarray] = nn.relu
 
     @nn.compact
-    def __call__(self, observations: jnp.ndarray) -> jnp.ndarray:
+    def __call__(self, observations: jnp.ndarray, training: bool = False) -> jnp.ndarray:
         """
         Actor network forward pass.
 
@@ -172,10 +182,12 @@ class ActorNet(nn.Module):
         """
 
         # Forward pass with the MLP
-        critic = MLP((*self.hidden_dims, 1))(observations)
+        logits = MLP((*self.hidden_dims, self.action_dims),
+                     dropout_rate=self.dropout_rate)(observations,
+                                                     training=training)
 
         # Return the output
-        return jnp.squeeze(critic, -1)
+        return logits
 
 
 @dataclass

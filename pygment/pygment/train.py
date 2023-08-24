@@ -8,7 +8,7 @@ from gymnasium import envs
 config = {'device': 'cpu',  # vs 'METAL'
           'seed': 42,
           'epochs': int(1e6),
-          'batch_size': 256,
+          'batch_size': 512,
           'tau': 0.5,
           'expectile': 0.8,
           'temperature': 0.1,
@@ -45,6 +45,7 @@ if __name__ == "__main__":
     # Create agent
     agent = IQLAgent(observations=env.observation_space.sample(),
                      actions=env.action_space.sample()[np.newaxis],
+                     action_dim=env.action_space.n,
                      dropout_rate=None,
                      opt_decay_schedule="cosine",
                      **config)
@@ -54,8 +55,7 @@ if __name__ == "__main__":
         batch = agent.sample(data,
                              config['batch_size'])
 
-        loss_info = agent.update(batch,
-                                 **config)
+        loss_info = agent.update(batch)
 
     """
     Other loss / metric recording aspects can go here

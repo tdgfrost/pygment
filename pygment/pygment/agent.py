@@ -62,6 +62,7 @@ class IQLAgent(BaseAgent):
                  seed: int,
                  observations: jnp.ndarray,
                  actions: jnp.ndarray,
+                 action_dim: int,
                  actor_lr: float = 3e-4,
                  value_lr: float = 3e-4,
                  critic_lr: float = 3e-4,
@@ -82,6 +83,9 @@ class IQLAgent(BaseAgent):
         rng = jax.random.PRNGKey(seed)
         self.rng, self.actor_key, self.critic_key, self.value_key = jax.random.split(rng, 4)
 
+        # Set parameters
+        self.action_dim = action_dim
+
         # Set hyperparameters
         self.expectile = expectile
         self.tau = tau
@@ -95,18 +99,18 @@ class IQLAgent(BaseAgent):
         else:
             optimiser = optax.adam(learning_rate=actor_lr)
 
+        """
+        Each Model essentially contains a neural network structure, parameters, and optimiser.
+        The parameters are kept separate from the neural network structure, and updated separately.
+        """
         # Set models
-        self.actor = Model.create(ActorNet(hidden_dims),
+        self.actor = Model.create(ActorNet(hidden_dims, self.action_dim),
                                   inputs=[self.actor_key, observations],
                                   optim=optimiser)
 
         self.critic = Model.create(DoubleCriticNet(hidden_dims),
                                    inputs=[self.critic_key, observations, actions],
                                    optim=optax.adam(learning_rate=critic_lr))
-
-        self.target_critic = Model.create(DoubleCriticNet(hidden_dims),
-                                          inputs=[self.critic_key, observations, actions],
-                                          optim=optax.adam(learning_rate=critic_lr))
 
         self.value = Model.create(ValueNet(hidden_dims),
                                   inputs=[self.value_key, observations],
@@ -122,8 +126,8 @@ class IQLAgent(BaseAgent):
         """
 
         # Create an updated copy of all the networks
-        new_rng, new_actor, new_critic, new_value, new_target_critic, info = _update_jit(
-            self.rng, self.actor, self.critic, self.value, self.target_critic,
+        new_rng, new_actor, new_critic, new_value, info = _update_jit(
+            self.rng, self.actor, self.critic, self.value,
             batch, self.gamma, self.tau, self.expectile)
 
         # Update the agent's networks with the updated copies
@@ -131,7 +135,6 @@ class IQLAgent(BaseAgent):
         self.actor = new_actor
         self.critic = new_critic
         self.value = new_value
-        self.target_critic = new_target_critic
 
         # Return the metadata
         return info
