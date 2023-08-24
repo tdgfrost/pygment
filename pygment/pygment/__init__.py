@@ -1,26 +1,9 @@
-from .agent import DQNAgent, PolicyGradient, PPO, PPOContinuous, IQLAgent, Experience
+from .agent import IQLAgent, Experience
 import gymnasium as gym
 import os
 import torch
 import os
 os.environ["IMAGEIO_FFMPEG_EXE"] = "/opt/homebrew/bin/ffmpeg"
-
-
-def create_agent(agent_type='doubledqn', device='mps', path=None):
-    agent_dict = {'doubledqn': DQNAgent(device, path),
-                  'ppo': PPO(device, path),
-                  'policy': PolicyGradient(device, path),
-                  'ppocontinuous': PPOContinuous(device, path),
-                  'iql': IQLAgent(device, path)}
-
-    if agent_type.lower() not in agent_dict.keys():
-        error = 'type must be one of: '
-        for key in agent_dict.keys():
-            error += key + ', '
-        error = error[:-2]
-        raise KeyError(error)
-
-    return agent_dict[agent_type.lower()]
 
 
 def animate(agent_instance, env_name, max_episode_steps=1000, directory=None, prefix='', target_reward=None):

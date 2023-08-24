@@ -1,16 +1,153 @@
-import torch
-from torch import nn
-import torch.nn.functional as F
-from torch.distributions import Categorical
 import gymnasium as gym
 from copy import deepcopy
 import numpy as np
+import jax.numpy as jnp
+import flax.linen as nn
+from jax import grad
+from flax.struct import dataclass, field
+
+from typing import Sequence, Callable, Optional, Tuple, Any, Dict
+import optax
+import flax
+
+import os
 
 
+# Specify types
+PRNGKey = Any
+Params = flax.core.FrozenDict[str, Any]
+Shape = Sequence[int]
+Dtype = Any
+InfoDict = Dict[str, float]
+
+
+def default_init(scale: Optional[float] = jnp.sqrt(2)):
+    return nn.initializers.orthogonal(scale)
+
+
+class MLP(nn.Module):
+    hidden_dims: Sequence[int]
+    activations: Callable[[jnp.ndarray], jnp.ndarray] = nn.relu
+    activate_final: int = False
+    dropout_rate: Optional[float] = None
+
+    @nn.compact
+    def __call__(self, x: jnp.ndarray, training: bool = False) -> jnp.ndarray:
+        for i, size in enumerate(self.hidden_dims):
+            x = nn.Dense(size, kernel_init=default_init())(x)
+            if i + 1 < len(self.hidden_dims) or self.activate_final:
+                x = self.activations(x)
+                if self.dropout_rate is not None:
+                    x = nn.Dropout(rate=self.dropout_rate)(
+                        x, deterministic=not training)
+        return x
+
+
+class ValueNet(nn.Module):
+    hidden_dims: Sequence[int]
+
+    @nn.compact
+    def __call__(self, observations: jnp.ndarray) -> jnp.ndarray:
+        critic = MLP((*self.hidden_dims, 1))(observations)
+        return jnp.squeeze(critic, -1)
+
+
+class CriticNet(nn.Module):
+    hidden_dims: Sequence[int]
+    activations: Callable[[jnp.ndarray], jnp.ndarray] = nn.relu
+
+    @nn.compact
+    def __call__(self, observations: jnp.ndarray,
+                 actions: jnp.ndarray) -> jnp.ndarray:
+        inputs = jnp.concatenate([observations, actions], -1)
+        critic = MLP((*self.hidden_dims, 1),
+                     activations=self.activations)(inputs)
+        return jnp.squeeze(critic, -1)
+
+
+class DoubleCriticNet(nn.Module):
+    hidden_dims: Sequence[int]
+    activations: Callable[[jnp.ndarray], jnp.ndarray] = nn.relu
+
+    @nn.compact
+    def __call__(self, observations: jnp.ndarray,
+                 actions: jnp.ndarray) -> Tuple[jnp.ndarray, jnp.ndarray]:
+        critic1 = CriticNet(self.hidden_dims,
+                            activations=self.activations)(observations, actions)
+        critic2 = CriticNet(self.hidden_dims,
+                            activations=self.activations)(observations, actions)
+        return critic1, critic2
+
+
+class ActorNet(nn.Module):
+    hidden_dims: Sequence[int]
+
+    @nn.compact
+    def __call__(self, observations: jnp.ndarray) -> jnp.ndarray:
+        critic = MLP((*self.hidden_dims, 1))(observations)
+        return jnp.squeeze(critic, -1)
+
+
+@dataclass
+class Model:
+    network: nn.Module = field(pytree_node=False)  # Formerly apply_fn
+    params: Params
+    tx: Optional[optax.GradientTransformation] = field(
+        pytree_node=False)
+    opt_state: Optional[optax.OptState] = None
+
+    @classmethod
+    def create(cls,
+               model_def: nn.Module,
+               inputs: Sequence[jnp.ndarray],
+               tx: Optional[optax.GradientTransformation] = None) -> 'Model':
+        variables = model_def.init(*inputs)
+
+        _, params = variables.pop('params')
+
+        if tx is not None:
+            opt_state = tx.init(params)
+        else:
+            opt_state = None
+
+        return cls(network=model_def,
+                   params=params,
+                   tx=tx,
+                   opt_state=opt_state)
+
+    def __call__(self, *args, **kwargs):
+        return self.network.apply({'params': self.params}, *args, **kwargs)
+
+    def apply(self, *args, **kwargs):
+        return self.network.apply(*args, **kwargs)
+
+    def apply_gradient(self, loss_fn) -> Tuple[Any, 'Model']:
+        grad_fn = grad(loss_fn, has_aux=True)
+        grads, info = grad_fn(self.params)
+
+        updates, new_opt_state = self.tx.update(grads, self.opt_state,
+                                                self.params)
+        new_params = optax.apply_updates(self.params, updates)
+
+        return self.replace(params=new_params,
+                            opt_state=new_opt_state), info
+
+    def save(self, save_path: str):
+        os.makedirs(os.path.dirname(save_path), exist_ok=True)
+        with open(save_path, 'wb') as f:
+            f.write(flax.serialization.to_bytes(self.params))
+
+    def load(self, load_path: str) -> 'Model':
+        with open(load_path, 'rb') as f:
+            params = flax.serialization.from_bytes(self.params, f.read())
+        return self.replace(params=params)
+
+
+"""
 class BaseNet:
-    """
+    '''
     Base neural network
-    """
+    '''
 
     def __init__(self):
         super().__init__()
@@ -18,15 +155,8 @@ class BaseNet:
         self.action_space = None
         self.observation_space = None
 
-        self.activations = {'relu': nn.ReLU,
-                            'sigmoid': nn.Sigmoid,
-                            'leaky': nn.LeakyReLU}
-
-        self.output_activations = {'sigmoid': nn.Sigmoid,
-                                   'softmax': nn.Softmax,
-                                   'linear': None}
-
-    def env_is_discrete(self, env):
+    @staticmethod
+    def env_is_discrete(env):
         if type(env.action_space) == gym.spaces.discrete.Discrete:
             return True
 
@@ -56,9 +186,9 @@ class BaseNet:
 
 
 class DualNet(BaseNet):
-    """
+    '''
     Wrapper around model to create both a main_net and a target_net
-    """
+    '''
 
     def __init__(self):
         super().__init__()
@@ -102,9 +232,9 @@ class DualNet(BaseNet):
 
 
 class PolicyGradientNet(BaseNet, nn.Module):
-    """
+    '''
     Wrapper for a policy gradient-based neural network
-    """
+    '''
 
     def __init__(self):
         super().__init__()
@@ -140,9 +270,9 @@ class PolicyGradientNet(BaseNet, nn.Module):
 
 
 class CriticNet(BaseNet, nn.Module):
-    """
+    '''
     Wrapper for the Actor-Critic neural networks
-    """
+    '''
 
     def __init__(self):
         super().__init__()
@@ -165,9 +295,9 @@ class CriticNet(BaseNet, nn.Module):
 
 
 class ActorNet(BaseNet, nn.Module):
-    """
+    '''
     Wrapper around model to create both a main_net and a target_net
-    """
+    '''
 
     def __init__(self):
         super().__init__()
@@ -191,9 +321,9 @@ class ActorNet(BaseNet, nn.Module):
 
 
 class ActorCriticNet(BaseNet, nn.Module):
-    """
+    '''
     Wrapper for the Actor-Critic neural networks
-    """
+    '''
 
     def __init__(self):
         super().__init__()
@@ -220,9 +350,9 @@ class ActorCriticNet(BaseNet, nn.Module):
 
 
 class ActorCriticNetContinuous(BaseNet, nn.Module):
-    """
-  Wrapper for the Actor-Critic neural networks (for a continuous action space)
-  """
+    '''
+    Wrapper for the Actor-Critic neural networks (for a continuous action space)
+    '''
 
     def __init__(self):
         super().__init__()
@@ -272,3 +402,4 @@ class ActorCriticNetContinuous(BaseNet, nn.Module):
         action_means = action_means[:, :action_means.shape[-1] // 2]
 
         return action_means, action_stds, state_value
+"""

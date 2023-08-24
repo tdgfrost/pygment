@@ -1,20 +1,45 @@
-import numpy as np
-import torch
-import torch.nn.functional as F
+from jax import jit
+from agent import Model
+from critic import update_q, update_v
+from actor import update as awr_update_actor
+from jax.random import PRNGKey
+import jax
+from common import Experience
+
+from typing import List, Optional, Sequence, Dict, Tuple
 
 
-def GreedyEpsilonSelector(obs, epsilon, net):
-    if np.random.random() <= epsilon:
-        action = np.random.randint(net.action_space)
+def target_update(critic: Model, target_critic: Model, tau: float) -> Model:
+    new_target_params = jax.tree_map(
+        lambda p, tp: p * tau + tp * (1 - tau), critic.params,
+        target_critic.params)
 
-    else:
-        with torch.no_grad():
-            q_values = net.forward(obs, target=False)
-            action = torch.argmax(q_values).item()
-
-    return action
+    return target_critic.replace(params=new_target_params)
 
 
+@jit
+def _update_jit(
+    rng: PRNGKey, actor: Model, critic: Model, value: Model,
+    target_critic: Model, batch: List[Experience], discount: float, tau: float,
+    expectile: float, temperature: float
+) -> Tuple[PRNGKey, Model, Model, Model, Model, Model, Dict[str, float]]:
+
+    new_value, value_info = update_v(target_critic, value, batch, expectile)
+    key, rng = jax.random.split(rng)
+    new_actor, actor_info = awr_update_actor(key, actor, target_critic,
+                                             new_value, batch, temperature)
+
+    new_critic, critic_info = update_q(critic, new_value, batch, discount)
+
+    new_target_critic = target_update(new_critic, target_critic, tau)
+
+    return rng, new_actor, new_critic, new_value, new_target_critic, {
+        **critic_info,
+        **value_info,
+        **actor_info
+    }
+
+"""
 def unpack_batch(batch: list):
     states, actions, rewards, next_states, dones = zip(*[(exp.state, exp.action, exp.reward, exp.next_state, exp.done)
                                                          for exp in batch])
@@ -111,7 +136,7 @@ def calc_loss_actor_critic(batch_Q_s, batch_actions, batch_entropy, batch_action
 
     return policy_loss, value_loss, entropy_loss
 
-"""
+
 def calc_iql_v_loss_batch(batch, device, critic1, critic2, value, tau):
     # Unpack the batch
     states, actions, reward, dones = zip(*[(exp.state, exp.action, exp.reward, exp.done) for exp in batch])
@@ -132,7 +157,6 @@ def calc_iql_v_loss_batch(batch, device, critic1, critic2, value, tau):
     loss_v[~mask] = loss_v[~mask] * tau
 
     return loss_v.mean()
-"""
 
 
 def calc_iql_v_loss_batch(batch, device, value, tau):
@@ -142,7 +166,7 @@ def calc_iql_v_loss_batch(batch, device, value, tau):
     pred_V_s = value.forward(states, device=device).squeeze(-1)
 
     # Calculate loss_v
-    """
+    '''
     MSE - expectile regression
     
     loss_v = pred_V_s - torch.tensor(cum_rewards, device=device, dtype=torch.float32)
@@ -151,14 +175,14 @@ def calc_iql_v_loss_batch(batch, device, value, tau):
     loss_v[mask] = loss_v[mask] * (1 - tau)
     loss_v[~mask] = loss_v[~mask] * tau
     loss_v = loss_v.mean()
-    """
-    """
+    '''
+    '''
     MAE - quantile regression
     loss_v = torch.tensor(cum_rewards, device=device, dtype=torch.float32) - pred_V_s
     loss_v = torch.maximum(tau * loss_v, (tau - 1) * loss_v)
     loss_v = loss_v.mean()
-    """
-    """
+    '''
+    '''
     # Barron et al adaptive robust loss function - specifically, alpha = 0 -> Cauchy distribution for residuals??
     loss_v = pred_V_s - torch.tensor(cum_rewards, device=device, dtype=torch.float32)
     mask = loss_v > 0
@@ -168,8 +192,8 @@ def calc_iql_v_loss_batch(batch, device, value, tau):
     loss_v = loss_v.mean()
     
     # Best reward performance so far (140 -> 200)
-    """
-    """
+    '''
+    '''
     # True Cauchy distribution for residuals - not sure about the expectile regression though...
     loss_v = pred_V_s - torch.tensor(cum_rewards, device=device, dtype=torch.float32)
     mask = loss_v > 0
@@ -177,7 +201,7 @@ def calc_iql_v_loss_batch(batch, device, value, tau):
     loss_v[mask] = loss_v[mask] * (1 - tau)
     loss_v[~mask] = loss_v[~mask] * tau
     loss_v = loss_v.mean()
-    """
+    '''
     # Huber Loss
     # loss_v = pred_V_s - torch.tensor(cum_rewards, device=device, dtype=torch.float32)
     loss_v = F.huber_loss(pred_V_s, torch.tensor(cum_rewards, device=device, dtype=torch.float32))
@@ -214,7 +238,7 @@ def calc_iql_q_loss_batch(batch, device, critic1, critic2, value, gamma):
 
     return loss_qt
 
-"""
+'''
 def calc_iql_q_loss_batch(batch, device, critic1, critic2, value, gamma):
     # Unpack the batch
     states, actions, reward, next_states, next_actions, cum_rewards, dones = zip(*[(exp.state, exp.action, exp.reward,
@@ -265,7 +289,7 @@ def calc_iql_q_loss_batch(batch, device, critic1, critic2, value, gamma):
     loss_qt2 = F.mse_loss(pred_Q2_t_choice, target_q)
 
     return loss_q1, loss_q2, loss_qt1, loss_qt2
-"""
+'''
 
 
 def calc_iql_policy_loss_batch(batch, device, critic1, critic2, value, actor, beta):
@@ -300,8 +324,6 @@ def calc_iql_policy_loss_batch(batch, device, critic1, critic2, value, actor, be
 
     return loss
 
-
-"""
 def calc_iql_policy_loss_batch(batch, device, critic1, critic2, value, actor, old_action_logprobs, beta, ppo_clip):
     # Unpack the batch
     states, actions = zip(*[(exp.state, exp.action) for exp in batch])
