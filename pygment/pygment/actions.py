@@ -1,7 +1,9 @@
-from jax import jit
 from agent import Model
 from critic import update_q, update_v
 from actor import update as awr_update_actor
+from common import Batch, InfoDict
+
+from jax import jit
 from jax.random import PRNGKey
 import jax
 from common import Experience
@@ -17,19 +19,19 @@ def target_update(critic: Model, target_critic: Model, tau: float) -> Model:
     return target_critic.replace(params=new_target_params)
 
 
-@jit
+#@jit
 def _update_jit(
     rng: PRNGKey, actor: Model, critic: Model, value: Model,
-    target_critic: Model, batch: List[Experience], discount: float, tau: float,
-    expectile: float, temperature: float
-) -> Tuple[PRNGKey, Model, Model, Model, Model, Model, Dict[str, float]]:
+    target_critic: Model, batch: Batch, gamma: float, tau: float,
+    expectile: float
+) -> Tuple[PRNGKey, Model, Model, Model, Model, InfoDict]:
 
     new_value, value_info = update_v(target_critic, value, batch, expectile)
     key, rng = jax.random.split(rng)
     new_actor, actor_info = awr_update_actor(key, actor, target_critic,
-                                             new_value, batch, temperature)
+                                             new_value, batch)
 
-    new_critic, critic_info = update_q(critic, new_value, batch, discount)
+    new_critic, critic_info = update_q(critic, new_value, batch, gamma)
 
     new_target_critic = target_update(new_critic, target_critic, tau)
 

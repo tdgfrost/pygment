@@ -1300,3 +1300,6 @@ pygment/pygment/.idea/other.xml
 pygment/pygment/.idea/pygment.iml
 pygment/pygment/.idea/vcs.xml
 pygment/samples/GenerateStaticDataset/LunarLander/140 reward/all_discounted_rewards.npy
+pygment/pygment/__pycache__/actor.cpython-310.pyc
+pygment/pygment/__pycache__/common.cpython-310.pyc
+pygment/pygment/__pycache__/critic.cpython-310.pyc

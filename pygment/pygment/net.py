@@ -1,24 +1,15 @@
-import gymnasium as gym
-from copy import deepcopy
-import numpy as np
+from common import Params
+
 import jax.numpy as jnp
 import flax.linen as nn
 from jax import grad
 from flax.struct import dataclass, field
 
-from typing import Sequence, Callable, Optional, Tuple, Any, Dict
+from typing import Sequence, Callable, Optional, Tuple, Any
 import optax
 import flax
 
 import os
-
-
-# Specify types
-PRNGKey = Any
-Params = flax.core.FrozenDict[str, Any]
-Shape = Sequence[int]
-Dtype = Any
-InfoDict = Dict[str, float]
 
 
 def default_init(scale: Optional[float] = jnp.sqrt(2)):
@@ -101,9 +92,12 @@ class Model:
                model_def: nn.Module,
                inputs: Sequence[jnp.ndarray],
                tx: Optional[optax.GradientTransformation] = None) -> 'Model':
+
+        # Initialise the neural network
         variables = model_def.init(*inputs)
 
-        _, params = variables.pop('params')
+        # Extract the parameters (variables: dictionary has only one key, 'params')
+        params = variables.pop('params')
 
         if tx is not None:
             opt_state = tx.init(params)
@@ -132,6 +126,24 @@ class Model:
         return self.replace(params=new_params,
                             opt_state=new_opt_state), info
 
+    """
+    def save_model(self):
+        pass
+
+    def load_model(self,
+                   path=None):
+        if path is None:
+            invalid_path = ''
+            while True:
+                path = input(invalid_path + 'Please enter model path, or press Q/q to exist: ')
+                if path == 'Q' or path == 'q':
+                    return
+                if os.path.isfile(path):
+                    break
+                invalid_path = 'Invalid path - '
+
+        self.path = os.path.dirname(path)
+    """
     def save(self, save_path: str):
         os.makedirs(os.path.dirname(save_path), exist_ok=True)
         with open(save_path, 'wb') as f:

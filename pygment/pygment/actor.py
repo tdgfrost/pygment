@@ -3,7 +3,8 @@ from typing import Tuple
 import jax
 import jax.numpy as jnp
 
-from common import Batch, InfoDict, Model, Params, PRNGKey
+from common import Batch, InfoDict, Params, PRNGKey
+from agent import Model
 
 
 def update(key: PRNGKey, actor: Model, critic: Model, value: Model,

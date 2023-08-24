@@ -1,8 +1,10 @@
-from typing import Tuple
+from agent import Model
+from common import Params, InfoDict, Batch
 
 import jax.numpy as jnp
+import flax
 
-from common import Batch, InfoDict, Model, Params
+from typing import Tuple, Any, List, Dict
 
 
 def loss(diff, expectile=0.8):
@@ -30,10 +32,10 @@ def update_v(critic: Model, value: Model, batch: Batch,
 
 
 def update_q(critic: Model, target_value: Model, batch: Batch,
-             discount: float) -> Tuple[Model, InfoDict]:
+             gamma: float) -> Tuple[Model, InfoDict]:
     next_v = target_value(batch.next_observations)
 
-    target_q = batch.rewards + discount * batch.masks * next_v
+    target_q = batch.rewards + gamma * batch.masks * next_v
 
     def critic_loss_fn(critic_params: Params) -> Tuple[jnp.ndarray, InfoDict]:
         q1, q2 = critic.apply({'params': critic_params}, batch.observations,

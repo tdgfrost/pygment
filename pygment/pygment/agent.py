@@ -1,5 +1,5 @@
 from net import Model, ValueNet, ActorNet, DoubleCriticNet
-from common import Experience
+from common import Batch, InfoDict
 from actions import _update_jit
 
 import os
@@ -16,8 +16,6 @@ from typing import List, Optional, Sequence, Dict
 class BaseAgent:
     def __init__(self,
                  path=None):
-        self.env = None
-
         now = dt.datetime.now()
         now = f'./{now.year}_{now.month}_{now.day:02}_{now.hour:02}{now.minute:02}{now.second:02}'
         if path is None:
@@ -25,29 +23,19 @@ class BaseAgent:
         else:
             self.path = os.path.join(path, now.lstrip('./'))
 
-    def load_env(self,
-                 env):
-        self.env = env
-
-    def save_model(self):
-        pass
-
-    def load_model(self,
-                   path=None):
-        if path is None:
-            invalid_path = ''
-            while True:
-                path = input(invalid_path + 'Please enter model path, or press Q/q to exist: ')
-                if path == 'Q' or path == 'q':
-                    return
-                if os.path.isfile(path):
-                    break
-                invalid_path = 'Invalid path - '
-
-        self.path = os.path.dirname(path)
-        """
-        Empty - code to load nn parameters into flax
-        """
+    @staticmethod
+    def sample(data,
+               batch_size):
+        idxs = np.random.default_rng().choice(len(data),
+                                              size=batch_size,
+                                              replace=False)
+        return Batch(states=data.state[idxs],
+                     actions=data.action[idxs],
+                     rewards=data.reward[idxs],
+                     discounted_rewards=data.discounted_reward[idxs],
+                     next_states=data.next_state[idxs],
+                     next_actions=data.next_action[idxs],
+                     dones=data.done[idxs])
 
 
 class IQLAgent(BaseAgent):
@@ -63,11 +51,11 @@ class IQLAgent(BaseAgent):
                  value_lr: float = 3e-4,
                  critic_lr: float = 3e-4,
                  hidden_dims: Sequence[int] = (256, 256),
-                 discount: float = 0.99,
+                 gamma: float = 0.99,
                  tau: float = 0.5,
                  expectile: float = 0.8,
                  dropout_rate: Optional[float] = None,
-                 max_steps: Optional[int] = None,
+                 epochs: Optional[int] = None,
                  opt_decay_schedule: str = "cosine",
                  *args,
                  **kwargs):
@@ -83,11 +71,11 @@ class IQLAgent(BaseAgent):
         # Set hyperparameters
         self.expectile = expectile
         self.tau = tau
-        self.discount = discount
+        self.gamma = gamma
 
         # Set optimizers
         if opt_decay_schedule == "cosine":
-            schedule_fn = optax.cosine_decay_schedule(-actor_lr, max_steps)
+            schedule_fn = optax.cosine_decay_schedule(-actor_lr, epochs)
             optimiser = optax.chain(optax.scale_by_adam(),
                                     optax.scale_by_schedule(schedule_fn))
         else:
@@ -98,11 +86,11 @@ class IQLAgent(BaseAgent):
                                   inputs=[self.actor_key, observations],
                                   tx=optimiser)
 
-        self.critic = Model.create(DoubleCriticNet(hidden_dims, action_dim),
+        self.critic = Model.create(DoubleCriticNet(hidden_dims),
                                    inputs=[self.critic_key, observations, actions],
                                    tx=optax.adam(learning_rate=critic_lr))
 
-        self.target_critic = Model.create(DoubleCriticNet(hidden_dims, action_dim),
+        self.target_critic = Model.create(DoubleCriticNet(hidden_dims),
                                           inputs=[self.critic_key, observations, actions],
                                           tx=optax.adam(learning_rate=critic_lr))
 
@@ -110,20 +98,12 @@ class IQLAgent(BaseAgent):
                                   inputs=[self.value_key, observations],
                                   tx=optax.adam(learning_rate=value_lr))
 
-    @staticmethod
-    def sample(data,
-               batch_size):
-        idxs = np.random.default_rng().choice(len(data),
-                                              size=batch_size,
-                                              replace=False)
-        return [data[idx] for idx in idxs]
-
     def update(self,
-               batch: List[Experience],
-               **kwargs) -> Dict[str, float]:
+               batch: Batch,
+               **kwargs) -> InfoDict:
         new_rng, new_actor, new_critic, new_value, new_target_critic, info = _update_jit(
             self.rng, self.actor, self.critic, self.value, self.target_critic,
-            batch, self.discount, self.tau, self.expectile, self.temperature)
+            batch, self.gamma, self.tau, self.expectile)
 
         self.rng = new_rng
         self.actor = new_actor
