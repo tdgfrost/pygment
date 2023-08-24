@@ -2,9 +2,8 @@ from agent import Model
 from common import Params, InfoDict, Batch
 
 import jax.numpy as jnp
-import flax
 
-from typing import Tuple, Any, List, Dict
+from typing import Tuple
 
 
 def loss(diff, expectile=0.8):
@@ -15,11 +14,11 @@ def loss(diff, expectile=0.8):
 def update_v(critic: Model, value: Model, batch: Batch,
              expectile: float) -> Tuple[Model, InfoDict]:
     actions = batch.actions
-    q1, q2 = critic(batch.observations, actions)
+    q1, q2 = critic(batch.states, actions)
     q = jnp.minimum(q1, q2)
 
     def value_loss_fn(value_params: Params) -> Tuple[jnp.ndarray, InfoDict]:
-        v = value.apply({'params': value_params}, batch.observations)
+        v = value.apply({'params': value_params}, batch.states)
         value_loss = loss(q - v, expectile).mean()
         return value_loss, {
             'value_loss': value_loss,
@@ -33,12 +32,12 @@ def update_v(critic: Model, value: Model, batch: Batch,
 
 def update_q(critic: Model, target_value: Model, batch: Batch,
              gamma: float) -> Tuple[Model, InfoDict]:
-    next_v = target_value(batch.next_observations)
+    next_v = target_value(batch.next_states)
 
-    target_q = batch.rewards + gamma * batch.masks * next_v
+    target_q = batch.rewards + gamma * ~batch.dones * next_v
 
     def critic_loss_fn(critic_params: Params) -> Tuple[jnp.ndarray, InfoDict]:
-        q1, q2 = critic.apply({'params': critic_params}, batch.observations,
+        q1, q2 = critic.apply({'params': critic_params}, batch.states,
                               batch.actions)
         critic_loss = ((q1 - target_q)**2 + (q2 - target_q)**2).mean()
         return critic_loss, {

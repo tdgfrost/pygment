@@ -14,8 +14,16 @@ from typing import List, Optional, Sequence, Dict
 
 
 class BaseAgent:
+    """
+    Base class for all agents. Contains the basic functions that all agents should have.
+    """
     def __init__(self,
                  path=None):
+        """
+        Creates a unique folder associated with the current agent.
+
+        :param path: optional path to save the agent to.
+        """
         now = dt.datetime.now()
         now = f'./{now.year}_{now.month}_{now.day:02}_{now.hour:02}{now.minute:02}{now.second:02}'
         if path is None:
@@ -26,21 +34,28 @@ class BaseAgent:
     @staticmethod
     def sample(data,
                batch_size):
-        idxs = np.random.default_rng().choice(len(data),
+        """
+        Samples a batch from the data.
+
+        :param data: data in the form of a Batch object.
+        :param batch_size: desired batch size.
+        :return: a Batch object of size batch_size.
+        """
+        idxs = np.random.default_rng().choice(len(data.dones),
                                               size=batch_size,
                                               replace=False)
-        return Batch(states=data.state[idxs],
-                     actions=data.action[idxs],
-                     rewards=data.reward[idxs],
-                     discounted_rewards=data.discounted_reward[idxs],
-                     next_states=data.next_state[idxs],
-                     next_actions=data.next_action[idxs],
-                     dones=data.done[idxs])
+        return Batch(states=data.states[idxs],
+                     actions=data.actions[idxs],
+                     rewards=data.rewards[idxs],
+                     discounted_rewards=data.discounted_rewards[idxs],
+                     next_states=data.next_states[idxs],
+                     next_actions=data.next_actions[idxs],
+                     dones=data.dones[idxs])
 
 
 class IQLAgent(BaseAgent):
     """
-    Implementation of IQL
+    IQL Agent.
     """
 
     def __init__(self,
@@ -59,14 +74,13 @@ class IQLAgent(BaseAgent):
                  opt_decay_schedule: str = "cosine",
                  *args,
                  **kwargs):
+
+        # Initiate the BaseAgent characteristics
         super().__init__()
 
         # Set random seed
         rng = jax.random.PRNGKey(seed)
         self.rng, self.actor_key, self.critic_key, self.value_key = jax.random.split(rng, 4)
-
-        # Set parameters
-        action_dim = actions.shape[-1]
 
         # Set hyperparameters
         self.expectile = expectile
@@ -84,33 +98,42 @@ class IQLAgent(BaseAgent):
         # Set models
         self.actor = Model.create(ActorNet(hidden_dims),
                                   inputs=[self.actor_key, observations],
-                                  tx=optimiser)
+                                  optim=optimiser)
 
         self.critic = Model.create(DoubleCriticNet(hidden_dims),
                                    inputs=[self.critic_key, observations, actions],
-                                   tx=optax.adam(learning_rate=critic_lr))
+                                   optim=optax.adam(learning_rate=critic_lr))
 
         self.target_critic = Model.create(DoubleCriticNet(hidden_dims),
                                           inputs=[self.critic_key, observations, actions],
-                                          tx=optax.adam(learning_rate=critic_lr))
+                                          optim=optax.adam(learning_rate=critic_lr))
 
         self.value = Model.create(ValueNet(hidden_dims),
                                   inputs=[self.value_key, observations],
-                                  tx=optax.adam(learning_rate=value_lr))
+                                  optim=optax.adam(learning_rate=value_lr))
 
     def update(self,
-               batch: Batch,
-               **kwargs) -> InfoDict:
+               batch: Batch) -> InfoDict:
+        """
+        Updates the agent's networks.
+
+        :param batch: a Batch object.
+        :return: an InfoDict object containing metadata.
+        """
+
+        # Create an updated copy of all the networks
         new_rng, new_actor, new_critic, new_value, new_target_critic, info = _update_jit(
             self.rng, self.actor, self.critic, self.value, self.target_critic,
             batch, self.gamma, self.tau, self.expectile)
 
+        # Update the agent's networks with the updated copies
         self.rng = new_rng
         self.actor = new_actor
         self.critic = new_critic
         self.value = new_value
         self.target_critic = new_target_critic
 
+        # Return the metadata
         return info
 
 

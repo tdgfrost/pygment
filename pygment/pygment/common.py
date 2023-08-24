@@ -33,10 +33,12 @@ def load_data(path: str,
 
     # Pre-process rewards if required (normalise, standardise or none)
     if scale == "standardise":
-        loaded_data['rewards'] = (loaded_data['original_rewards'] - loaded_data['original_rewards'].mean()) / loaded_data['original_rewards'].std()
+        loaded_data['rewards'] = (loaded_data['original_rewards'] - loaded_data['original_rewards'].mean()) / \
+                                 loaded_data['original_rewards'].std()
 
     elif scale == "normalise":
-        loaded_data['rewards'] = (loaded_data['original_rewards'] - loaded_data['original_rewards'].min()) / (loaded_data['original_rewards'].max() - loaded_data['original_rewards'].min())
+        loaded_data['rewards'] = (loaded_data['original_rewards'] - loaded_data['original_rewards'].min()) / (
+                    loaded_data['original_rewards'].max() - loaded_data['original_rewards'].min())
 
     else:
         loaded_data['rewards'] = loaded_data['original_rewards']
@@ -74,13 +76,12 @@ def calc_discounted_rewards(dones, rewards, gamma):
     discounted_rewards = np.zeros((samples, length))
     discounted_rewards[mask] = rewards
 
-    # Use jax to calculate the discounted rewards for each row
-    discounted_rewards = lax.scan(lambda discounted_sum, reward: (gamma * discounted_sum + reward, gamma * discounted_sum + reward),
+    # Use JAX/lax to calculate the discounted rewards for each row
+    discounted_rewards = lax.scan(lambda agg, reward: (gamma * agg + reward, gamma * agg + reward),
                                   np.zeros((samples,)),
                                   jnp.array(discounted_rewards.transpose()), reverse=True)[1].transpose()
 
-    # Finally, convert the array back to a 1D array
+    # Finally, convert the array back to a 1D (numpy) array
     discounted_rewards = np.array(discounted_rewards[mask])
 
     return discounted_rewards
-

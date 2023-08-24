@@ -6,7 +6,6 @@ from common import Batch, InfoDict
 from jax import jit
 from jax.random import PRNGKey
 import jax
-from common import Experience
 
 from typing import List, Optional, Sequence, Dict, Tuple
 

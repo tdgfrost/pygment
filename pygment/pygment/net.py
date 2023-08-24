@@ -17,6 +17,14 @@ def default_init(scale: Optional[float] = jnp.sqrt(2)):
 
 
 class MLP(nn.Module):
+    """
+    Multi-layer perceptron.
+    Has attributes:
+        - hidden_dims: the number of hidden units in each layer
+        - activations: the activation function to use between layers
+        - activate_final: whether to apply the activation function to the final layer
+        - dropout_rate: the dropout rate to apply between layers
+    """
     hidden_dims: Sequence[int]
     activations: Callable[[jnp.ndarray], jnp.ndarray] = nn.relu
     activate_final: int = False
@@ -24,66 +32,167 @@ class MLP(nn.Module):
 
     @nn.compact
     def __call__(self, x: jnp.ndarray, training: bool = False) -> jnp.ndarray:
+        """
+        MLP forward pass.
+
+        :param x: input to the MLP
+        :param training: whether to keep dropout random (during training), or consistent (during evaluation)
+        :return: output of the MLP
+        """
+
+        # Iterate through each layer
         for i, size in enumerate(self.hidden_dims):
+
+            # Apply a dense layer
             x = nn.Dense(size, kernel_init=default_init())(x)
+
+            # Apply the activation function
             if i + 1 < len(self.hidden_dims) or self.activate_final:
                 x = self.activations(x)
+
+                # Apply dropout (deterministically during evaluation)
                 if self.dropout_rate is not None:
-                    x = nn.Dropout(rate=self.dropout_rate)(
-                        x, deterministic=not training)
+                    x = nn.Dropout(rate=self.dropout_rate)(x, deterministic=not training)
+
         return x
 
 
 class ValueNet(nn.Module):
+    """
+    Value network.
+
+    Has attributes:
+        - hidden_dims: the number of hidden units in each layer
+    """
+
     hidden_dims: Sequence[int]
 
     @nn.compact
     def __call__(self, observations: jnp.ndarray) -> jnp.ndarray:
+        """
+        Value network forward pass.
+        :param observations: input data for the forward pass
+        :return: output of the value network
+        """
+
+        # Do a forward pass with the MLP
         critic = MLP((*self.hidden_dims, 1))(observations)
+
+        # Return the output
         return jnp.squeeze(critic, -1)
 
 
 class CriticNet(nn.Module):
+    """
+    Critic network.
+
+    Has attributes:
+        - hidden_dims: the number of hidden units in each layer
+        - activations: the activation function to use between layers
+    """
+
     hidden_dims: Sequence[int]
     activations: Callable[[jnp.ndarray], jnp.ndarray] = nn.relu
 
     @nn.compact
     def __call__(self, observations: jnp.ndarray,
                  actions: jnp.ndarray) -> jnp.ndarray:
+        """
+        Critic network forward pass.
+
+        :param observations: input data for the forward pass
+        :param actions: chosen actions to evaluate the Q-value for
+        :return: output of the critic network
+        """
+
+        """
+        Because we only care about evaluating Q-values (and extracting policies) for known actions,
+        we don't need to create Q-values for all possible actions. 
+        
+        Instead, we just treat the action as another input to the network.
+        """
         inputs = jnp.concatenate([observations, actions], -1)
         critic = MLP((*self.hidden_dims, 1),
                      activations=self.activations)(inputs)
+
+        # Return the output of the MLP
         return jnp.squeeze(critic, -1)
 
 
 class DoubleCriticNet(nn.Module):
+    """
+    Double critic network.
+
+    Has attributes:
+        - hidden_dims: the number of hidden units in each layer
+        - activations: the activation function to use between layers
+    """
+
     hidden_dims: Sequence[int]
     activations: Callable[[jnp.ndarray], jnp.ndarray] = nn.relu
 
     @nn.compact
     def __call__(self, observations: jnp.ndarray,
                  actions: jnp.ndarray) -> Tuple[jnp.ndarray, jnp.ndarray]:
+        """
+        Double critic network forward pass.
+
+        :param observations: input data for each critic's forward pass
+        :param actions: actions to select the Q-value for
+        :return: output of each critic network
+        """
+
+        # Forward pass for each critic network MLP
         critic1 = CriticNet(self.hidden_dims,
                             activations=self.activations)(observations, actions)
         critic2 = CriticNet(self.hidden_dims,
                             activations=self.activations)(observations, actions)
+
+        # Return both outputs
         return critic1, critic2
 
 
 class ActorNet(nn.Module):
+    """
+    Actor network.
+
+    Has attributes:
+        - hidden_dims: the number of hidden units in each layer
+    """
+
     hidden_dims: Sequence[int]
 
     @nn.compact
     def __call__(self, observations: jnp.ndarray) -> jnp.ndarray:
+        """
+        Actor network forward pass.
+
+        :param observations: input data for the forward pass
+        :return: output of the actor network
+        """
+
+        # Forward pass with the MLP
         critic = MLP((*self.hidden_dims, 1))(observations)
+
+        # Return the output
         return jnp.squeeze(critic, -1)
 
 
 @dataclass
 class Model:
+    """
+    Model class, which contains the neural network, parameters, and optimiser state.
+
+    Has attributes:
+        - network: the neural network architecture
+        - params: the parameters of the neural network
+        - optim: the optimiser
+        - opt_state: the optimiser state (??)
+    """
+
     network: nn.Module = field(pytree_node=False)  # Formerly apply_fn
     params: Params
-    tx: Optional[optax.GradientTransformation] = field(
+    optim: Optional[optax.GradientTransformation] = field(
         pytree_node=False)
     opt_state: Optional[optax.OptState] = None
 
@@ -91,7 +200,15 @@ class Model:
     def create(cls,
                model_def: nn.Module,
                inputs: Sequence[jnp.ndarray],
-               tx: Optional[optax.GradientTransformation] = None) -> 'Model':
+               optim: Optional[optax.GradientTransformation] = None) -> 'Model':
+        """
+        Class method to create a new instance of the Model class (with some necessary pre-processing).
+
+        :param model_def: the neural network architecture
+        :param inputs: dummy input data to initialise the network
+        :param optim: the optimiser
+        :return: an instance of the Model class
+        """
 
         # Initialise the neural network
         variables = model_def.init(*inputs)
@@ -99,30 +216,54 @@ class Model:
         # Extract the parameters (variables: dictionary has only one key, 'params')
         params = variables.pop('params')
 
-        if tx is not None:
-            opt_state = tx.init(params)
+        # Initialise the optimiser state if optimiser is present
+        if optim is not None:
+            opt_state = optim.init(params)
         else:
             opt_state = None
 
+        # Return an instance of the class with the following attributes
         return cls(network=model_def,
                    params=params,
-                   tx=tx,
+                   optim=optim,
                    opt_state=opt_state)
 
-    def __call__(self, *args, **kwargs):
-        return self.network.apply({'params': self.params}, *args, **kwargs)
+    def __call__(self, *args):
+        """
+        Forward pass through the neural network.
+
+        :param args: input data to pass through the neural network
+        :return: output of the neural network
+        """
+
+        return self.network.apply({'params': self.params}, *args)
 
     def apply(self, *args, **kwargs):
         return self.network.apply(*args, **kwargs)
 
-    def apply_gradient(self, loss_fn) -> Tuple[Any, 'Model']:
+    def apply_gradient(self, loss_fn) -> Tuple['Model', Any]:
+        """
+        Calculate the gradient of the loss function with respect to the parameters of the neural network.
+        Returns the updated parameters and optimiser state.
+
+        :param loss_fn: loss function used to calculate the gradient
+        :return: updated parameters and optimiser state
+        """
+
+        # Convert the loss function to a gradient function
         grad_fn = grad(loss_fn, has_aux=True)
+
+        # Calculate the gradients and relevant metadata
         grads, info = grad_fn(self.params)
 
-        updates, new_opt_state = self.tx.update(grads, self.opt_state,
-                                                self.params)
+        # Calculate the parameter updates, as well as the new optimiser state
+        updates, new_opt_state = self.optim.update(grads, self.opt_state,
+                                                   self.params)
+
+        # Calculate the new parameters
         new_params = optax.apply_updates(self.params, updates)
 
+        # Return the new parameters and optimiser state, as well as the metadata
         return self.replace(params=new_params,
                             opt_state=new_opt_state), info
 
@@ -144,6 +285,7 @@ class Model:
 
         self.path = os.path.dirname(path)
     """
+
     def save(self, save_path: str):
         os.makedirs(os.path.dirname(save_path), exist_ok=True)
         with open(save_path, 'wb') as f:

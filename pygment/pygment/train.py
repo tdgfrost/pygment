@@ -35,11 +35,11 @@ if __name__ == "__main__":
                      gamma=config['gamma'])
 
     data = Batch(states=data['state'],
-                 actions=data['actions'],
+                 actions=data['actions'][:, np.newaxis],
                  rewards=data['rewards'],
                  discounted_rewards=data['discounted_rewards'],
                  next_states=data['next_state'],
-                 next_actions=data['next_action'],
+                 next_actions=data['next_action'][:, np.newaxis],
                  dones=data['dones'])
 
     # Create agent
