@@ -1,7 +1,9 @@
-from typing import Tuple
+from typing import Tuple, Dict
 
 import jax.numpy as jnp
 import flax.linen as nn
+from jax import Array
+import jax
 
 from common import Batch, InfoDict, Params, PRNGKey
 from agent import Model
@@ -19,12 +21,24 @@ def loss(logits, actions, adv_filter):
 
     # Convert the logits to log_probs, and select the log_probs for the sampled actions
     action_logprobs = nn.log_softmax(logits, axis=-1)
+    """
+    This is until jnp.take_along_axis works for metal backend
+    
     action_logprobs = jnp.squeeze(jnp.take_along_axis(action_logprobs,
                                                       actions,
                                                       axis=-1), -1)
+    """
+    action_logprobs = jax.lax.gather(action_logprobs,
+                                     jnp.concatenate((jnp.arange(len(actions)).reshape(-1, 1), actions), axis=1),
+                                     jax.lax.GatherDimensionNumbers(
+                                         offset_dims=tuple([]),
+                                         collapsed_slice_dims=tuple([0, 1]),
+                                         start_index_map=tuple([0, 1])), tuple([1, 1]))
 
     # Remove any NaNs / infinite values
-    action_logprobs = jnp.where(jnp.isinf(action_logprobs), -1000, action_logprobs)
+    action_logprobs = jnp.where(jnp.isinf(action_logprobs) | jnp.isnan(action_logprobs),
+                                -1000,
+                                action_logprobs)
     # action_logprobs = jnp.where(action_logprobs == 0, -1e-8, action_logprobs)
 
     # Filter the logprobs using the advantage filter
@@ -51,13 +65,24 @@ def update_policy(key: PRNGKey, actor: Model, critic: Model, value: Model,
     v = value(batch.states)
 
     # Calculate the Q(s,a) for the states and actions in the batch
-    q1, q2 = critic(batch.states, batch.actions)
+    q1, q2 = critic(batch.states)
     q = jnp.minimum(q1, q2)
+    """
+    This is until jnp.take_along_axis works for metal backend.
+    
+    q = jnp.squeeze(jnp.take_along_axis(q, batch.actions, axis=-1), -1)
+    """
+    q = jax.lax.gather(q,
+                       jnp.concatenate((jnp.arange(len(batch.actions)).reshape(-1, 1), batch.actions), axis=1),
+                       jax.lax.GatherDimensionNumbers(
+                           offset_dims=tuple([]),
+                           collapsed_slice_dims=tuple([0, 1]),
+                           start_index_map=tuple([0, 1])), tuple([1, 1]))
 
     # Calculate the advantages (with a boolean filter for positive advantages)
     adv_filter = nn.relu(jnp.sign(q - v)).astype(jnp.bool_)
 
-    def actor_loss_fn(actor_params: Params) -> Tuple[jnp.ndarray, InfoDict]:
+    def actor_loss_fn(actor_params: Params) -> tuple[Array, dict[str, Array]]:
         """
         Calculate the loss for the actor model
 
@@ -78,7 +103,7 @@ def update_policy(key: PRNGKey, actor: Model, critic: Model, value: Model,
         actor_loss = -action_logprobs.mean()
 
         # Return the loss value, plus metadata
-        return actor_loss, {'actor_loss': actor_loss, 'adv': q - v}
+        return actor_loss, {'actor_loss': actor_loss}
 
     # Calculate the updated model parameters using the loss function
     new_actor, info = actor.apply_gradient(actor_loss_fn)

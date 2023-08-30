@@ -1303,3 +1303,10 @@ pygment/samples/GenerateStaticDataset/LunarLander/140 reward/all_discounted_rewa
 pygment/pygment/__pycache__/actor.cpython-310.pyc
 pygment/pygment/__pycache__/common.cpython-310.pyc
 pygment/pygment/__pycache__/critic.cpython-310.pyc
+pygment/.DS_Store
+pygment/experiments/2023_8_29_215720/actor/checkpoint
+pygment/experiments/2023_8_29_215720/critic/checkpoint
+pygment/experiments/2023_8_29_215720/value/checkpoint
+pygment/experiments/tensorboard/current/events.out.tfevents.1693342641.PopHS-047787.local
+pygment/experiments/tensorboard/current/events.out.tfevents.1693395719.eduroam-int-dhcp-97-26-196.ucl.ac.uk
+pygment/experiments/tensorboard/current/events.out.tfevents.1693396920.eduroam-int-dhcp-97-26-196.ucl.ac.uk

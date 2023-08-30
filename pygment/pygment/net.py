@@ -3,17 +3,12 @@ from common import Params
 import jax.numpy as jnp
 import flax.linen as nn
 from jax import grad
-from flax.struct import dataclass, field
+from flax import struct
 
 from typing import Sequence, Callable, Optional, Tuple, Any
 import optax
-import flax
-
-import os
-
-
-def default_init(scale: Optional[float] = jnp.sqrt(2)):
-    return nn.initializers.orthogonal(scale)
+import orbax.checkpoint
+from flax.training import orbax_utils
 
 
 class MLP(nn.Module):
@@ -44,7 +39,12 @@ class MLP(nn.Module):
         for i, size in enumerate(self.hidden_dims):
 
             # Apply a dense layer
-            x = nn.Dense(size, kernel_init=default_init())(x)
+            """
+            If using LSTM / RNN, consider switching initialiser to orthogonal.
+            He normal is good for ReLU, but not necessarily for other activation functions.
+            Glorot normal is good for tanh / sigmoid.
+            """
+            x = nn.Dense(size, kernel_init=nn.initializers.he_normal())(x)
 
             # Apply the activation function
             if i + 1 < len(self.hidden_dims) or self.activate_final:
@@ -92,15 +92,16 @@ class CriticNet(nn.Module):
 
     Has attributes:
         - hidden_dims: the number of hidden units in each layer
+        - action_dims: the number of available actions
         - activations: the activation function to use between layers
     """
 
     hidden_dims: Sequence[int]
+    action_dims: int
     activations: Callable[[jnp.ndarray], jnp.ndarray] = nn.relu
 
     @nn.compact
-    def __call__(self, observations: jnp.ndarray,
-                 actions: jnp.ndarray) -> jnp.ndarray:
+    def __call__(self, observations: jnp.ndarray) -> jnp.ndarray:
         """
         Critic network forward pass.
 
@@ -115,12 +116,11 @@ class CriticNet(nn.Module):
         
         Instead, we just treat the action as another input to the network.
         """
-        inputs = jnp.concatenate([observations, actions], -1)
-        critic = MLP((*self.hidden_dims, 1),
-                     activations=self.activations)(inputs)
+        critic = MLP((*self.hidden_dims, self.action_dims),
+                     activations=self.activations)(observations)
 
         # Return the output of the MLP
-        return jnp.squeeze(critic, -1)
+        return critic
 
 
 class DoubleCriticNet(nn.Module):
@@ -129,15 +129,16 @@ class DoubleCriticNet(nn.Module):
 
     Has attributes:
         - hidden_dims: the number of hidden units in each layer
+        - action_dims: the number of available actions
         - activations: the activation function to use between layers
     """
 
     hidden_dims: Sequence[int]
+    action_dims: int
     activations: Callable[[jnp.ndarray], jnp.ndarray] = nn.relu
 
     @nn.compact
-    def __call__(self, observations: jnp.ndarray,
-                 actions: jnp.ndarray) -> Tuple[jnp.ndarray, jnp.ndarray]:
+    def __call__(self, observations: jnp.ndarray) -> Tuple[jnp.ndarray, jnp.ndarray]:
         """
         Double critic network forward pass.
 
@@ -147,10 +148,10 @@ class DoubleCriticNet(nn.Module):
         """
 
         # Forward pass for each critic network MLP
-        critic1 = CriticNet(self.hidden_dims,
-                            activations=self.activations)(observations, actions)
-        critic2 = CriticNet(self.hidden_dims,
-                            activations=self.activations)(observations, actions)
+        critic1 = CriticNet(self.hidden_dims, self.action_dims,
+                            activations=self.activations)(observations)
+        critic2 = CriticNet(self.hidden_dims, self.action_dims,
+                            activations=self.activations)(observations)
 
         # Return both outputs
         return critic1, critic2
@@ -164,7 +165,7 @@ class ActorNet(nn.Module):
         - hidden_dims: the number of hidden units in each layer
         - activations: the activation function to use between layers
         - dropout_rate: the dropout rate to apply between layers
-        - action_dims: the number of dimensions in the action space
+        - action_dims: the number of available actions
     """
 
     hidden_dims: Sequence[int]
@@ -190,7 +191,7 @@ class ActorNet(nn.Module):
         return logits
 
 
-@dataclass
+@struct.dataclass
 class Model:
     """
     Model class, which contains the neural network, parameters, and optimiser state.
@@ -199,20 +200,22 @@ class Model:
         - network: the neural network architecture
         - params: the parameters of the neural network
         - optim: the optimiser
-        - opt_state: the optimiser state (??)
+        - opt_state: the optimiser state
     """
 
-    network: nn.Module = field(pytree_node=False)  # Formerly apply_fn
+    network: nn.Module = struct.field(pytree_node=False)
     params: Params
-    optim: Optional[optax.GradientTransformation] = field(
+    optim: Optional[optax.GradientTransformation] = struct.field(
         pytree_node=False)
     opt_state: Optional[optax.OptState] = None
+    checkpointer = orbax.checkpoint.Checkpointer(orbax.checkpoint.PyTreeCheckpointHandler())
 
     @classmethod
     def create(cls,
                model_def: nn.Module,
                inputs: Sequence[jnp.ndarray],
-               optim: Optional[optax.GradientTransformation] = None) -> 'Model':
+               optim: Optional[optax.GradientTransformation] = None
+               ) -> 'Model':
         """
         Class method to create a new instance of the Model class (with some necessary pre-processing).
 
@@ -275,38 +278,21 @@ class Model:
         # Calculate the new parameters
         new_params = optax.apply_updates(self.params, updates)
 
-        # Return the new parameters and optimiser state, as well as the metadata
+        # Returns a COPY with the new parameters and optimiser state, as well as the metadata
         return self.replace(params=new_params,
                             opt_state=new_opt_state), info
 
-    """
-    def save_model(self):
-        pass
-
-    def load_model(self,
-                   path=None):
-        if path is None:
-            invalid_path = ''
-            while True:
-                path = input(invalid_path + 'Please enter model path, or press Q/q to exist: ')
-                if path == 'Q' or path == 'q':
-                    return
-                if os.path.isfile(path):
-                    break
-                invalid_path = 'Invalid path - '
-
-        self.path = os.path.dirname(path)
-    """
-
     def save(self, save_path: str):
-        os.makedirs(os.path.dirname(save_path), exist_ok=True)
-        with open(save_path, 'wb') as f:
-            f.write(flax.serialization.to_bytes(self.params))
+        self.checkpointer.save(save_path, self.params,
+                               save_args=orbax_utils.save_args_from_target(self.params),
+                               force=True)
 
     def load(self, load_path: str) -> 'Model':
-        with open(load_path, 'rb') as f:
-            params = flax.serialization.from_bytes(self.params, f.read())
-        return self.replace(params=params)
+        # Load the saved parameters
+        new_params = self.checkpointer.restore(load_path)
+
+        # Returns a COPY with the updated parameters
+        return self.replace(params=new_params)
 
 
 """
