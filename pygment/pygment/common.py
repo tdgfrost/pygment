@@ -85,3 +85,23 @@ def calc_discounted_rewards(dones, rewards, gamma):
     discounted_rewards = np.array(discounted_rewards[mask])
 
     return discounted_rewards
+
+
+def progress_bar(iteration, total_iterations):
+    """
+    Print a progress bar to the console
+    :param iteration: current iteration
+    :param total_iterations: total number of iterations
+    :return: None
+    """
+    bar_length = 30
+
+    percent = iteration / total_iterations
+    percent_complete = int(percent * 100)
+
+    progress = int(percent * bar_length)
+    progress = '[' + '#' * progress + ' ' * (bar_length - progress) + ']'
+
+    print(f'\r{progress} {percent_complete}% complete', end='', flush=True)
+    return
+

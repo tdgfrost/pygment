@@ -6,7 +6,6 @@ import os
 import jax
 import jax.numpy as jnp
 from stable_baselines3.common.env_util import make_vec_env
-from stable_baselines3.common.vec_env import SubprocVecEnv
 
 # Set jax to CPU
 jax.config.update('jax_platform_name', 'cpu')
@@ -27,28 +26,9 @@ config = {'seed': 123,
           }
 
 
-def progress_bar(iteration, total_iterations):
-    """
-    Print a progress bar to the console
-    :param iteration: current iteration
-    :param total_iterations: total number of iterations
-    :return: None
-    """
-    bar_length = 30
-
-    percent = iteration / total_iterations
-    percent_complete = int(percent * 100)
-
-    progress = int(percent * bar_length)
-    progress = '[' + '#' * progress + ' ' * (bar_length - progress) + ']'
-
-    print(f'\r{progress} {percent_complete}% complete', end='', flush=True)
-    return
-
-
 if __name__ == "__main__":
     from agent import IQLAgent
-    from common import load_data, Batch
+    from common import load_data, Batch, progress_bar
 
     # Set whether to train and/or evaluate
     train = False
@@ -138,6 +118,12 @@ if __name__ == "__main__":
             return env
 
         def evaluate_envs(nodes=10):
+            """
+            Evaluate the agent across vectorised episodes.
+
+            :param nodes: number of episodes to evaluate.
+            :return: array of total rewards for each episode.
+            """
             envs = make_vec_env(make_env, n_envs=nodes)
 
             # Initial parameters
@@ -146,10 +132,11 @@ if __name__ == "__main__":
             dones = np.array([False for _ in range(nodes)])
             idxs = np.array([i for i in range(nodes)])
             all_rewards = np.array([0. for _ in range(nodes)])
-            count = 0
+            step = 0
+
             while not dones.all():
-                count += 1
-                progress_bar(count, max_episode_steps)
+                step += 1
+                progress_bar(step, max_episode_steps)
                 # Step through environments
                 actions = np.array(agent.sample_action(states, key))
                 states, rewards, new_dones, prem_dones = envs.step(actions)
