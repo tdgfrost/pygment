@@ -173,3 +173,20 @@ class IQLAgent(BaseAgent):
             **value_info,
             **actor_info
         }
+
+    def sample_action(self, state, key=None):
+        """
+        Chooses an action based on the current state.
+
+        :param state: the current state.
+        :param key: a PRNGKey.
+        :return: an action (as an integer if a single state, or an Array if multiple states)
+        """
+        key = jax.random.PRNGKey(123) if key is None else key
+        _, logits = self.actor(state)
+        action = jax.random.categorical(key, logits, axis=-1)
+
+        if not action.shape:
+            action = action.item()
+
+        return action

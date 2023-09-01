@@ -62,10 +62,10 @@ def update_policy(key: PRNGKey, actor: Model, critic: Model, value: Model,
     """
 
     # Calculate the optimal V(s') for the states in the batch
-    v = value(batch.states)
+    _, v = value(batch.states)
 
     # Calculate the Q(s,a) for the states and actions in the batch
-    q1, q2 = critic(batch.states)
+    _, (q1, q2) = critic(batch.states)
     q = jnp.minimum(q1, q2)
     """
     This is until jnp.take_along_axis works for metal backend.
@@ -91,10 +91,10 @@ def update_policy(key: PRNGKey, actor: Model, critic: Model, value: Model,
         """
 
         # Generate the logits for the actions
-        logits = actor.apply({'params': actor_params},
-                             batch.states,
-                             training=True,
-                             rngs={'dropout': key})
+        layer_outputs, logits = actor.apply({'params': actor_params},
+                                batch.states,
+                                training=True,
+                                rngs={'dropout': key})
 
         # Convert this to advantage-filtered logprobs
         action_logprobs = loss(logits, batch.actions, adv_filter)
@@ -103,7 +103,9 @@ def update_policy(key: PRNGKey, actor: Model, critic: Model, value: Model,
         actor_loss = -action_logprobs.mean()
 
         # Return the loss value, plus metadata
-        return actor_loss, {'actor_loss': actor_loss}
+        return actor_loss, {'actor_loss': actor_loss,
+                            'layer_outputs': layer_outputs,
+                            }
 
     # Calculate the updated model parameters using the loss function
     new_actor, info = actor.apply_gradient(actor_loss_fn)

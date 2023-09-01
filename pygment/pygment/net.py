@@ -2,13 +2,22 @@ from common import Params
 
 import jax.numpy as jnp
 import flax.linen as nn
-from jax import grad
+from jax import grad, Array
 from flax import struct
 
-from typing import Sequence, Callable, Optional, Tuple, Any
+from typing import Sequence, Callable, Optional, Tuple, Any, Dict
 import optax
 import orbax.checkpoint
 from flax.training import orbax_utils
+import jax
+
+
+def default_initializer():
+    """
+    Default initialiser for the neural network weights.
+    """
+
+    return nn.initializers.he_normal()
 
 
 class MLP(nn.Module):
@@ -26,7 +35,7 @@ class MLP(nn.Module):
     dropout_rate: Optional[float] = None
 
     @nn.compact
-    def __call__(self, x: jnp.ndarray, training: bool = False) -> jnp.ndarray:
+    def __call__(self, x: jnp.ndarray, training: bool = False) -> tuple[dict[int, Any], Array | Any]:
         """
         MLP forward pass.
 
@@ -34,6 +43,8 @@ class MLP(nn.Module):
         :param training: whether to keep dropout random (during training), or consistent (during evaluation)
         :return: output of the MLP
         """
+
+        layer_outputs = {}
 
         # Iterate through each layer
         for i, size in enumerate(self.hidden_dims):
@@ -44,17 +55,19 @@ class MLP(nn.Module):
             He normal is good for ReLU, but not necessarily for other activation functions.
             Glorot normal is good for tanh / sigmoid.
             """
-            x = nn.Dense(size, kernel_init=nn.initializers.he_normal())(x)
+            x = nn.Dense(size, kernel_init=default_initializer())(x)
 
             # Apply the activation function
             if i + 1 < len(self.hidden_dims) or self.activate_final:
                 x = self.activations(x)
 
+                layer_outputs[i] = x
+
                 # Apply dropout (deterministically during evaluation)
                 if self.dropout_rate is not None:
                     x = nn.Dropout(rate=self.dropout_rate)(x, deterministic=not training)
 
-        return x
+        return layer_outputs, x
 
 
 class ValueNet(nn.Module):
@@ -70,7 +83,7 @@ class ValueNet(nn.Module):
     activations: Callable[[jnp.ndarray], jnp.ndarray] = nn.relu
 
     @nn.compact
-    def __call__(self, observations: jnp.ndarray) -> jnp.ndarray:
+    def __call__(self, observations: jnp.ndarray) -> tuple[dict[int, Any], Array]:
         """
         Value network forward pass.
 
@@ -79,11 +92,11 @@ class ValueNet(nn.Module):
         """
 
         # Do a forward pass with the MLP
-        value = MLP((*self.hidden_dims, 1),
-                    activations=self.activations)(observations)
+        layer_outputs, value = MLP((*self.hidden_dims, 1),
+                                   activations=self.activations)(observations)
 
         # Return the output
-        return jnp.squeeze(value, -1)
+        return layer_outputs, jnp.squeeze(value, -1)
 
 
 class CriticNet(nn.Module):
@@ -101,7 +114,7 @@ class CriticNet(nn.Module):
     activations: Callable[[jnp.ndarray], jnp.ndarray] = nn.relu
 
     @nn.compact
-    def __call__(self, observations: jnp.ndarray) -> jnp.ndarray:
+    def __call__(self, observations: jnp.ndarray) -> tuple[dict[int, Any], Any]:
         """
         Critic network forward pass.
 
@@ -116,11 +129,11 @@ class CriticNet(nn.Module):
         
         Instead, we just treat the action as another input to the network.
         """
-        critic = MLP((*self.hidden_dims, self.action_dims),
-                     activations=self.activations)(observations)
+        layer_outputs, critic = MLP((*self.hidden_dims, self.action_dims),
+                                    activations=self.activations)(observations)
 
         # Return the output of the MLP
-        return critic
+        return layer_outputs, critic
 
 
 class DoubleCriticNet(nn.Module):
@@ -138,7 +151,7 @@ class DoubleCriticNet(nn.Module):
     activations: Callable[[jnp.ndarray], jnp.ndarray] = nn.relu
 
     @nn.compact
-    def __call__(self, observations: jnp.ndarray) -> Tuple[jnp.ndarray, jnp.ndarray]:
+    def __call__(self, observations: jnp.ndarray) -> tuple[tuple[dict[int, Any], dict[int, Any]], tuple[Any, Any]]:
         """
         Double critic network forward pass.
 
@@ -148,13 +161,13 @@ class DoubleCriticNet(nn.Module):
         """
 
         # Forward pass for each critic network MLP
-        critic1 = CriticNet(self.hidden_dims, self.action_dims,
-                            activations=self.activations)(observations)
-        critic2 = CriticNet(self.hidden_dims, self.action_dims,
-                            activations=self.activations)(observations)
+        layer_outputs_q1, critic1 = CriticNet(self.hidden_dims, self.action_dims,
+                                              activations=self.activations)(observations)
+        layer_outputs_q2, critic2 = CriticNet(self.hidden_dims, self.action_dims,
+                                              activations=self.activations)(observations)
 
         # Return both outputs
-        return critic1, critic2
+        return (layer_outputs_q1, layer_outputs_q2), (critic1, critic2)
 
 
 class ActorNet(nn.Module):
@@ -174,7 +187,7 @@ class ActorNet(nn.Module):
     activations: Callable[[jnp.ndarray], jnp.ndarray] = nn.relu
 
     @nn.compact
-    def __call__(self, observations: jnp.ndarray, training: bool = False) -> jnp.ndarray:
+    def __call__(self, observations: jnp.ndarray, training: bool = False) -> tuple[dict[int, Any], Any]:
         """
         Actor network forward pass.
 
@@ -183,12 +196,12 @@ class ActorNet(nn.Module):
         """
 
         # Forward pass with the MLP
-        logits = MLP((*self.hidden_dims, self.action_dims),
-                     dropout_rate=self.dropout_rate)(observations,
-                                                     training=training)
+        layer_outputs, logits = MLP((*self.hidden_dims, self.action_dims),
+                                    dropout_rate=self.dropout_rate)(observations,
+                                                                    training=training)
 
         # Return the output
-        return logits
+        return layer_outputs, logits
 
 
 @struct.dataclass
@@ -208,6 +221,7 @@ class Model:
     optim: Optional[optax.GradientTransformation] = struct.field(
         pytree_node=False)
     opt_state: Optional[optax.OptState] = None
+    initializer = nn.initializers.he_normal()
     checkpointer = orbax.checkpoint.Checkpointer(orbax.checkpoint.PyTreeCheckpointHandler())
 
     @classmethod
@@ -277,6 +291,25 @@ class Model:
 
         # Calculate the new parameters
         new_params = optax.apply_updates(self.params, updates)
+
+        # Re-initialise all the dead units
+        def iterate_through_layers(params_dict, updates_dict):
+            for key, value in updates_dict.items():
+                if 'kernel' in value.keys():
+                    current_update = value['kernel']
+                    dead_units = current_update == 0
+
+                    params_dict[key]['kernel'] = jnp.where(dead_units,
+                                                           default_initializer()(jax.random.PRNGKey(123),
+                                                                                 current_update.shape),
+                                                           params_dict[key]['kernel'])
+
+                else:
+                    params_dict[key] = iterate_through_layers(params_dict[key], updates_dict[key])
+
+            return params_dict
+
+        new_params = iterate_through_layers(new_params, updates)
 
         # Returns a COPY with the new parameters and optimiser state, as well as the metadata
         return self.replace(params=new_params,

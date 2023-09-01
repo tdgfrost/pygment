@@ -38,7 +38,7 @@ def update_v(value: Model, batch: Batch, expectile: float) -> Tuple[Model, InfoD
 
     def value_loss_fn(value_params: Params) -> tuple[Array, dict[str, Array]]:
         # Generate V(s) for the sample states
-        v = value.apply({'params': value_params}, batch.states)
+        layer_outputs, v = value.apply({'params': value_params}, batch.states)
 
         # Calculate the loss for V using Q with expectile regression
         value_loss = loss(v - discounted_rewards, expectile).mean()
@@ -46,6 +46,7 @@ def update_v(value: Model, batch: Batch, expectile: float) -> Tuple[Model, InfoD
         # Return the loss value, plus metadata
         return value_loss, {
             'value_loss': value_loss,
+            'layer_outputs': layer_outputs,
         }
 
     # Calculate the updated model parameters using the loss function
@@ -63,14 +64,14 @@ def update_q(critic: Model, target_value: Model, batch: Batch,
     actions = batch.actions
 
     # Calculate the optimal V(s') for the next states in the batch
-    next_v = target_value(batch.next_states)
+    _, next_v = target_value(batch.next_states)
 
     # Use this to calculate the target Q(s,a) for each state in the batch under an optimal V(s')
     target_q = batch.rewards + gamma * (~batch.dones).astype(jnp.float32) * next_v
 
     def critic_loss_fn(critic_params: Params) -> tuple[Array, dict[str, Array]]:
         # Generate Q values from each of the two critic networks
-        q1, q2 = critic.apply({'params': critic_params}, states)
+        layer_outputs, (q1, q2) = critic.apply({'params': critic_params}, states)
 
         # Select the sampled actions
         """
@@ -98,7 +99,8 @@ def update_q(critic: Model, target_value: Model, batch: Batch,
 
         # Return the loss value, plus metadata
         return critic_loss, {
-            'critic_loss': critic_loss
+            'critic_loss': critic_loss,
+            'layer_outputs': layer_outputs,
         }
 
     # Calculate the updated model parameters using the loss function
