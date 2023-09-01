@@ -61,8 +61,7 @@ class IQLAgent(BaseAgent):
 
     def __init__(self,
                  seed: int,
-                 observations: jnp.ndarray,
-                 actions: jnp.ndarray,
+                 observations: np.ndarray,
                  action_dim: int,
                  actor_lr: float = 3e-4,
                  value_lr: float = 3e-4,

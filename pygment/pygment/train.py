@@ -5,7 +5,8 @@ from tensorboardX import SummaryWriter
 import os
 import jax
 import jax.numpy as jnp
-import ray
+from stable_baselines3.common.env_util import make_vec_env
+from stable_baselines3.common.vec_env import SubprocVecEnv
 
 # Set jax to CPU
 jax.config.update('jax_platform_name', 'cpu')
@@ -24,6 +25,25 @@ config = {'seed': 123,
           'hidden_dims': (256, 256),
           'clipping': 1,
           }
+
+
+def progress_bar(iteration, total_iterations):
+    """
+    Print a progress bar to the console
+    :param iteration: current iteration
+    :param total_iterations: total number of iterations
+    :return: None
+    """
+    bar_length = 30
+
+    percent = iteration / total_iterations
+    percent_complete = int(percent * 100)
+
+    progress = int(percent * bar_length)
+    progress = '[' + '#' * progress + ' ' * (bar_length - progress) + ']'
+
+    print(f'\r{progress} {percent_complete}% complete', end='', flush=True)
+    return
 
 
 if __name__ == "__main__":
@@ -52,7 +72,6 @@ if __name__ == "__main__":
 
     # Create agent
     agent = IQLAgent(observations=env.observation_space.sample(),
-                     actions=env.action_space.sample()[np.newaxis],
                      action_dim=env.action_space.n,
                      dropout_rate=None,
                      opt_decay_schedule="cosine",
@@ -111,73 +130,43 @@ if __name__ == "__main__":
         agent.critic = agent.critic.load(os.path.join('../experiments/experiment_3', 'critic'))
         agent.value = agent.value.load(os.path.join('../experiments/experiment_3', 'value'))
 
-        ray.init()
+        max_episode_steps = 1000
+        envs_to_evaluate = 1000
 
-        @ray.remote
-        def evaluate_policy(policy, environment):
-            done, prem_done = False, False
-            total_reward = 0
+        def make_env():
+            env = gymnasium.envs.make('LunarLander-v2', max_episode_steps=max_episode_steps)
+            return env
+
+        def evaluate_envs(nodes=10):
+            envs = make_vec_env(make_env, n_envs=nodes)
+
+            # Initial parameters
             key = jax.random.PRNGKey(123)
-            device = jax.devices('cpu')[0]
+            states = envs.reset()
+            dones = np.array([False for _ in range(nodes)])
+            idxs = np.array([i for i in range(nodes)])
+            all_rewards = np.array([0. for _ in range(nodes)])
+            count = 0
+            while not dones.all():
+                count += 1
+                progress_bar(count, max_episode_steps)
+                # Step through environments
+                actions = np.array(agent.sample_action(states, key))
+                states, rewards, new_dones, prem_dones = envs.step(actions)
 
-            state, _ = environment.reset()
-            state = jax.device_put(jnp.array(state), device)
+                # Update finished environments
+                prem_dones = np.array([d['TimeLimit.truncated'] for d in prem_dones])
+                dones[idxs] = np.any((new_dones, prem_dones), axis=0)[idxs]
 
-            while not done and not prem_done:
-                _, logits = policy(state)
-                action = jax.random.categorical(key, logits).item()
+                # Update rewards
+                all_rewards[idxs] += np.array(rewards)[idxs]
 
-                state, reward, done, prem_done, _ = environment.step(action)
-
-                total_reward += reward
+                # Update remaining parameters
+                idxs = np.where(~dones)[0]
+                states = np.array(states)
                 key = jax.random.split(key, num=1)[0]
-                state = jax.device_put(state, device)
 
-            return total_reward
+            return all_rewards
 
-
-        # Define the number of environments to evaluate in parallel
-        parallel_envs = 512
-
-        import multiprocessing
-        from functools import partial
-
-        def evaluate_policy(environment, policy):
-            device = jax.devices('cpu')[0]
-            key = jax.random.PRNGKey(123)
-
-            total_reward = 0
-            state, _ = environment.reset()
-            state = jax.device_put(state, device)
-            done, prem_done = False, False
-
-            while not done and not prem_done:
-                _, logits = policy(state)
-                action = jax.random.categorical(key, logits).item()
-
-                state, reward, done, prem_done, _ = environment.step(action)
-
-                total_reward += reward
-                key = jax.random.split(key, num=1)[0]
-                state = jax.device_put(state, device)
-
-            return total_reward
-
-        envs = [gymnasium.make('LunarLander-v2', max_episode_steps=500) for _ in range(parallel_envs)]
-
-        with multiprocessing.Pool(processes=parallel_envs) as pool:
-            evaluate_partial = partial(evaluate_policy, policy=agent.actor)
-
-            rewards = pool.map(evaluate_partial, envs)
-
-        for env in envs:
-            env.close()
-
-
-
-        total_rewards = ray.get([evaluate_policy.remote(agent.actor,
-                                                        gymnasium.envs.make('LunarLander-v2',
-                                                                            max_episode_steps=500))
-                                 for _ in range(parallel_envs)])
-
-        print(f'Total rewards: {np.array(total_rewards).mean()}')
+        results = evaluate_envs(envs_to_evaluate)
+        print(f'\nMedian reward: {np.median(results)}')
