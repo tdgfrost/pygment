@@ -1,6 +1,7 @@
 from common import Params
 
 import jax.numpy as jnp
+import numpy as np
 import flax.linen as nn
 from jax import grad, Array
 from flax import struct
@@ -61,11 +62,11 @@ class MLP(nn.Module):
             if i + 1 < len(self.hidden_dims) or self.activate_final:
                 x = self.activations(x)
 
-                layer_outputs[i] = x
-
                 # Apply dropout (deterministically during evaluation)
                 if self.dropout_rate is not None:
                     x = nn.Dropout(rate=self.dropout_rate)(x, deterministic=not training)
+
+            layer_outputs[i] = x.copy()
 
         return layer_outputs, x
 
@@ -223,6 +224,13 @@ class Model:
     opt_state: Optional[optax.OptState] = None
     initializer = nn.initializers.he_normal()
     checkpointer = orbax.checkpoint.Checkpointer(orbax.checkpoint.PyTreeCheckpointHandler())
+    ages: Sequence[jnp.ndarray] = None
+    util: Sequence[jnp.ndarray] = None
+    mean_outputs: Sequence[jnp.ndarray] = None
+    bias_corrected_util: Sequence[jnp.ndarray] = None
+    decay_rate: float = 0.99
+    replacement_rate: float = 0.01
+    maturity_threshold: int = 20
 
     @classmethod
     def create(cls,
@@ -251,11 +259,32 @@ class Model:
         else:
             opt_state = None
 
+        # Define
+        def iterate_through_layers(params_dict):
+            empty_list = []
+            for key, value in params_dict.items():
+                if 'Dense_0' in value.keys():
+                    return [jnp.zeros(value[f'Dense_{i}']['kernel'].shape[-1]) for i in range(len(value.keys()) - 1)]
+
+                else:
+                    empty_list.append(iterate_through_layers(params_dict[key]))
+
+            return empty_list
+
+        ages = iterate_through_layers(params)
+        util = ages.copy()
+        mean_outputs = ages.copy()
+        bias_corrected_util = ages.copy()
+
         # Return an instance of the class with the following attributes
         return cls(network=model_def,
                    params=params,
                    optim=optim,
-                   opt_state=opt_state)
+                   opt_state=opt_state,
+                   ages=ages,
+                   util=util,
+                   mean_outputs=mean_outputs,
+                   bias_corrected_util=bias_corrected_util)
 
     def __call__(self, *args):
         """
@@ -292,24 +321,12 @@ class Model:
         # Calculate the new parameters
         new_params = optax.apply_updates(self.params, updates)
 
-        # Re-initialise all the dead units
-        def iterate_through_layers(params_dict, updates_dict):
-            for key, value in updates_dict.items():
-                if 'kernel' in value.keys():
-                    current_update = value['kernel']
-                    dead_units = current_update == 0
+        # Identify the lowest utility nodes to be replaced - as per "Loss of Plasticity in Deep Continual Learning"
+        #features_to_replace, num_features_to_replace = self.choose_features(outputs=info['layer_outputs'],
+                                                                            #new_params=new_params)
 
-                    params_dict[key]['kernel'] = jnp.where(dead_units,
-                                                           default_initializer()(jax.random.PRNGKey(123),
-                                                                                 current_update.shape),
-                                                           params_dict[key]['kernel'])
-
-                else:
-                    params_dict[key] = iterate_through_layers(params_dict[key], updates_dict[key])
-
-            return params_dict
-
-        new_params = iterate_through_layers(new_params, updates)
+        # Update the new parameters with re-initialised low utility nodes, as required
+        #new_params = self.gen_new_features(features_to_replace, num_features_to_replace, new_params)
 
         # Returns a COPY with the new parameters and optimiser state, as well as the metadata
         return self.replace(params=new_params,
@@ -326,6 +343,153 @@ class Model:
 
         # Returns a COPY with the updated parameters
         return self.replace(params=new_params)
+
+    def update_utility(self, layer_idx=0, outputs=None, new_params=None):
+        """
+        Update the utility of the nodes in the current layer.
+        :param layer_idx: current layer number
+        :param outputs: all output values (across all layers) from the neural network
+        :param new_params: updated parameters of the neural network
+        :return: None
+        """
+
+        # As per Equation 3/4/5 - we are using a running average, so we decay the current output values first
+        self.mean_outputs[layer_idx] *= self.decay_rate
+        # And then update with the new output values
+        self.mean_outputs[layer_idx] += (1 - self.decay_rate) * outputs[layer_idx].mean(0)
+
+        # We bias correct the output values
+        bias_correction = 1 - self.decay_rate ** self.ages[layer_idx]
+        bias_corrected_outputs = self.mean_outputs[layer_idx] / bias_correction
+
+        # Then we calculate the utility of the nodes in the current layer, also using a running average
+        self.util[layer_idx] *= self.decay_rate
+
+        # Equation 6 - calculate the absolute difference between the current outputs and the running average
+        new_util = jnp.absolute(outputs[layer_idx].mean(0) - bias_corrected_outputs)
+        # Then multiply by the weights connecting the current outputs to the next layer
+        new_util *= jnp.sum(jnp.absolute(new_params['MLP_0'][f'Dense_{layer_idx + 1}']['kernel']), axis=1)
+        # Then divide by the weights connecting the previous layer to the current outputs
+        new_util /= jnp.sum(jnp.absolute(new_params['MLP_0'][f'Dense_{layer_idx}']['kernel']), axis=0)
+
+        # Update the utility with the new utility values
+        self.util[layer_idx] += (1 - self.decay_rate) * new_util
+        # And similarly update the bias-corrected utility
+        self.bias_corrected_util[layer_idx] = self.util[layer_idx] / bias_correction
+
+    def choose_features(self, outputs, new_params=None):
+        """
+        Update the utility values of all the nodes, and choose the lowest utility nodes to re-initialise.
+
+        :param outputs: outputs from each layer of the neural network
+        :param new_params: updated parameters for the neural network
+        :return: feature indexes (for each layer) to reset, and the number of features being reset
+        """
+        # Define number of layers
+        n_hidden_layers = len(self.network.hidden_dims)
+        # Empty placeholders for features to replace and number of features to replace
+        features_to_replace = [jnp.empty(0, dtype=jnp.int32) for _ in range(n_hidden_layers)]
+        num_features_to_replace = [0 for _ in range(n_hidden_layers)]
+
+        # Otherwise, iterate through each layer
+        for i in range(n_hidden_layers):
+            # Update the age of the nodes in each layer
+            self.ages[i] += 1
+
+            # Update the utility of the nodes in each layer
+            self.update_utility(layer_idx=i, outputs=outputs, new_params=new_params)
+
+            # Find eligible features to replace in the current layer (assuming they are 'old' enough)
+            eligible_features_bool = self.ages[i] > self.maturity_threshold
+
+            # If no features old enough to be replaced, continue to the next layer
+            # if eligible_feature_indices.shape[0] == 0:
+                # continue
+
+            # Calculate the number of features to replace in the current layer
+            num_new_features_to_replace = self.replacement_rate * eligible_features_bool.sum()
+
+            # If the number of features to replace in this layer is between 0-1, use this as a probability
+            boolean_random_threshold = np.random.default_rng().uniform() <= num_new_features_to_replace
+            num_new_features_to_replace = boolean_random_threshold * jnp.maximum(num_new_features_to_replace, 1)
+
+            # Otherwise, just round to the lowest integer
+            num_new_features_to_replace = num_new_features_to_replace.astype(int)
+
+            # If no features are being replaced, continue to the next layer
+            # if num_new_features_to_replace == 0:
+                # continue
+
+            # Otherwise, find the features to replace by choosing the K lowest utility nodes
+            ranked_features = jnp.argsort(self.bias_corrected_util[i])
+            undo_ranking = jnp.argsort(ranked_features)
+            boolean_ranked_features = eligible_features_bool[ranked_features]
+
+            top_k_features = jnp.arange(self.network.hidden_dims[i]) < num_new_features_to_replace
+
+            new_features_to_replace = boolean_ranked_features * top_k_features
+
+            new_features_to_replace = new_features_to_replace[undo_ranking]
+
+            # new_features_to_replace = jax.lax.top_k(-self.bias_corrected_util[i][eligible_feature_bool],
+                                                     # num_new_features_to_replace)[1]
+
+            # Update the feature indices to those specific features
+            # new_features_to_replace = eligible_feature_indices[new_features_to_replace]
+
+            # Reset the utility and mean outputs of these nodes to zero
+            # self.util[i] = self.util[i].at[new_features_to_replace].set(0)
+            # self.mean_outputs[i] = self.mean_outputs[i].at[new_features_to_replace].set(0)
+
+            features_to_replace[i] = new_features_to_replace
+            num_features_to_replace[i] = num_new_features_to_replace
+
+        return features_to_replace, num_features_to_replace
+
+    def gen_new_features(self, features_to_replace, num_features_to_replace, new_params):
+        """
+        Generate new features: Reset input and output weights for low utility features
+        """
+        def reset(array, index, replace=0):
+            return jnp.where(index, replace, array)
+
+        # Iterate through each hidden layer
+        for layer_idx in range(len(self.network.hidden_dims)):
+
+            # If no features being replaced in this layer, continue
+            # if num_features_to_replace[layer_idx] == 0:
+                # continue
+
+            # Otherwise, reset the input and output weights for the low utility features
+
+            # Start by identifying the input and output layers
+            current_layer = new_params['MLP_0'][f'Dense_{layer_idx}']
+            next_layer = new_params['MLP_0'][f'Dense_{layer_idx + 1}']
+
+            # Reset the input bias to 0
+            current_layer['bias'] = reset(current_layer['bias'], features_to_replace[layer_idx])
+
+            # Re-initialize the input weights randomly
+            new_weights = default_initializer()(jax.random.PRNGKey(0),
+                                                shape=current_layer['kernel'].shape)
+
+            current_layer['kernel'] = reset(current_layer['kernel'], features_to_replace[layer_idx].reshape(1, -1),
+                                            new_weights)
+
+            # Then set the output weights to zero (so the current performance is not directly affected)
+            next_layer['kernel'] = reset(next_layer['kernel'], features_to_replace[layer_idx].reshape(-1, 1))
+
+            # Reset the ages, mean outputs, and utility of the newly reset nodes to zero
+            self.ages[layer_idx] = reset(self.ages[layer_idx], features_to_replace[layer_idx])
+            self.util[layer_idx] = reset(self.util[layer_idx], features_to_replace[layer_idx])
+            self.bias_corrected_util[layer_idx] = reset(self.bias_corrected_util[layer_idx],
+                                                        features_to_replace[layer_idx])
+            self.mean_outputs[layer_idx] = reset(self.mean_outputs[layer_idx], features_to_replace[layer_idx])
+
+            new_params['MLP_0'][f'Dense_{layer_idx}'] = current_layer
+            new_params['MLP_0'][f'Dense_{layer_idx + 1}'] = next_layer
+
+        return new_params
 
 
 """

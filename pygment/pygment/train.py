@@ -8,7 +8,7 @@ import jax.numpy as jnp
 from stable_baselines3.common.env_util import make_vec_env
 
 # Set jax to CPU
-jax.config.update('jax_platform_name', 'cpu')
+# jax.config.update('jax_platform_name', 'cpu')
 # jax.config.update("jax_debug_nans", True)
 # jax.config.update('jax_disable_jit', True)
 
@@ -21,7 +21,7 @@ config = {'seed': 123,
           'actor_lr': 5e-3,
           'value_lr': 5e-3,
           'critic_lr': 5e-3,
-          'hidden_dims': (256, 256),
+          'hidden_dims': (512, 512),
           'clipping': 1,
           }
 
@@ -31,11 +31,11 @@ if __name__ == "__main__":
     from common import load_data, Batch, progress_bar
 
     # Set whether to train and/or evaluate
-    train = False
+    train = True
     evaluate = True
 
     # Create environment
-    env = gymnasium.envs.make('LunarLander-v2', max_episode_steps=1000)
+    dummy_env = gymnasium.envs.make('LunarLander-v2')
 
     # Load static dataset (dictionary) and convert to a 1D list of Experiences
     data = load_data(path='../samples/GenerateStaticDataset/LunarLander/140 reward',
@@ -51,11 +51,13 @@ if __name__ == "__main__":
                  dones=data['dones'])
 
     # Create agent
-    agent = IQLAgent(observations=env.observation_space.sample(),
-                     action_dim=env.action_space.n,
+    agent = IQLAgent(observations=dummy_env.observation_space.sample(),
+                     action_dim=dummy_env.action_space.n,
                      dropout_rate=None,
                      opt_decay_schedule="cosine",
                      **config)
+
+    del dummy_env
 
     # Prepare logging tensorboard
     summary_writer = SummaryWriter('../experiments/tensorboard/current',
@@ -106,9 +108,10 @@ if __name__ == "__main__":
     Time to evaluate!
     """
     if evaluate:
-        agent.actor = agent.actor.load(os.path.join('../experiments/experiment_3', 'actor'))
-        agent.critic = agent.critic.load(os.path.join('../experiments/experiment_3', 'critic'))
-        agent.value = agent.value.load(os.path.join('../experiments/experiment_3', 'value'))
+        filename = agent.path
+        agent.actor = agent.actor.load(os.path.join('../experiments', f'{filename}', 'actor'))
+        agent.critic = agent.critic.load(os.path.join('../experiments', f'{filename}', 'critic'))
+        agent.value = agent.value.load(os.path.join('../experiments', f'{filename}', 'value'))
 
         max_episode_steps = 1000
         envs_to_evaluate = 1000
