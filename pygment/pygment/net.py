@@ -322,11 +322,11 @@ class Model:
         new_params = optax.apply_updates(self.params, updates)
 
         # Identify the lowest utility nodes to be replaced - as per "Loss of Plasticity in Deep Continual Learning"
-        #features_to_replace, num_features_to_replace = self.choose_features(outputs=info['layer_outputs'],
-                                                                            #new_params=new_params)
+        features_to_replace, num_features_to_replace = self.choose_features(outputs=info['layer_outputs'],
+                                                                            new_params=new_params)
 
         # Update the new parameters with re-initialised low utility nodes, as required
-        #new_params = self.gen_new_features(features_to_replace, num_features_to_replace, new_params)
+        new_params = self.gen_new_features(features_to_replace, new_params)
 
         # Returns a COPY with the new parameters and optimiser state, as well as the metadata
         return self.replace(params=new_params,
@@ -402,10 +402,6 @@ class Model:
             # Find eligible features to replace in the current layer (assuming they are 'old' enough)
             eligible_features_bool = self.ages[i] > self.maturity_threshold
 
-            # If no features old enough to be replaced, continue to the next layer
-            # if eligible_feature_indices.shape[0] == 0:
-                # continue
-
             # Calculate the number of features to replace in the current layer
             num_new_features_to_replace = self.replacement_rate * eligible_features_bool.sum()
 
@@ -413,40 +409,30 @@ class Model:
             boolean_random_threshold = np.random.default_rng().uniform() <= num_new_features_to_replace
             num_new_features_to_replace = boolean_random_threshold * jnp.maximum(num_new_features_to_replace, 1)
 
-            # Otherwise, just round to the lowest integer
+            # Round to the lowest integer
             num_new_features_to_replace = num_new_features_to_replace.astype(int)
 
-            # If no features are being replaced, continue to the next layer
-            # if num_new_features_to_replace == 0:
-                # continue
-
-            # Otherwise, find the features to replace by choosing the K lowest utility nodes
+            # Rank the features in terms of utility
             ranked_features = jnp.argsort(self.bias_corrected_util[i])
             undo_ranking = jnp.argsort(ranked_features)
+
+            # Combine this with the 'eligible node' boolean mask
             boolean_ranked_features = eligible_features_bool[ranked_features]
 
+            # Select the top K eligible features
             top_k_features = jnp.arange(self.network.hidden_dims[i]) < num_new_features_to_replace
-
             new_features_to_replace = boolean_ranked_features * top_k_features
 
+            # Revert back to the original ordering
             new_features_to_replace = new_features_to_replace[undo_ranking]
 
-            # new_features_to_replace = jax.lax.top_k(-self.bias_corrected_util[i][eligible_feature_bool],
-                                                     # num_new_features_to_replace)[1]
-
-            # Update the feature indices to those specific features
-            # new_features_to_replace = eligible_feature_indices[new_features_to_replace]
-
-            # Reset the utility and mean outputs of these nodes to zero
-            # self.util[i] = self.util[i].at[new_features_to_replace].set(0)
-            # self.mean_outputs[i] = self.mean_outputs[i].at[new_features_to_replace].set(0)
-
+            # Set these as the features to replace
             features_to_replace[i] = new_features_to_replace
             num_features_to_replace[i] = num_new_features_to_replace
 
         return features_to_replace, num_features_to_replace
 
-    def gen_new_features(self, features_to_replace, num_features_to_replace, new_params):
+    def gen_new_features(self, features_to_replace, new_params):
         """
         Generate new features: Reset input and output weights for low utility features
         """
@@ -455,12 +441,6 @@ class Model:
 
         # Iterate through each hidden layer
         for layer_idx in range(len(self.network.hidden_dims)):
-
-            # If no features being replaced in this layer, continue
-            # if num_features_to_replace[layer_idx] == 0:
-                # continue
-
-            # Otherwise, reset the input and output weights for the low utility features
 
             # Start by identifying the input and output layers
             current_layer = new_params['MLP_0'][f'Dense_{layer_idx}']
