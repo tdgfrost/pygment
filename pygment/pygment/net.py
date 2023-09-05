@@ -7,6 +7,7 @@ from jax import grad, Array
 from flax import struct
 
 from typing import Sequence, Callable, Optional, Tuple, Any, Dict
+from collections import defaultdict
 import optax
 import orbax.checkpoint
 from flax.training import orbax_utils
@@ -120,7 +121,6 @@ class CriticNet(nn.Module):
         Critic network forward pass.
 
         :param observations: input data for the forward pass
-        :param actions: chosen actions to evaluate the Q-value for
         :return: output of the critic network
         """
 
@@ -157,7 +157,6 @@ class DoubleCriticNet(nn.Module):
         Double critic network forward pass.
 
         :param observations: input data for each critic's forward pass
-        :param actions: actions to select the Q-value for
         :return: output of each critic network
         """
 
@@ -272,9 +271,9 @@ class Model:
             return empty_list
 
         ages = iterate_through_layers(params)
-        util = ages.copy()
-        mean_outputs = ages.copy()
-        bias_corrected_util = ages.copy()
+        util = iterate_through_layers(params)
+        mean_outputs = iterate_through_layers(params)
+        bias_corrected_util = iterate_through_layers(params)
 
         # Return an instance of the class with the following attributes
         return cls(network=model_def,
@@ -397,7 +396,9 @@ class Model:
             self.ages[i] += 1
 
             # Update the utility of the nodes in each layer
-            self.update_utility(layer_idx=i, outputs=outputs, new_params=new_params)
+            self.update_utility(layer_idx=i,
+                                outputs=outputs,
+                                new_params=new_params)
 
             # Find eligible features to replace in the current layer (assuming they are 'old' enough)
             eligible_features_bool = self.ages[i] > self.maturity_threshold
@@ -470,6 +471,16 @@ class Model:
             new_params['MLP_0'][f'Dense_{layer_idx + 1}'] = next_layer
 
         return new_params
+
+    @staticmethod
+    def yield_features(params):
+        conditional = jax.lax.cond(
+            len(params.keys()) == 2,
+            lambda: {key: params[key]['MLP_0'] for key in params.keys()},
+            lambda: params
+        )
+
+        return conditional
 
 
 """
