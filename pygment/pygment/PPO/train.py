@@ -6,6 +6,7 @@ import os
 import jax
 import jax.numpy as jnp
 from stable_baselines3.common.env_util import make_vec_env
+from sklearn.cluster import KMeans
 
 # Set jax to CPU
 # jax.config.update('jax_platform_name', 'cpu')
@@ -21,43 +22,38 @@ config = {'seed': 123,
           'actor_lr': 5e-3,
           'value_lr': 5e-3,
           'critic_lr': 5e-3,
-          'hidden_dims': (256, 256),
+          'hidden_dims': (512, 512),
           'clipping': 1,
           }
-
 
 if __name__ == "__main__":
     from agent import IQLAgent
     from common import load_data, Batch, progress_bar
+    from envs import VariableTimeSteps
 
     # Set whether to train and/or evaluate
     train = True
     evaluate = True
 
-    # Create environment
-    dummy_env = gymnasium.envs.make('LunarLander-v2')
+    # Set the number of clusters to use
+    n_clusters = 10
 
-    # Load static dataset (dictionary) and convert to a 1D list of Experiences
+    # Load static dataset (dictionary)
     data = load_data(path='../samples/GenerateStaticDataset/LunarLander/140 reward',
                      scale='standardise',
-                     gamma=config['gamma'])
+                     gamma=config['gamma'])['state']
 
-    data = Batch(states=data['state'],
-                 actions=data['actions'][:, np.newaxis],
-                 rewards=data['rewards'],
-                 discounted_rewards=data['discounted_rewards'],
-                 next_states=data['next_state'],
-                 next_actions=data['next_action'][:, np.newaxis],
-                 dones=data['dones'])
+    # Generate clustering function
+    kmeans = KMeans(n_clusters=n_clusters,
+                    random_state=123).fit(data[:1e6])
+
+    # Create environment and wrap in time-delay wrapper
+    env = gymnasium.envs.make('LunarLander-v2', max_episode_steps=1000)
+    env = VariableTimeSteps(env, fn=lambda x: kmeans.predict(x.reshape(1, -1))[0] if len(x.shape) == 1
+                                                                                  else kmeans.predict(x))
 
     # Create agent
-    agent = IQLAgent(observations=dummy_env.observation_space.sample(),
-                     action_dim=dummy_env.action_space.n,
-                     dropout_rate=None,
-                     opt_decay_schedule="cosine",
-                     **config)
-
-    del dummy_env
+    pass
 
     # Prepare logging tensorboard
     summary_writer = SummaryWriter('../experiments/tensorboard/current',
@@ -66,43 +62,40 @@ if __name__ == "__main__":
 
     # Train agent
     if train:
-        for value, critic, actor in [[False, True, False], [False, True, False], [False, False, True]]:
+        best_loss = jnp.inf
+        count = 0
+        for epoch in tqdm(range(config['epochs'])):
+            batch = agent.sample(data,
+                                 config['batch_size'])
 
-            loss_key = f"{'value' if value else ('critic' if critic else 'actor')}_loss"
-            best_loss = jnp.inf
-            count = 0
-            for epoch in tqdm(range(config['epochs'])):
-                batch = agent.sample(data,
-                                     config['batch_size'])
+            loss_info = agent.update_async(batch, actor, critic, value)
 
-                loss_info = agent.update_async(batch, actor, critic, value)
+            # Record best loss
+            if loss_info[loss_key] < best_loss:
+                best_loss = loss_info[loss_key]
+                count = 0
+                agent.actor.save(os.path.join('../experiments', agent.path, 'actor')) if actor else None
+                agent.critic.save(os.path.join('../experiments', agent.path, 'critic')) if critic else None
+                agent.value.save(os.path.join('../experiments', agent.path, 'value')) if value else None
+            else:
+                count += 1
+                if count > 1000:
+                    agent.actor = agent.actor.load(
+                        os.path.join('../experiments', agent.path, 'actor')) if actor else agent.actor
+                    agent.critic = agent.critic.load(
+                        os.path.join('../experiments', agent.path, 'critic')) if critic else agent.critic
+                    agent.value = agent.value.load(
+                        os.path.join('../experiments', agent.path, 'value')) if value else agent.value
+                    break
 
-                # Record best loss
-                if loss_info[loss_key] < best_loss:
-                    best_loss = loss_info[loss_key]
-                    count = 0
-                    agent.actor.save(os.path.join('../experiments', agent.path, 'actor')) if actor else None
-                    agent.critic.save(os.path.join('../experiments', agent.path, 'critic')) if critic else None
-                    agent.value.save(os.path.join('../experiments', agent.path, 'value')) if value else None
-                else:
-                    count += 1
-                    if count > 1000:
-                        agent.actor = agent.actor.load(
-                            os.path.join('../experiments', agent.path, 'actor')) if actor else agent.actor
-                        agent.critic = agent.critic.load(
-                            os.path.join('../experiments', agent.path, 'critic')) if critic else agent.critic
-                        agent.value = agent.value.load(
-                            os.path.join('../experiments', agent.path, 'value')) if value else agent.value
-                        break
-
-                # Log intermittently
-                if epoch % 5 == 0:
-                    for key, val in loss_info.items():
-                        if key == 'layer_outputs':
-                            continue
-                        if val.ndim == 0:
-                            summary_writer.add_scalar(f'training/{key}', val, epoch)
-                    summary_writer.flush()
+            # Log intermittently
+            if epoch % 5 == 0:
+                for key, val in loss_info.items():
+                    if key == 'layer_outputs':
+                        continue
+                    if val.ndim == 0:
+                        summary_writer.add_scalar(f'training/{key}', val, epoch)
+                summary_writer.flush()
 
     """
     Time to evaluate!
@@ -116,9 +109,11 @@ if __name__ == "__main__":
         max_episode_steps = 1000
         envs_to_evaluate = 1000
 
+
         def make_env():
             env = gymnasium.envs.make('LunarLander-v2', max_episode_steps=max_episode_steps)
             return env
+
 
         def evaluate_envs(nodes=10):
             """
@@ -157,6 +152,7 @@ if __name__ == "__main__":
                 key = jax.random.split(key, num=1)[0]
 
             return all_rewards
+
 
         results = evaluate_envs(envs_to_evaluate)
         print(f'\nMedian reward: {np.median(results)}')
