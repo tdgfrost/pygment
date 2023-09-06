@@ -8,20 +8,20 @@ import jax.numpy as jnp
 from stable_baselines3.common.env_util import make_vec_env
 
 # Set jax to CPU
-jax.config.update('jax_platform_name', 'cpu')
+# jax.config.update('jax_platform_name', 'cpu')
 # jax.config.update("jax_debug_nans", True)
-jax.config.update('jax_disable_jit', True)
+# jax.config.update('jax_disable_jit', True)
 
 # Define config file - could change to FLAGS at some point
 config = {'seed': 123,
           'epochs': int(1e6),
           'batch_size': int(1e5),
-          'expectile': 0.8,
+          'expectile': 0.5,
           'gamma': 0.9999,
           'actor_lr': 5e-3,
           'value_lr': 5e-3,
           'critic_lr': 5e-3,
-          'hidden_dims': (256, 256),
+          'hidden_dims': (512, 512),
           'clipping': 1,
           }
 
@@ -66,7 +66,7 @@ if __name__ == "__main__":
 
     # Train agent
     if train:
-        for value, critic, actor in [[False, True, False], [False, True, False], [False, False, True]]:
+        for value, critic, actor in [[True, False, False], [False, True, False], [False, False, True]]:
 
             loss_key = f"{'value' if value else ('critic' if critic else 'actor')}_loss"
             best_loss = jnp.inf
@@ -120,7 +120,7 @@ if __name__ == "__main__":
             env = gymnasium.envs.make('LunarLander-v2', max_episode_steps=max_episode_steps)
             return env
 
-        def evaluate_envs(nodes=10):
+        def evaluate_envs(policy, nodes=10):
             """
             Evaluate the agent across vectorised episodes.
 
@@ -141,7 +141,7 @@ if __name__ == "__main__":
                 step += 1
                 progress_bar(step, max_episode_steps)
                 # Step through environments
-                actions = np.array(agent.sample_action(states, key))
+                actions = np.array(policy.sample_action(states, key))
                 states, rewards, new_dones, prem_dones = envs.step(actions)
 
                 # Update finished environments
@@ -158,5 +158,5 @@ if __name__ == "__main__":
 
             return all_rewards
 
-        results = evaluate_envs(envs_to_evaluate)
+        results = evaluate_envs(agent, envs_to_evaluate)
         print(f'\nMedian reward: {np.median(results)}')

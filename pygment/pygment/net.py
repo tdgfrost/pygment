@@ -85,7 +85,7 @@ class ValueNet(nn.Module):
     activations: Callable[[jnp.ndarray], jnp.ndarray] = nn.relu
 
     @nn.compact
-    def __call__(self, observations: jnp.ndarray) -> tuple[dict[int, Any], Array]:
+    def __call__(self, observations: jnp.ndarray) -> tuple[dict[str, dict[int, Any]], Array]:
         """
         Value network forward pass.
 
@@ -98,7 +98,7 @@ class ValueNet(nn.Module):
                                    activations=self.activations)(observations)
 
         # Return the output
-        return layer_outputs, jnp.squeeze(value, -1)
+        return {'MLP_0': layer_outputs}, jnp.squeeze(value, -1)
 
 
 class CriticNet(nn.Module):
@@ -116,7 +116,7 @@ class CriticNet(nn.Module):
     activations: Callable[[jnp.ndarray], jnp.ndarray] = nn.relu
 
     @nn.compact
-    def __call__(self, observations: jnp.ndarray) -> tuple[dict[int, Any], Any]:
+    def __call__(self, observations: jnp.ndarray) -> tuple[dict[str, dict[int, Any]], Any]:
         """
         Critic network forward pass.
 
@@ -134,7 +134,7 @@ class CriticNet(nn.Module):
                                     activations=self.activations)(observations)
 
         # Return the output of the MLP
-        return layer_outputs, critic
+        return {'MLP_0': layer_outputs}, critic
 
 
 class DoubleCriticNet(nn.Module):
@@ -152,7 +152,7 @@ class DoubleCriticNet(nn.Module):
     activations: Callable[[jnp.ndarray], jnp.ndarray] = nn.relu
 
     @nn.compact
-    def __call__(self, observations: jnp.ndarray) -> tuple[tuple[dict[int, Any], dict[int, Any]], tuple[Any, Any]]:
+    def __call__(self, observations: jnp.ndarray) -> tuple[dict[str, dict[int, Any]], tuple[Any, Any]]:
         """
         Double critic network forward pass.
 
@@ -161,13 +161,14 @@ class DoubleCriticNet(nn.Module):
         """
 
         # Forward pass for each critic network MLP
-        layer_outputs_q1, critic1 = CriticNet(self.hidden_dims, self.action_dims,
-                                              activations=self.activations)(observations)
-        layer_outputs_q2, critic2 = CriticNet(self.hidden_dims, self.action_dims,
-                                              activations=self.activations)(observations)
+        layer_outputs_q1, critic1 = MLP((*self.hidden_dims, self.action_dims),
+                                        activations=self.activations)(observations)
+        layer_outputs_q2, critic2 = MLP((*self.hidden_dims, self.action_dims),
+                                        activations=self.activations)(observations)
 
         # Return both outputs
-        return (layer_outputs_q1, layer_outputs_q2), (critic1, critic2)
+        return {'MLP_0': layer_outputs_q1,
+                'MLP_1': layer_outputs_q2}, (critic1, critic2)
 
 
 class ActorNet(nn.Module):
@@ -187,7 +188,7 @@ class ActorNet(nn.Module):
     activations: Callable[[jnp.ndarray], jnp.ndarray] = nn.relu
 
     @nn.compact
-    def __call__(self, observations: jnp.ndarray, training: bool = False) -> tuple[dict[int, Any], Any]:
+    def __call__(self, observations: jnp.ndarray, training: bool = False) -> tuple[dict[str, dict[int, Any]], Any]:
         """
         Actor network forward pass.
 
@@ -201,7 +202,7 @@ class ActorNet(nn.Module):
                                                                     training=training)
 
         # Return the output
-        return layer_outputs, logits
+        return {'MLP_0': layer_outputs}, logits
 
 
 @struct.dataclass
@@ -228,7 +229,7 @@ class Model:
     mean_outputs: Sequence[jnp.ndarray] = None
     bias_corrected_util: Sequence[jnp.ndarray] = None
     decay_rate: float = 0.99
-    replacement_rate: float = 0.01
+    replacement_rate: float = 0.001
     maturity_threshold: int = 20
 
     @classmethod
@@ -260,15 +261,11 @@ class Model:
 
         # Define
         def iterate_through_layers(params_dict):
-            empty_list = []
+            empty_dict = {}
             for key, value in params_dict.items():
-                if 'Dense_0' in value.keys():
-                    return [jnp.zeros(value[f'Dense_{i}']['kernel'].shape[-1]) for i in range(len(value.keys()) - 1)]
+                empty_dict[key] = [jnp.zeros(value[f'Dense_{i}']['kernel'].shape[-1]) for i in range(len(value.keys()) - 1)]
 
-                else:
-                    empty_list.append(iterate_through_layers(params_dict[key]))
-
-            return empty_list
+            return empty_dict
 
         ages = iterate_through_layers(params)
         util = iterate_through_layers(params)
@@ -343,38 +340,38 @@ class Model:
         # Returns a COPY with the updated parameters
         return self.replace(params=new_params)
 
-    def update_utility(self, layer_idx=0, outputs=None, new_params=None):
+    def update_utility(self, layer_idx=0, outputs=None, params=None, key=None):
         """
         Update the utility of the nodes in the current layer.
         :param layer_idx: current layer number
         :param outputs: all output values (across all layers) from the neural network
-        :param new_params: updated parameters of the neural network
+        :param params: updated parameters of the neural network
         :return: None
         """
 
         # As per Equation 3/4/5 - we are using a running average, so we decay the current output values first
-        self.mean_outputs[layer_idx] *= self.decay_rate
+        self.mean_outputs[key][layer_idx] *= self.decay_rate
         # And then update with the new output values
-        self.mean_outputs[layer_idx] += (1 - self.decay_rate) * outputs[layer_idx].mean(0)
+        self.mean_outputs[key][layer_idx] += (1 - self.decay_rate) * outputs[layer_idx].mean(0)
 
         # We bias correct the output values
-        bias_correction = 1 - self.decay_rate ** self.ages[layer_idx]
-        bias_corrected_outputs = self.mean_outputs[layer_idx] / bias_correction
+        bias_correction = 1 - self.decay_rate ** self.ages[key][layer_idx]
+        bias_corrected_outputs = self.mean_outputs[key][layer_idx] / bias_correction
 
         # Then we calculate the utility of the nodes in the current layer, also using a running average
-        self.util[layer_idx] *= self.decay_rate
+        self.util[key][layer_idx] *= self.decay_rate
 
         # Equation 6 - calculate the absolute difference between the current outputs and the running average
         new_util = jnp.absolute(outputs[layer_idx].mean(0) - bias_corrected_outputs)
         # Then multiply by the weights connecting the current outputs to the next layer
-        new_util *= jnp.sum(jnp.absolute(new_params['MLP_0'][f'Dense_{layer_idx + 1}']['kernel']), axis=1)
+        new_util *= jnp.sum(jnp.absolute(params[f'Dense_{layer_idx + 1}']['kernel']), axis=1)
         # Then divide by the weights connecting the previous layer to the current outputs
-        new_util /= jnp.sum(jnp.absolute(new_params['MLP_0'][f'Dense_{layer_idx}']['kernel']), axis=0)
+        new_util /= jnp.sum(jnp.absolute(params[f'Dense_{layer_idx}']['kernel']), axis=0)
 
         # Update the utility with the new utility values
-        self.util[layer_idx] += (1 - self.decay_rate) * new_util
+        self.util[key][layer_idx] += (1 - self.decay_rate) * new_util
         # And similarly update the bias-corrected utility
-        self.bias_corrected_util[layer_idx] = self.util[layer_idx] / bias_correction
+        self.bias_corrected_util[key][layer_idx] = self.util[key][layer_idx] / bias_correction
 
     def choose_features(self, outputs, new_params=None):
         """
@@ -386,50 +383,57 @@ class Model:
         """
         # Define number of layers
         n_hidden_layers = len(self.network.hidden_dims)
+
         # Empty placeholders for features to replace and number of features to replace
-        features_to_replace = [jnp.empty(0, dtype=jnp.int32) for _ in range(n_hidden_layers)]
-        num_features_to_replace = [0 for _ in range(n_hidden_layers)]
+        features_to_replace = {}
+        num_features_to_replace = {}
 
-        # Otherwise, iterate through each layer
-        for i in range(n_hidden_layers):
-            # Update the age of the nodes in each layer
-            self.ages[i] += 1
+        for key, params in new_params.items():
+            # Empty placeholders for features to replace and number of features to replace
+            features_to_replace[key] = [jnp.empty(0, dtype=jnp.int32) for _ in range(n_hidden_layers)]
+            num_features_to_replace[key] = [0 for _ in range(n_hidden_layers)]
 
-            # Update the utility of the nodes in each layer
-            self.update_utility(layer_idx=i,
-                                outputs=outputs,
-                                new_params=new_params)
+            # Iterate through each layer
+            for i in range(n_hidden_layers):
+                # Update the age of the nodes in each layer
+                self.ages[key][i] += 1
 
-            # Find eligible features to replace in the current layer (assuming they are 'old' enough)
-            eligible_features_bool = self.ages[i] > self.maturity_threshold
+                # Update the utility of the nodes in each layer
+                self.update_utility(layer_idx=i,
+                                    outputs=outputs[key],
+                                    params=params,
+                                    key=key)
 
-            # Calculate the number of features to replace in the current layer
-            num_new_features_to_replace = self.replacement_rate * eligible_features_bool.sum()
+                # Find eligible features to replace in the current layer (assuming they are 'old' enough)
+                eligible_features_bool = self.ages[key][i] > self.maturity_threshold
 
-            # If the number of features to replace in this layer is between 0-1, use this as a probability
-            boolean_random_threshold = np.random.default_rng().uniform() <= num_new_features_to_replace
-            num_new_features_to_replace = boolean_random_threshold * jnp.maximum(num_new_features_to_replace, 1)
+                # Calculate the number of features to replace in the current layer
+                num_new_features_to_replace = self.replacement_rate * eligible_features_bool.sum()
 
-            # Round to the lowest integer
-            num_new_features_to_replace = num_new_features_to_replace.astype(int)
+                # If the number of features to replace in this layer is between 0-1, use this as a probability
+                boolean_random_threshold = np.random.default_rng().uniform() <= num_new_features_to_replace
+                num_new_features_to_replace = boolean_random_threshold * jnp.maximum(num_new_features_to_replace, 1)
 
-            # Rank the features in terms of utility
-            ranked_features = jnp.argsort(self.bias_corrected_util[i])
-            undo_ranking = jnp.argsort(ranked_features)
+                # Round to the lowest integer
+                num_new_features_to_replace = num_new_features_to_replace.astype(int)
 
-            # Combine this with the 'eligible node' boolean mask
-            boolean_ranked_features = eligible_features_bool[ranked_features]
+                # Rank the features in terms of utility
+                ranked_features = jnp.argsort(self.bias_corrected_util[key][i])
+                undo_ranking = jnp.argsort(ranked_features)
 
-            # Select the top K eligible features
-            top_k_features = jnp.arange(self.network.hidden_dims[i]) < num_new_features_to_replace
-            new_features_to_replace = boolean_ranked_features * top_k_features
+                # Combine this with the 'eligible node' boolean mask
+                boolean_ranked_features = eligible_features_bool[ranked_features]
 
-            # Revert back to the original ordering
-            new_features_to_replace = new_features_to_replace[undo_ranking]
+                # Select the top K eligible features
+                top_k_features = jnp.arange(self.network.hidden_dims[i]) < num_new_features_to_replace
+                new_features_to_replace = boolean_ranked_features * top_k_features
 
-            # Set these as the features to replace
-            features_to_replace[i] = new_features_to_replace
-            num_features_to_replace[i] = num_new_features_to_replace
+                # Revert back to the original ordering
+                new_features_to_replace = new_features_to_replace[undo_ranking]
+
+                # Set these as the features to replace
+                features_to_replace[key][i] = new_features_to_replace
+                num_features_to_replace[key][i] = num_new_features_to_replace
 
         return features_to_replace, num_features_to_replace
 
@@ -437,50 +441,44 @@ class Model:
         """
         Generate new features: Reset input and output weights for low utility features
         """
+
         def reset(array, index, replace=0):
             return jnp.where(index, replace, array)
 
-        # Iterate through each hidden layer
-        for layer_idx in range(len(self.network.hidden_dims)):
+        for key, params in new_params.items():
 
-            # Start by identifying the input and output layers
-            current_layer = new_params['MLP_0'][f'Dense_{layer_idx}']
-            next_layer = new_params['MLP_0'][f'Dense_{layer_idx + 1}']
+            # Iterate through each hidden layer
+            for layer_idx in range(len(self.network.hidden_dims)):
+                # Start by identifying the input and output layers
+                current_layer = params[f'Dense_{layer_idx}']
+                next_layer = params[f'Dense_{layer_idx + 1}']
 
-            # Reset the input bias to 0
-            current_layer['bias'] = reset(current_layer['bias'], features_to_replace[layer_idx])
+                # Reset the input bias to 0
+                current_layer['bias'] = reset(current_layer['bias'], features_to_replace[key][layer_idx])
 
-            # Re-initialize the input weights randomly
-            new_weights = default_initializer()(jax.random.PRNGKey(0),
-                                                shape=current_layer['kernel'].shape)
+                # Re-initialize the input weights randomly
+                new_weights = default_initializer()(jax.random.PRNGKey(0),
+                                                    shape=current_layer['kernel'].shape)
 
-            current_layer['kernel'] = reset(current_layer['kernel'], features_to_replace[layer_idx].reshape(1, -1),
-                                            new_weights)
+                current_layer['kernel'] = reset(current_layer['kernel'],
+                                                features_to_replace[key][layer_idx].reshape(1, -1),
+                                                new_weights)
 
-            # Then set the output weights to zero (so the current performance is not directly affected)
-            next_layer['kernel'] = reset(next_layer['kernel'], features_to_replace[layer_idx].reshape(-1, 1))
+                # Then set the output weights to zero (so the current performance is not directly affected)
+                next_layer['kernel'] = reset(next_layer['kernel'], features_to_replace[key][layer_idx].reshape(-1, 1))
 
-            # Reset the ages, mean outputs, and utility of the newly reset nodes to zero
-            self.ages[layer_idx] = reset(self.ages[layer_idx], features_to_replace[layer_idx])
-            self.util[layer_idx] = reset(self.util[layer_idx], features_to_replace[layer_idx])
-            self.bias_corrected_util[layer_idx] = reset(self.bias_corrected_util[layer_idx],
-                                                        features_to_replace[layer_idx])
-            self.mean_outputs[layer_idx] = reset(self.mean_outputs[layer_idx], features_to_replace[layer_idx])
+                # Reset the ages, mean outputs, and utility of the newly reset nodes to zero
+                self.ages[key][layer_idx] = reset(self.ages[key][layer_idx], features_to_replace[key][layer_idx])
+                self.util[key][layer_idx] = reset(self.util[key][layer_idx], features_to_replace[key][layer_idx])
+                self.bias_corrected_util[key][layer_idx] = reset(self.bias_corrected_util[key][layer_idx],
+                                                                 features_to_replace[key][layer_idx])
+                self.mean_outputs[key][layer_idx] = reset(self.mean_outputs[key][layer_idx],
+                                                          features_to_replace[key][layer_idx])
 
-            new_params['MLP_0'][f'Dense_{layer_idx}'] = current_layer
-            new_params['MLP_0'][f'Dense_{layer_idx + 1}'] = next_layer
+                new_params[key][f'Dense_{layer_idx}'] = current_layer
+                new_params[key][f'Dense_{layer_idx + 1}'] = next_layer
 
         return new_params
-
-    @staticmethod
-    def yield_features(params):
-        conditional = jax.lax.cond(
-            len(params.keys()) == 2,
-            lambda: {key: params[key]['MLP_0'] for key in params.keys()},
-            lambda: params
-        )
-
-        return conditional
 
 
 """
