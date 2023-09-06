@@ -1,34 +1,33 @@
-from tqdm import tqdm
-import numpy as np
-import gymnasium
-from tensorboardX import SummaryWriter
 import os
+
+import gymnasium
 import jax
 import jax.numpy as jnp
-from stable_baselines3.common.env_util import make_vec_env
+import numpy as np
 from sklearn.cluster import KMeans
+from stable_baselines3.common.env_util import make_vec_env
+from tensorboardX import SummaryWriter
+from tqdm import tqdm
 
 # Set jax to CPU
-# jax.config.update('jax_platform_name', 'cpu')
+jax.config.update('jax_platform_name', 'cpu')
 # jax.config.update("jax_debug_nans", True)
-# jax.config.update('jax_disable_jit', True)
+jax.config.update('jax_disable_jit', True)
 
 # Define config file - could change to FLAGS at some point
 config = {'seed': 123,
           'epochs': int(1e6),
           'batch_size': int(1e5),
-          'expectile': 0.8,
           'gamma': 0.9999,
           'actor_lr': 5e-3,
           'value_lr': 5e-3,
-          'critic_lr': 5e-3,
           'hidden_dims': (512, 512),
           'clipping': 1,
           }
 
 if __name__ == "__main__":
-    from agent import IQLAgent
-    from common import load_data, Batch, progress_bar
+    from agent import PPOAgent
+    from common import load_data, progress_bar, Batch
     from envs import VariableTimeSteps
 
     # Set whether to train and/or evaluate
@@ -50,10 +49,14 @@ if __name__ == "__main__":
     # Create environment and wrap in time-delay wrapper
     env = gymnasium.envs.make('LunarLander-v2', max_episode_steps=1000)
     env = VariableTimeSteps(env, fn=lambda x: kmeans.predict(x.reshape(1, -1))[0] if len(x.shape) == 1
-                                                                                  else kmeans.predict(x))
+    else kmeans.predict(x))
 
     # Create agent
-    pass
+    agent = PPOAgent(observations=env.observation_space.sample(),
+                     action_dim=env.action_space.n,
+                     dropout_rate=None,
+                     opt_decay_schedule="cosine",
+                     **config)
 
     # Prepare logging tensorboard
     summary_writer = SummaryWriter('../experiments/tensorboard/current',
@@ -62,14 +65,38 @@ if __name__ == "__main__":
 
     # Train agent
     if train:
-        best_loss = jnp.inf
+        best_actor_loss = jnp.inf
+        key = jax.random.PRNGKey(123)
         count = 0
-        for epoch in tqdm(range(config['epochs'])):
-            batch = agent.sample(data,
-                                 config['batch_size'])
+        for episode in tqdm(range(config['epochs'])):
+            state, _ = env.reset()
+            done, prem_done = False, False
+            key = jax.random.split(key, 1)[0]
+            actor_loss = []
+            critic_loss = []
+            ep_reward = 0
 
-            loss_info = agent.update_async(batch, actor, critic, value)
+            while not done and not prem_done:
+                action, action_logprobs = agent.sample_action(state, key)
 
+                next_state, reward, done, prem_done, _ = env.step(action)
+
+                loss_info = agent.update(Batch(states=state,
+                                               actions=action,
+                                               rewards=reward,
+                                               next_states=next_state,
+                                               dones=done,
+                                               action_logprobs=action_logprobs))
+
+                actor_loss += loss_info['actor_loss']
+                critic_loss += loss_info['critic_loss']
+                ep_reward += reward
+
+                key = jax.random.split(key, 1)[0]
+
+            actor_loss = np.array(actor_loss).mean()
+            critic_loss = np.array(critic_loss).mean()
+            """
             # Record best loss
             if loss_info[loss_key] < best_loss:
                 best_loss = loss_info[loss_key]
@@ -87,15 +114,20 @@ if __name__ == "__main__":
                     agent.value = agent.value.load(
                         os.path.join('../experiments', agent.path, 'value')) if value else agent.value
                     break
-
+            """
             # Log intermittently
-            if epoch % 5 == 0:
+            if episode % 1 == 0:
+                """
                 for key, val in loss_info.items():
                     if key == 'layer_outputs':
                         continue
                     if val.ndim == 0:
                         summary_writer.add_scalar(f'training/{key}', val, epoch)
                 summary_writer.flush()
+                """
+                summary_writer.add_scalar(f'training/actor_loss', actor_loss, episode)
+                summary_writer.add_scalar(f'training/critic_loss', critic_loss, episode)
+                summary_writer.add_scalar(f'training/episode_reward', ep_reward, episode)
 
     """
     Time to evaluate!

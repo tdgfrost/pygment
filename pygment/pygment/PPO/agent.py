@@ -1,6 +1,6 @@
-from net import Model, ValueNet, ActorNet, DoubleCriticNet
+from net import Model, ValueNet, ActorNet
 from common import Batch, InfoDict
-from actions import _update_jit, _update_value_jit, _update_critic_jit, _update_actor_jit
+from actions import _update_jit, _update_value_jit, _update_actor_jit
 
 import os
 import datetime as dt
@@ -65,7 +65,6 @@ class PPOAgent(BaseAgent):
                  action_dim: int,
                  actor_lr: float = 3e-4,
                  value_lr: float = 3e-4,
-                 critic_lr: float = 3e-4,
                  hidden_dims: Sequence[int] = (256, 256),
                  gamma: float = 0.99,
                  epochs: Optional[int] = None,
@@ -79,13 +78,12 @@ class PPOAgent(BaseAgent):
 
         # Set random seed
         rng = jax.random.PRNGKey(seed)
-        self.rng, self.actor_key, self.critic_key, self.value_key = jax.random.split(rng, 4)
+        self.rng, self.actor_key, self.value_key = jax.random.split(rng, 3)
 
         # Set parameters
         self.action_dim = action_dim
 
         # Set hyperparameters
-        self.expectile = expectile
         self.gamma = gamma
 
         # Set optimizers
@@ -106,10 +104,6 @@ class PPOAgent(BaseAgent):
                                   inputs=[self.actor_key, observations],
                                   optim=optimiser)
 
-        self.critic = Model.create(DoubleCriticNet(hidden_dims, self.action_dim),
-                                   inputs=[self.critic_key, observations],
-                                   optim=optax.adam(learning_rate=critic_lr))
-
         self.value = Model.create(ValueNet(hidden_dims),
                                   inputs=[self.value_key, observations],
                                   optim=optax.adam(learning_rate=value_lr))
@@ -123,53 +117,17 @@ class PPOAgent(BaseAgent):
         """
 
         # Create an updated copy of all the networks
-        new_rng, new_actor, new_critic, new_value, info = _update_jit(
-            self.rng, self.actor, self.critic, self.value,
-            batch, self.gamma, self.expectile)
+        new_rng, new_actor, new_value, info = _update_jit(
+            self.rng, self.actor, self.value,
+            batch, self.gamma)
 
         # Update the agent's networks with the updated copies
         self.rng = new_rng
         self.actor = new_actor
-        self.critic = new_critic
         self.value = new_value
 
         # Return the metadata
         return info
-
-    def update_async(self, batch: Batch, actor: bool = False,
-                     critic: bool = False, value: bool = False) -> InfoDict:
-        """
-        Updates the agent's networks asynchronously.
-
-        :param batch: a Batch object.
-        :param actor: whether to update the actor network.
-        :param critic: whether to update the critic network.
-        :param value: whether to update the value network.
-        :return: an InfoDict object containing metadata.
-        """
-
-        # Create an updated copy of the required networks
-        new_rng, new_actor, actor_info = _update_actor_jit(
-            self.rng, self.actor, self.critic, self.value, batch) if actor else (self.rng, self.actor, {})
-
-        new_critic, critic_info = _update_critic_jit(
-            self.critic, self.value, batch, self.gamma) if critic else (self.critic, {})
-
-        new_value, value_info = _update_value_jit(
-            self.value, batch, self.expectile) if value else (self.value, {})
-
-        # Update the agent's networks with the updated copies
-        self.rng = new_rng
-        self.actor = new_actor
-        self.critic = new_critic
-        self.value = new_value
-
-        # Return the metadata
-        return {
-            **critic_info,
-            **value_info,
-            **actor_info
-        }
 
     def sample_action(self, state, key=None):
         """
@@ -181,9 +139,11 @@ class PPOAgent(BaseAgent):
         """
         key = jax.random.PRNGKey(123) if key is None else key
         _, logits = self.actor(state)
+        logprobs = jax.nn.log_softmax(logits)
         action = jax.random.categorical(key, logits, axis=-1)
+        action_logprobs = logprobs[action]
 
         if not action.shape:
             action = action.item()
 
-        return action
+        return action, action_logprobs

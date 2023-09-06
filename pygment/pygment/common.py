@@ -9,8 +9,9 @@ from collections import namedtuple
 Params = flax.core.FrozenDict[str, Any]
 InfoDict = Dict[str, float]
 PRNGKey = Any
-Batch = namedtuple('Batch', ['states', 'actions', 'rewards', 'discounted_rewards',
-                             'next_states', 'next_actions', 'dones'])
+fields = ['states', 'actions', 'rewards', 'discounted_rewards',
+          'next_states', 'next_actions', 'dones', 'action_logprobs']
+Batch = namedtuple('Batch', fields, defaults=(None,) * len(fields))
 
 
 def load_data(path: str,

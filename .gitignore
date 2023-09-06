@@ -1469,3 +1469,6 @@ pygment/experiments/tensorboard/current/events.out.tfevents.1693939193.eduroam-i
 pygment/experiments/tensorboard/current/events.out.tfevents.1693939376.eduroam-int-dhcp-97-26-196.ucl.ac.uk
 pygment/experiments/tensorboard/current/events.out.tfevents.1693939443.eduroam-int-dhcp-97-26-196.ucl.ac.uk
 pygment/experiments/tensorboard/current/events.out.tfevents.1693993041.eduroam-int-dhcp-97-26-196.ucl.ac.uk
+pygment/experiments/2023_9_06_103720/actor/checkpoint
+pygment/experiments/2023_9_06_103720/critic/checkpoint
+pygment/pygment/PPO/__pycache__/agent.cpython-310.pyc

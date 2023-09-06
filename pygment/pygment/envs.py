@@ -37,6 +37,8 @@ class VariableTimeSteps(gymnasium.Wrapper):
             return state, sequential_reward, done, prem_done, info
 
         time_steps = self._generate_time_steps(state)
+        """TEMPORARY!!! NEEDS REMOVING"""
+        time_steps = 0
 
         for step in range(2, time_steps + 2):
             state, reward, done, prem_done, info = self.step(action)

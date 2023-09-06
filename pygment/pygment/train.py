@@ -28,7 +28,7 @@ config = {'seed': 123,
 
 if __name__ == "__main__":
     from agent import IQLAgent
-    from common import load_data, Batch, progress_bar
+    from common import load_data,ss progress_bar
 
     # Set whether to train and/or evaluate
     train = True
