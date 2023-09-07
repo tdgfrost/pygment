@@ -9,6 +9,7 @@ import numpy as np
 import jax.numpy as jnp
 import jax
 import optax
+from jax import jit
 
 from typing import List, Optional, Sequence, Dict
 
@@ -141,10 +142,5 @@ class PPOAgent(BaseAgent):
         _, logits = self.actor(state)
         logprobs = jax.nn.log_softmax(logits)
         action = np.array(jax.random.categorical(key, logits, axis=-1))
-
-        if not action.shape:
-            action = action.item()
-            if action < 0:
-                print('hi')
 
         return action, logprobs
