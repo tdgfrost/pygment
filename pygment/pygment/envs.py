@@ -70,7 +70,7 @@ def generate_episodes(policy, envs, key=None, gamma=0.99):
 
     # Calculate the total reward for each episode
     episode_rewards = np.sum(flattened_rewards, axis=1).reshape(-1, 1)
-
+    """
     # Using the zero-padded rewards, calculate the discounted rewards
     discounted_rewards = jax.lax.scan(lambda agg, reward: (agg * gamma + reward, agg * gamma + reward),
                                       jnp.zeros(shape=num_envs), flattened_rewards.transpose(),
@@ -79,13 +79,20 @@ def generate_episodes(policy, envs, key=None, gamma=0.99):
     # Then convert the discounted rewards back to a non-padded list of lists
     discounted_rewards = [[ep[r_idx].item() for r_idx in flattened_idx[ep_idx]]
                           for ep_idx, ep in enumerate(np.array(discounted_rewards))]
-
+    """
     # Calculate the value function for each state in each episode
-    values = [np.array(policy.value(episode)[1]) for episode in all_states]
+    current_v = [np.array(policy.value(ep)[1]) for ep in all_states]
+
+    # Calculate the future discounted value for each step of each episode
+    next_v = [np.array(policy.value(ep)[1]) * ~np.array(dones) for ep, dones in zip(all_next_states, all_dones)]
+
+    # Calculate the current discounted value for each step of each episode
+    discounted_rewards = [[r + gamma * future_r for r, future_r in zip(ep_r, ep_next_v)]
+                          for ep_r, ep_next_v in zip(np.array(flattened_rewards), next_v)]
 
     # Calculate the advantage value for each step in each episode
     advantages = [[disc_r - value for disc_r, value in zip(ep_r, ep_val)]
-                  for ep_r, ep_val in zip(discounted_rewards, values)]
+                  for ep_r, ep_val in zip(discounted_rewards, current_v)]
 
     # Normalise the advantage values
     advantages_flattened = np.array([adv for ep in advantages for adv in ep])

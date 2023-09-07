@@ -36,17 +36,35 @@ def mse_loss(diff):
     return (diff ** 2).mean()
 
 
-def update_v(value: Model, batch: Batch) -> Tuple[Model, InfoDict]:
+def update_v(value: Model, batch: Batch, gamma: float) -> Tuple[Model, InfoDict]:
     """
     Function to update the Value network
 
     :param value: the Value network to be updated
     :param batch: a Batch object of samples
+    :param gamma: the discount factor
     :return: a tuple containing the new model parameters, plus metadata
     """
     # Get the discounted future reward
-    target_v = batch.discounted_rewards
 
+    target_v = batch.discounted_rewards
+    """
+    _, next_v = value(batch.next_states)
+
+    max_seq_len = max([len(seq) for seq in batch.rewards])
+    seq_rewards = jnp.array([[seq[i] if i < len(seq) else 0 for i in range(max_seq_len)] for seq in batch.rewards])
+
+    discounted_rewards = jax.lax.scan(lambda agg, reward: (agg * gamma + reward, agg * gamma + reward),
+                                      jnp.zeros(shape=seq_rewards.shape[0]), seq_rewards.transpose(),
+                                      reverse=True)[1].transpose()[:, 0]
+
+    gammas = jnp.ones(shape=discounted_rewards.shape[0]) * gamma
+    gammas = jnp.power(gammas, jnp.array([len(seq) for seq in batch.rewards]))
+
+    discounted_rewards = discounted_rewards + gammas * next_v * ~batch.dones
+
+    target_v = discounted_rewards + gamma * ~batch.dones * next_v
+    """
     def value_loss_fn(value_params: Params) -> tuple[Array, dict[str, Array]]:
         # Generate V(s) for the sample states
         layer_outputs, v = value.apply({'params': value_params}, batch.states)

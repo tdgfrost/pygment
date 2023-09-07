@@ -36,7 +36,7 @@ def ppo_loss(logprobs, old_logprobs, advantage, clip_ratio=0.2):
     return loss
 
 
-def update_policy(key: PRNGKey, actor: Model, batch: Batch) -> Tuple[Model, InfoDict]:
+def update_policy(key: PRNGKey, actor: Model, value, batch: Batch, gamma: float) -> Tuple[Model, InfoDict]:
     """
     Update the policy using the advantage-filtered logprobs
 

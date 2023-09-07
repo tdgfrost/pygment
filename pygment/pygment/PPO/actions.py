@@ -17,10 +17,10 @@ def _update_jit(
     batch: Batch, gamma: float
 ) -> tuple[Any, Model, Model, dict[Any, Any]]:
 
-    new_value, value_info = update_v(value, batch)
+    new_value, value_info = update_v(value, batch, gamma)
     key, rng = jax.random.split(rng)
 
-    new_actor, actor_info = update_policy(key, actor, batch)
+    new_actor, actor_info = update_policy(key, actor, value, batch, gamma)
 
     return rng, new_actor, new_value, {
         **value_info,
