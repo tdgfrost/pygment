@@ -5,51 +5,63 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 from sklearn.cluster import KMeans
-from stable_baselines3.common.env_util import make_vec_env
-from tensorboardX import SummaryWriter
+import wandb
 from tqdm import tqdm
+from stable_baselines3.common.env_util import make_vec_env
 
 # Set jax to CPU
-jax.config.update('jax_platform_name', 'cpu')
+# jax.config.update('jax_platform_name', 'cpu')
 # jax.config.update("jax_debug_nans", True)
-jax.config.update('jax_disable_jit', True)
+# jax.config.update('jax_disable_jit', True)
 
 # Define config file - could change to FLAGS at some point
 config = {'seed': 123,
           'epochs': int(1e6),
-          'batch_size': int(1e5),
+          'steps': 1000,
+          'batch_size': 64,
           'gamma': 0.9999,
           'actor_lr': 5e-3,
           'value_lr': 5e-3,
-          'hidden_dims': (512, 512),
+          'hidden_dims': (256, 256),
           'clipping': 1,
           }
 
 if __name__ == "__main__":
     from agent import PPOAgent
-    from common import load_data, progress_bar, Batch
-    from envs import VariableTimeSteps
+    from common import load_data, progress_bar, Batch, shuffle_batch
+    from envs import VariableTimeSteps, EpisodeGenerator
 
     # Set whether to train and/or evaluate
     train = True
     evaluate = True
 
     # Set the number of clusters to use
-    n_clusters = 10
+    n_clusters = 5
 
     # Load static dataset (dictionary)
-    data = load_data(path='../samples/GenerateStaticDataset/LunarLander/140 reward',
-                     scale='standardise',
-                     gamma=config['gamma'])['state']
+    data = load_data(
+        path='/Users/thomasfrost/Documents/Github/pygment/pygment/pygment/samples/GenerateStaticDataset/LunarLander/140 reward',
+        scale='standardise',
+        gamma=config['gamma'])['state']
 
     # Generate clustering function
     kmeans = KMeans(n_clusters=n_clusters,
-                    random_state=123).fit(data[:1e6])
+                    random_state=123,
+                    n_init='auto').fit(data[:int(1e6)])
 
     # Create environment and wrap in time-delay wrapper
-    env = gymnasium.envs.make('LunarLander-v2', max_episode_steps=1000)
-    env = VariableTimeSteps(env, fn=lambda x: kmeans.predict(x.reshape(1, -1))[0] if len(x.shape) == 1
-    else kmeans.predict(x))
+    def make_env(fn=None):
+        environment = VariableTimeSteps(gymnasium.envs.make('LunarLander-v2', max_episode_steps=500),
+                                        fn=fn)
+        return environment
+
+
+    # env = make_env(lambda x: kmeans.predict(x.reshape(1, -1))[0] if len(x.shape) == 1 else kmeans.predict(x))
+    env = make_env(fn=None)
+    envs = make_vec_env(lambda: make_env(fn=None), n_envs=20)
+
+    # Create episode generator
+    sampler = EpisodeGenerator(envs, gamma=config['gamma'])
 
     # Create agent
     agent = PPOAgent(observations=env.observation_space.sample(),
@@ -58,44 +70,57 @@ if __name__ == "__main__":
                      opt_decay_schedule="cosine",
                      **config)
 
-    # Prepare logging tensorboard
-    summary_writer = SummaryWriter('../experiments/tensorboard/current',
-                                   write_to_disk=True)
-    os.makedirs('../experiments/tensorboard/current/', exist_ok=True)
+    # Prepare logging
+    wandb.init(
+        project="PPO",
+        config=config,
+    )
 
     # Train agent
     if train:
+        # Generate initial log variables + random key
         best_actor_loss = jnp.inf
         key = jax.random.PRNGKey(123)
         count = 0
-        for episode in tqdm(range(config['epochs'])):
-            state, _ = env.reset()
-            done, prem_done = False, False
+
+        # Generate initial batch
+        batch, key = sampler(agent, key=key)
+
+        # Train agent
+        for epoch in tqdm(range(config['epochs'])):
+            actor_loss = 0
+            critic_loss = 0
+
+            for update_iter in range(5):
+                shuffled_batch = shuffle_batch(batch,
+                                               key,
+                                               steps=config['steps'],
+                                               batch_size=config['batch_size'])
+                # Iterate through each sample in the batch
+                for sample in shuffled_batch:
+                    # Update the agent
+                    loss_info = agent.update(sample)
+
+                    # Update the loss
+                    actor_loss += loss_info['actor_loss'].item()
+                    critic_loss += loss_info['value_loss'].item()
+
+            # Reset the jax key
             key = jax.random.split(key, 1)[0]
-            actor_loss = []
-            critic_loss = []
-            ep_reward = 0
 
-            while not done and not prem_done:
-                action, action_logprobs = agent.sample_action(state, key)
+            # Generate the next batch using the updated agent
+            batch, key = sampler(agent, key=key)
 
-                next_state, reward, done, prem_done, _ = env.step(action)
+            # Check the value function is training correctly
+            disc_r = np.array([r for ep in batch.discounted_rewards for r in ep])
+            v = np.array(agent.value([s for ep in batch.states for s in ep])[1])
+            tmp_idx = np.random.permutation([i for i in range(len(disc_r))])[:5]
+            print('\nDiscounted rewards: ', disc_r[tmp_idx])
+            print('Value function: ', v[tmp_idx])
 
-                loss_info = agent.update(Batch(states=state,
-                                               actions=action,
-                                               rewards=reward,
-                                               next_states=next_state,
-                                               dones=done,
-                                               action_logprobs=action_logprobs))
+            # Calculate the average reward (for logging purposes)
+            average_reward = np.mean(batch.episode_rewards)
 
-                actor_loss += loss_info['actor_loss']
-                critic_loss += loss_info['critic_loss']
-                ep_reward += reward
-
-                key = jax.random.split(key, 1)[0]
-
-            actor_loss = np.array(actor_loss).mean()
-            critic_loss = np.array(critic_loss).mean()
             """
             # Record best loss
             if loss_info[loss_key] < best_loss:
@@ -115,19 +140,10 @@ if __name__ == "__main__":
                         os.path.join('../experiments', agent.path, 'value')) if value else agent.value
                     break
             """
-            # Log intermittently
-            if episode % 1 == 0:
-                """
-                for key, val in loss_info.items():
-                    if key == 'layer_outputs':
-                        continue
-                    if val.ndim == 0:
-                        summary_writer.add_scalar(f'training/{key}', val, epoch)
-                summary_writer.flush()
-                """
-                summary_writer.add_scalar(f'training/actor_loss', actor_loss, episode)
-                summary_writer.add_scalar(f'training/critic_loss', critic_loss, episode)
-                summary_writer.add_scalar(f'training/episode_reward', ep_reward, episode)
+            # Log results
+            wandb.log({'actor_loss': actor_loss,
+                       'critic_loss': critic_loss,
+                       'episode_reward': average_reward})
 
     """
     Time to evaluate!
@@ -142,15 +158,11 @@ if __name__ == "__main__":
         envs_to_evaluate = 1000
 
 
-        def make_env():
-            env = gymnasium.envs.make('LunarLander-v2', max_episode_steps=max_episode_steps)
-            return env
-
-
-        def evaluate_envs(nodes=10):
+        def evaluate_envs(policy, nodes=10):
             """
             Evaluate the agent across vectorised episodes.
 
+            :param policy: policy to evaluate.
             :param nodes: number of episodes to evaluate.
             :return: array of total rewards for each episode.
             """
@@ -168,7 +180,7 @@ if __name__ == "__main__":
                 step += 1
                 progress_bar(step, max_episode_steps)
                 # Step through environments
-                actions = np.array(agent.sample_action(states, key))
+                actions = np.array(policy.sample_action(states, key))
                 states, rewards, new_dones, prem_dones = envs.step(actions)
 
                 # Update finished environments
@@ -186,5 +198,5 @@ if __name__ == "__main__":
             return all_rewards
 
 
-        results = evaluate_envs(envs_to_evaluate)
+        results = evaluate_envs(agent, envs_to_evaluate)
         print(f'\nMedian reward: {np.median(results)}')

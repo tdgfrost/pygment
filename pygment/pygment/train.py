@@ -28,7 +28,7 @@ config = {'seed': 123,
 
 if __name__ == "__main__":
     from agent import IQLAgent
-    from common import load_data,ss progress_bar
+    from common import load_data, progress_bar
 
     # Set whether to train and/or evaluate
     train = True
@@ -124,6 +124,7 @@ if __name__ == "__main__":
             """
             Evaluate the agent across vectorised episodes.
 
+            :param policy: the policy agent to deploy
             :param nodes: number of episodes to evaluate.
             :return: array of total rewards for each episode.
             """

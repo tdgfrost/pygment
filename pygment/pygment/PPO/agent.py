@@ -140,10 +140,11 @@ class PPOAgent(BaseAgent):
         key = jax.random.PRNGKey(123) if key is None else key
         _, logits = self.actor(state)
         logprobs = jax.nn.log_softmax(logits)
-        action = jax.random.categorical(key, logits, axis=-1)
-        action_logprobs = logprobs[action]
+        action = np.array(jax.random.categorical(key, logits, axis=-1))
 
         if not action.shape:
             action = action.item()
+            if action < 0:
+                print('hi')
 
-        return action, action_logprobs
+        return action, logprobs

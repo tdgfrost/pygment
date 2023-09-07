@@ -3,14 +3,15 @@ import jax.numpy as jnp
 from typing import AnyStr, Dict, Any, List
 import flax
 from jax import lax
+import jax
 from collections import namedtuple
 
 # Specify types
 Params = flax.core.FrozenDict[str, Any]
 InfoDict = Dict[str, float]
 PRNGKey = Any
-fields = ['states', 'actions', 'rewards', 'discounted_rewards',
-          'next_states', 'next_actions', 'dones', 'action_logprobs']
+fields = ['states', 'actions', 'rewards', 'discounted_rewards', 'episode_rewards',
+          'next_states', 'next_actions', 'dones', 'action_logprobs', 'advantages']
 Batch = namedtuple('Batch', fields, defaults=(None,) * len(fields))
 
 
@@ -39,7 +40,7 @@ def load_data(path: str,
 
     elif scale == "normalise":
         loaded_data['rewards'] = (loaded_data['original_rewards'] - loaded_data['original_rewards'].min()) / (
-                    loaded_data['original_rewards'].max() - loaded_data['original_rewards'].min())
+                loaded_data['original_rewards'].max() - loaded_data['original_rewards'].min())
 
     else:
         loaded_data['rewards'] = loaded_data['original_rewards']
@@ -106,3 +107,41 @@ def progress_bar(iteration, total_iterations):
     print(f'\r{progress} {percent_complete}% complete', end='', flush=True)
     return
 
+
+def shuffle_batch(batch: Batch, random_key, steps=1000, batch_size=64):
+    # Define the random generator
+    rand_gen = np.random.default_rng(random_key[0].item())
+
+    # Change batch to list of tuples (agnostic to the labels)
+    data = []
+    for key, val in batch._asdict().items():
+        if val is None:
+            continue
+        data += [(key, np.array([step for episode in val for step in episode])
+                    if key != 'rewards' else [step for episode in val for step in episode])]
+
+    # Create shuffled indexes
+    available_steps = len(data[0][1])
+    idxs = rand_gen.choice([i for i in range(available_steps)],
+                           size=(min(steps, available_steps) // batch_size, batch_size),
+                           replace=False)
+
+    # Iterate through and generate each set of shuffled samples
+    for sample_idxs in idxs:
+        shuffled_batch = {'episode_rewards': batch.episode_rewards}
+
+        # Iterate through each feature and shuffle
+        for key, val in data:
+
+            # Skip the episode rewards (not used for training)
+            if key == 'episode_rewards':
+                continue
+            # For the rewards, keep as a list of (irregular) lists
+            elif key == 'rewards':
+                shuffled_batch[key] = [val[i] for i in sample_idxs]
+
+            # Return the remaining features as a NumPy array
+            else:
+                shuffled_batch[key] = val[sample_idxs]
+
+        yield Batch(**shuffled_batch)

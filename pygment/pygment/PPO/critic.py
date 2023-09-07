@@ -3,6 +3,7 @@ from jax import Array
 from agent import Model
 from common import Params, InfoDict, Batch
 
+import numpy as np
 import jax.numpy as jnp
 import jax
 
@@ -35,19 +36,16 @@ def mse_loss(diff):
     return (diff ** 2).mean()
 
 
-def update_v(value: Model, batch: Batch, gamma: float) -> Tuple[Model, InfoDict]:
+def update_v(value: Model, batch: Batch) -> Tuple[Model, InfoDict]:
     """
     Function to update the Value network
 
     :param value: the Value network to be updated
     :param batch: a Batch object of samples
-    :param gamma: the discount factor
     :return: a tuple containing the new model parameters, plus metadata
     """
-    # Get the next state values from the target value network
-    _, next_v = value(batch.next_states)
-
-    target_v = batch.rewards + gamma * next_v * batch.dones
+    # Get the discounted future reward
+    target_v = batch.discounted_rewards
 
     def value_loss_fn(value_params: Params) -> tuple[Array, dict[str, Array]]:
         # Generate V(s) for the sample states

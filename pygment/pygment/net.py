@@ -229,7 +229,7 @@ class Model:
     mean_outputs: Sequence[jnp.ndarray] = None
     bias_corrected_util: Sequence[jnp.ndarray] = None
     decay_rate: float = 0.99
-    replacement_rate: float = 0.001
+    replacement_rate: float = 0.005
     maturity_threshold: int = 20
 
     @classmethod
@@ -316,14 +316,14 @@ class Model:
 
         # Calculate the new parameters
         new_params = optax.apply_updates(self.params, updates)
-
+        """
         # Identify the lowest utility nodes to be replaced - as per "Loss of Plasticity in Deep Continual Learning"
         features_to_replace, num_features_to_replace = self.choose_features(outputs=info['layer_outputs'],
                                                                             new_params=new_params)
 
         # Update the new parameters with re-initialised low utility nodes, as required
         new_params = self.gen_new_features(features_to_replace, new_params)
-
+        """
         # Returns a COPY with the new parameters and optimiser state, as well as the metadata
         return self.replace(params=new_params,
                             opt_state=new_opt_state), info
