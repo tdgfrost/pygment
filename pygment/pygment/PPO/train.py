@@ -19,6 +19,7 @@ config = {'seed': 123,
           'epochs': int(1e6),
           'steps': 1000,
           'batch_size': 64,
+          'n_envs': 5,
           'gamma': 0.9999,
           'actor_lr': 5e-3,
           'value_lr': 5e-3,
@@ -58,7 +59,7 @@ if __name__ == "__main__":
 
     # env = make_env(lambda x: kmeans.predict(x.reshape(1, -1))[0] if len(x.shape) == 1 else kmeans.predict(x))
     env = make_env(fn=None)
-    envs = make_vec_env(lambda: make_env(fn=None), n_envs=20)
+    envs = make_vec_env(lambda: make_env(fn=None), n_envs=config['n_envs'])
 
     # Create episode generator
     sampler = EpisodeGenerator(envs, gamma=config['gamma'])
@@ -69,13 +70,13 @@ if __name__ == "__main__":
                      dropout_rate=None,
                      opt_decay_schedule="cosine",
                      **config)
-
+    """
     # Prepare logging
     wandb.init(
         project="PPO",
         config=config,
     )
-
+    """
     # Train agent
     if train:
         # Generate initial log variables + random key

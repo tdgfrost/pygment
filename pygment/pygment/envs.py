@@ -82,19 +82,19 @@ def generate_episodes(policy, envs, key=None, gamma=0.99):
                           for ep_idx, ep in enumerate(np.array(discounted_rewards))]
 
     # Calculate the value function for each state in each episode
-    current_v = [np.array(policy.value(ep)[1]) for ep in all_states]
-    """
-    # Calculate the future discounted value for each step of each episode
-    next_v = [np.array(policy.value(ep)[1]) * ~np.array(dones) for ep, dones in zip(all_next_states, all_dones)]
+    current_vs = [np.array(policy.value(ep)[1]) for ep in all_states]
 
-    # Calculate the current discounted value for each step of each episode
-    discounted_rewards = [[r + gamma * future_r for r, future_r in zip(ep_r, ep_next_v)]
-                          for ep_r, ep_next_v in zip(np.array(flattened_rewards), next_v)]
+    # Calculate the future discounted value for each step of each episode
+    next_vs = [np.array(policy.value(ep)[1]) * ~np.array(dones) for ep, dones in zip(all_next_states, all_dones)]
+
+    # Calculate the advantage value for each step in each episode
+    advantages = [[r + gamma * next_v - current_v for r, next_v, current_v in zip(ep_r, ep_next_v, ep_current_v)]
+                          for ep_r, ep_next_v, ep_current_v in zip(np.array(flattened_rewards), next_vs, current_vs)]
     """
     # Calculate the advantage value for each step in each episode
     advantages = [[disc_r - value for disc_r, value in zip(ep_r, ep_val)]
                   for ep_r, ep_val in zip(discounted_rewards, current_v)]
-
+    """
     # Normalise the advantage values
     advantages_flattened = np.array([adv for ep in advantages for adv in ep])
     advantages = [[(adv - advantages_flattened.mean()) / (advantages_flattened.std() + 1e-8)
