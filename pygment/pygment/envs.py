@@ -50,7 +50,7 @@ def generate_episodes(policy, envs, key=None, gamma=0.99):
         # Update record
         [all_states[i].append(states[i]) for i in active_idx]
         [all_actions[i].append(actions[i]) for i in active_idx]
-        [all_action_logprobs[i].append(np.array(action_logprobs)[i][actions[i]]) for i in active_idx]
+        [all_action_logprobs[i].append(action_logprobs[i, actions[i]]) for i in active_idx]
         [all_rewards[i].append(rewards[i]) for i in active_idx]
         [flattened_rewards[i].extend(rewards[i]) for i in active_idx]
         [all_next_states[i].append(next_states[i]) for i in active_idx]
@@ -62,43 +62,40 @@ def generate_episodes(policy, envs, key=None, gamma=0.99):
         key = jax.random.split(key, num=1)[0]
 
     # For variable time delays, find the index of when an action is taken (relative to each episode step)
-    flattened_idx = [[i for i in range(len(flattened_ep)) if flattened_ep[i] == seq_ep[i][0]]
-                     for flattened_ep, seq_ep in zip(flattened_rewards, all_rewards)]
+    action_idxs = [np.concatenate((np.array([0]), np.cumsum(np.array([len(r) for r in ep]))), axis=-1)[:-1]
+                   for ep in all_rewards]
 
     # Zero-pad the rewards to the length of the longest episode and convert to Jax array
-    flattened_rewards = jnp.array([[ep[i] if i < len(ep) else 0 for i in range(longest_episode)]
-                                   for ep in flattened_rewards])
+    flattened_rewards = np.array([[ep[i] if i < len(ep) else 0 for i in range(longest_episode)]
+                                  for ep in flattened_rewards])
 
     # Calculate the total reward for each episode
     episode_rewards = np.sum(flattened_rewards, axis=1).reshape(-1, 1)
 
     # Using the zero-padded rewards, calculate the discounted rewards
-    discounted_rewards = jax.lax.scan(lambda agg, reward: (agg * gamma + reward, agg * gamma + reward),
-                                      jnp.zeros(shape=num_envs), flattened_rewards.transpose(),
-                                      reverse=True)[1].transpose()
+    discounter = np.frompyfunc(lambda agg, reward: agg * gamma + reward, 2, 1).accumulate
+    discounted_rewards = np.flip(discounter(np.flip(flattened_rewards, -1), axis=-1), -1).astype(np.float32)
 
     # Then convert the discounted rewards back to a non-padded list of lists
-    discounted_rewards = [[ep[r_idx].item() for r_idx in flattened_idx[ep_idx]]
-                          for ep_idx, ep in enumerate(np.array(discounted_rewards))]
+    discounted_rewards = [ep[action_idx] for action_idx, ep in zip(action_idxs, np.array(discounted_rewards))]
 
     # Calculate the value function for each state in each episode
-    current_vs = [np.array(policy.value(ep)[1]) for ep in all_states]
-
+    # current_vs = [np.array(policy.value(np.array(ep))[1]) for ep in all_states]
+    """
     # Calculate the future discounted value for each step of each episode
-    next_vs = [np.array(policy.value(ep)[1]) * ~np.array(dones) for ep, dones in zip(all_next_states, all_dones)]
+    next_vs = [np.array(policy.value(jnp.array(ep))[1]) * ~np.array(dones) for ep, dones in zip(all_next_states, all_dones)]
 
     # Calculate the advantage value for each step in each episode
     advantages = [[r + gamma * next_v - current_v for r, next_v, current_v in zip(ep_r, ep_next_v, ep_current_v)]
                           for ep_r, ep_next_v, ep_current_v in zip(np.array(flattened_rewards), next_vs, current_vs)]
     """
     # Calculate the advantage value for each step in each episode
-    advantages = [[disc_r - value for disc_r, value in zip(ep_r, ep_val)]
-                  for ep_r, ep_val in zip(discounted_rewards, current_v)]
-    """
+    # advantages = [ep_r - ep_v for ep_r, ep_v in zip(discounted_rewards, current_vs)]
+
     # Normalise the advantage values
-    advantages_flattened = np.array([adv for ep in advantages for adv in ep])
-    advantages = [[(adv - advantages_flattened.mean()) / (advantages_flattened.std() + 1e-8)
-                   for adv in ep] for ep in advantages]
+    # advantages_flattened = np.concatenate(advantages)
+    # advantages = [(ep - advantages_flattened.mean()) / np.maximum(advantages_flattened.std(), 1e-8)
+                  # for ep in advantages]
 
     # Return a Batch
     return Batch(states=all_states,
@@ -108,8 +105,8 @@ def generate_episodes(policy, envs, key=None, gamma=0.99):
                  discounted_rewards=discounted_rewards,
                  next_states=all_next_states,
                  dones=all_dones,
-                 episode_rewards=episode_rewards,
-                 advantages=advantages), key
+                 episode_rewards=episode_rewards), key
+                 #advantages=advantages), key
 
 
 class EpisodeGenerator:

@@ -36,7 +36,7 @@ def mse_loss(diff):
     return (diff ** 2).mean()
 
 
-def update_v(value: Model, batch: Batch, gamma: float) -> Tuple[Model, InfoDict]:
+def update_v(value: Model, batch: Batch) -> Tuple[Model, InfoDict]:
     """
     Function to update the Value network
 

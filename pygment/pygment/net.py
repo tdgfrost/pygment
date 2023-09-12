@@ -64,17 +64,20 @@ class MLP(nn.Module):
             """
             if i + 1 < len(self.hidden_dims) or self.activate_final:
                 x = self.activations(x)
-
+            
                 # Apply dropout (deterministically during evaluation)
                 if self.dropout_rate is not None:
                     x = nn.Dropout(rate=self.dropout_rate)(x, deterministic=not training)
+            
             """
-            x = jax.lax.cond(
-                i + 1 < len(self.hidden_dims) or self.activate_final,
-                lambda tensor: self.activations(tensor),
-                lambda tensor: tensor,
-                operand=x
+            before_final_layer = i + 1 < len(self.hidden_dims) or self.activate_final
+
+            x = jax.lax.select(
+                before_final_layer,
+                self.activations(x),
+                x
             )
+
             layer_outputs[i] = x.copy()
 
         return layer_outputs, x
@@ -237,7 +240,7 @@ class Model:
     mean_outputs: Sequence[jnp.ndarray] = None
     bias_corrected_util: Sequence[jnp.ndarray] = None
     decay_rate: float = 0.99
-    replacement_rate: float = 0.001
+    replacement_rate: float = 0.01
     maturity_threshold: int = 100
 
     @classmethod
@@ -290,6 +293,7 @@ class Model:
                    mean_outputs=mean_outputs,
                    bias_corrected_util=bias_corrected_util)
 
+    @jit
     def __call__(self, *args):
         """
         Forward pass through the neural network.
@@ -324,14 +328,14 @@ class Model:
 
         # Calculate the new parameters
         new_params = optax.apply_updates(self.params, updates)
-        """
+
         # Identify the lowest utility nodes to be replaced - as per "Loss of Plasticity in Deep Continual Learning"
         features_to_replace, num_features_to_replace = self.choose_features(outputs=info['layer_outputs'],
                                                                             new_params=new_params)
 
         # Update the new parameters with re-initialised low utility nodes, as required
         new_params = self.gen_new_features(features_to_replace, new_params)
-        """
+
         # Returns a COPY with the new parameters and optimiser state, as well as the metadata
         return self.replace(params=new_params,
                             opt_state=new_opt_state), info
@@ -465,7 +469,7 @@ class Model:
                 current_layer['bias'] = reset(current_layer['bias'], features_to_replace[key][layer_idx])
 
                 # Re-initialize the input weights randomly
-                new_weights = default_initializer()(jax.random.PRNGKey(0),
+                new_weights = default_initializer()(jax.random.PRNGKey(np.random.randint(int(1e9))),
                                                     shape=current_layer['kernel'].shape)
 
                 current_layer['kernel'] = reset(current_layer['kernel'],

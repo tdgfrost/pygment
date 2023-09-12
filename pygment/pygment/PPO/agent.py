@@ -9,9 +9,11 @@ import numpy as np
 import jax.numpy as jnp
 import jax
 import optax
-from jax import jit
+from jax import jit, nn
+from scipy.special import log_softmax
 
 from typing import List, Optional, Sequence, Dict
+from functools import partial
 
 
 class BaseAgent:
@@ -120,7 +122,7 @@ class PPOAgent(BaseAgent):
         # Create an updated copy of all the networks
         new_rng, new_actor, new_value, info = _update_jit(
             self.rng, self.actor, self.value,
-            batch, self.gamma)
+            batch)
 
         # Update the agent's networks with the updated copies
         self.rng = new_rng
@@ -130,7 +132,7 @@ class PPOAgent(BaseAgent):
         # Return the metadata
         return info
 
-    def sample_action(self, state, key=None):
+    def sample_action(self, state, key=jax.random.PRNGKey(123)):
         """
         Chooses an action based on the current state.
 
@@ -138,9 +140,15 @@ class PPOAgent(BaseAgent):
         :param key: a PRNGKey.
         :return: an action (as an integer if a single state, or an Array if multiple states)
         """
-        key = jax.random.PRNGKey(123) if key is None else key
-        _, logits = self.actor(state)
-        logprobs = jax.nn.log_softmax(logits)
-        action = np.array(jax.random.categorical(key, logits, axis=-1))
 
-        return action, logprobs
+        _, logits = self.actor(state)
+
+        action, logprobs = self._sample_action_jit(logits, key)
+        return np.array(action), np.array(logprobs)
+
+    @staticmethod
+    @jit
+    def _sample_action_jit(logits, key):
+        log_probs = nn.log_softmax(logits, axis=-1)
+        action = jax.random.categorical(key, logits, axis=-1)
+        return action, log_probs

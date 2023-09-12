@@ -64,6 +64,7 @@ def update_policy(key: PRNGKey, actor: Model, batch: Batch) -> Tuple[Model, Info
 
     # Get old action logprobs
     old_logprobs = batch.action_logprobs
+    actions = batch.actions
 
     """
     q = jax.lax.gather(q,
@@ -88,22 +89,28 @@ def update_policy(key: PRNGKey, actor: Model, batch: Batch) -> Tuple[Model, Info
                                             training=True,
                                             rngs={'dropout': key})
 
+        logprobs = nn.log_softmax(logits, axis=-1)
+
         # Convert this to logprobs
-        action_logprobs = jax.lax.gather(nn.log_softmax(logits),
-                                         jnp.concatenate((jnp.arange(len(batch.actions)).reshape(-1, 1), batch.actions.reshape(-1, 1)),
-                                                         axis=1),
-                                         jax.lax.GatherDimensionNumbers(
-                                             offset_dims=tuple([]),
-                                             collapsed_slice_dims=tuple([0, 1]),
-                                             start_index_map=tuple([0, 1])), tuple([1, 1]))
+        """
+        This doesn't work with METAL currently
+        action_logprobs = jnp.take_along_axis(nn.log_softmax(logits, axis=-1),
+                                              batch.actions.reshape(-1, 1), axis=-1).flatten()
+        """
+        action_logprobs = jax.lax.gather(logprobs,
+                                         jnp.concatenate((jnp.arange(len(actions)).reshape(-1, 1),
+                                                          actions.reshape(-1, 1)), axis=1),
+                                         jax.lax.GatherDimensionNumbers(offset_dims=tuple([]),
+                                                                        collapsed_slice_dims=tuple([0, 1]),
+                                                                        start_index_map=tuple([0, 1])), tuple([1, 1]))
 
         # Calculate the loss for the actor model
         actor_loss = ppo_loss(action_logprobs, old_logprobs, advantage, clip_ratio=0.2)
 
         # Return the loss value, plus metadata
         return actor_loss, {'actor_loss': actor_loss,
-                            'layer_outputs': layer_outputs,
-                            }
+                      'layer_outputs': layer_outputs,
+                      }
 
     # Calculate the updated model parameters using the loss function
     new_actor, info = actor.apply_gradient(actor_loss_fn)

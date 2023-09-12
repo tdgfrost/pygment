@@ -8,6 +8,7 @@ from sklearn.cluster import KMeans
 import wandb
 from tqdm import tqdm
 from stable_baselines3.common.env_util import make_vec_env
+from stable_baselines3 import PPO
 
 # Set jax to CPU
 # jax.config.update('jax_platform_name', 'cpu')
@@ -19,8 +20,8 @@ config = {'seed': 123,
           'epochs': int(1e6),
           'steps': 1000,
           'batch_size': 64,
-          'n_envs': 5,
-          'gamma': 0.9999,
+          'n_envs': 512,
+          'gamma': 0.999,
           'actor_lr': 5e-3,
           'value_lr': 5e-3,
           'hidden_dims': (256, 256),
@@ -29,7 +30,7 @@ config = {'seed': 123,
 
 if __name__ == "__main__":
     from agent import PPOAgent
-    from common import load_data, progress_bar, Batch, shuffle_batch
+    from common import load_data, progress_bar, Batch, shuffle_batch, alter_batch
     from envs import VariableTimeSteps, EpisodeGenerator
 
     # Set whether to train and/or evaluate
@@ -46,10 +47,11 @@ if __name__ == "__main__":
         gamma=config['gamma'])['state']
 
     # Generate clustering function
+    """
     kmeans = KMeans(n_clusters=n_clusters,
                     random_state=123,
                     n_init='auto').fit(data[:int(1e6)])
-
+    """
     # Create environment and wrap in time-delay wrapper
     def make_env(fn=None):
         environment = VariableTimeSteps(gymnasium.envs.make('LunarLander-v2', max_episode_steps=500),
@@ -70,13 +72,13 @@ if __name__ == "__main__":
                      dropout_rate=None,
                      opt_decay_schedule="cosine",
                      **config)
-    """
+
     # Prepare logging
     wandb.init(
         project="PPO",
         config=config,
     )
-    """
+
     # Train agent
     if train:
         # Generate initial log variables + random key
@@ -93,6 +95,16 @@ if __name__ == "__main__":
             critic_loss = 0
 
             for update_iter in range(5):
+                # Every iteration, the advantage should be re-calculated
+                batch_state_values = [np.array(agent.value(np.array(ep))[1]) for ep in batch.states]
+                advantages = [ep_r - ep_v for ep_r, ep_v in zip(batch.discounted_rewards, batch_state_values)]
+                adv_mean = np.concatenate(advantages).mean()
+                adv_std = np.maximum(np.concatenate(advantages).std(), 1e-8)
+                advantages = [(adv - adv_mean) / adv_std for adv in advantages]
+
+                batch = alter_batch(batch, advantages=advantages)
+
+                # Shuffle the batch
                 shuffled_batch = shuffle_batch(batch,
                                                key,
                                                steps=config['steps'],
@@ -114,7 +126,7 @@ if __name__ == "__main__":
 
             # Check the value function is training correctly
             disc_r = np.array([r for ep in batch.discounted_rewards for r in ep])
-            v = np.array(agent.value([s for ep in batch.states for s in ep])[1])
+            v = np.array(agent.value(np.array([s for ep in batch.states for s in ep]))[1])
             tmp_idx = np.random.permutation([i for i in range(len(disc_r))])[:5]
             print('\nDiscounted rewards: ', disc_r[tmp_idx])
             print('Value function: ', v[tmp_idx])

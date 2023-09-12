@@ -8,7 +8,7 @@ from collections import namedtuple
 
 # Specify types
 Params = flax.core.FrozenDict[str, Any]
-InfoDict = Dict[str, float]
+InfoDict = Dict[str, Any]
 PRNGKey = Any
 fields = ['states', 'actions', 'rewards', 'discounted_rewards', 'episode_rewards',
           'next_states', 'next_actions', 'dones', 'action_logprobs', 'advantages']
@@ -142,6 +142,28 @@ def shuffle_batch(batch: Batch, random_key, steps=1000, batch_size=64):
 
             # Return the remaining features as a NumPy array
             else:
-                shuffled_batch[key] = val[sample_idxs]
+                shuffled_batch[key] = jnp.array(val[sample_idxs]).astype(jnp.float32) if val.dtype == np.float64 \
+                    else (jnp.array(val[sample_idxs]).astype(jnp.int32) if val.dtype == np.int64 else val[sample_idxs])
 
         yield Batch(**shuffled_batch)
+
+
+def alter_batch(batch, **kwargs):
+    """
+    Alter the batch by adding or removing features
+    :param batch: Batch object
+    :param kwargs: Dict of features to add or remove
+    :return: Batch object
+    """
+    # Convert the batch to a dictionary
+    batch = batch._asdict()
+
+    # Iterate through the kwargs
+    for key, val in kwargs.items():
+        batch[key] = val
+
+    # Convert the batch back to a Batch object
+    batch = Batch(**batch)
+
+    return batch
+

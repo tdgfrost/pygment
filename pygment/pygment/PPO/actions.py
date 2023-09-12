@@ -14,10 +14,10 @@ from net import Model
 @jit
 def _update_jit(
     rng: PRNGKey, actor: Model, value: Model,
-    batch: Batch, gamma: float
+    batch: Batch
 ) -> tuple[PRNGKey, Model, Model, dict[Any, Any]]:
 
-    new_value, value_info = update_v(value, batch, gamma)
+    new_value, value_info = update_v(value, batch)
     key, rng = jax.random.split(rng)
 
     new_actor, actor_info = update_policy(key, actor, batch)
