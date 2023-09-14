@@ -72,9 +72,7 @@ def update_policy(key: PRNGKey, actor: Model, batch: Batch) -> Tuple[Model, Info
 
         # Generate the logits for the actions
         layer_outputs, logits = actor.apply({'params': actor_params},
-                                            batch.states,
-                                            training=True,
-                                            rngs={'dropout': key})
+                                            batch.states)
 
         logprobs = nn.log_softmax(logits, axis=-1)
 

@@ -141,7 +141,6 @@ def shuffle_split_batch(batch: Batch, steps=1000, batch_size=64):
                 shuffled_batch[key] = jnp.array(val[sample_idxs]).astype(jnp.float32) if val.dtype == np.float64 \
                     else (jnp.array(val[sample_idxs]).astype(jnp.int32) if val.dtype == np.int64
                           else jnp.array(val[sample_idxs]))
-
         yield Batch(**shuffled_batch)
 
 

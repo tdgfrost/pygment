@@ -25,17 +25,6 @@ def expectile_loss(diff, expectile=0.8):
     return weight * jnp.log(diff ** 2 / 2 + 1)
 
 
-def mse_loss(diff):
-    """
-    Calculates the mean squared error loss function for the residuals.
-
-    :param diff: the error term
-    :return: the loss term
-    """
-
-    return (diff ** 2).mean()
-
-
 def update_v(value: Model, batch: Batch) -> Tuple[Model, InfoDict]:
     """
     Function to update the Value network
@@ -53,7 +42,7 @@ def update_v(value: Model, batch: Batch) -> Tuple[Model, InfoDict]:
         layer_outputs, v = value.apply({'params': value_params}, batch.states)
 
         # Calculate the loss for V using Q with expectile regression
-        value_loss = mse_loss(v - target_v)
+        value_loss = ((v - target_v)**2).mean()
 
         # Return the loss value, plus metadata
         return value_loss, {
