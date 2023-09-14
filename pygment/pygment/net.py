@@ -241,7 +241,7 @@ class Model:
     bias_corrected_util: Sequence[jnp.ndarray] = None
     decay_rate: float = 0.99
     replacement_rate: float = 0.01
-    maturity_threshold: int = 100
+    maturity_threshold: int = 50
 
     @classmethod
     def create(cls,

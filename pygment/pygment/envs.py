@@ -32,11 +32,9 @@ def generate_episodes(policy, envs, key=None, gamma=0.99):
     all_next_states = [[] for _ in range(num_envs)]
     all_dones = [[] for _ in range(num_envs)]
     active_idx = np.array([i for i in range(num_envs)])
-    longest_episode = 0
 
     # Complete all episodes
     while active_idx.any():
-        longest_episode += 1
         # Step through environments
         actions, action_logprobs = policy.sample_action(states, key)
 
@@ -61,6 +59,9 @@ def generate_episodes(policy, envs, key=None, gamma=0.99):
         states = next_states
         key = jax.random.split(key, num=1)[0]
 
+    # Find the longest episode
+    longest_episode = max([len([r for seq in ep for r in seq]) for ep in all_rewards])
+
     # For variable time delays, find the index of when an action is taken (relative to each episode step)
     action_idxs = [np.concatenate((np.array([0]), np.cumsum(np.array([len(r) for r in ep]))), axis=-1)[:-1]
                    for ep in all_rewards]
@@ -77,25 +78,7 @@ def generate_episodes(policy, envs, key=None, gamma=0.99):
     discounted_rewards = np.flip(discounter(np.flip(flattened_rewards, -1), axis=-1), -1).astype(np.float32)
 
     # Then convert the discounted rewards back to a non-padded list of lists
-    discounted_rewards = [ep[action_idx] for action_idx, ep in zip(action_idxs, np.array(discounted_rewards))]
-
-    # Calculate the value function for each state in each episode
-    # current_vs = [np.array(policy.value(np.array(ep))[1]) for ep in all_states]
-    """
-    # Calculate the future discounted value for each step of each episode
-    next_vs = [np.array(policy.value(jnp.array(ep))[1]) * ~np.array(dones) for ep, dones in zip(all_next_states, all_dones)]
-
-    # Calculate the advantage value for each step in each episode
-    advantages = [[r + gamma * next_v - current_v for r, next_v, current_v in zip(ep_r, ep_next_v, ep_current_v)]
-                          for ep_r, ep_next_v, ep_current_v in zip(np.array(flattened_rewards), next_vs, current_vs)]
-    """
-    # Calculate the advantage value for each step in each episode
-    # advantages = [ep_r - ep_v for ep_r, ep_v in zip(discounted_rewards, current_vs)]
-
-    # Normalise the advantage values
-    # advantages_flattened = np.concatenate(advantages)
-    # advantages = [(ep - advantages_flattened.mean()) / np.maximum(advantages_flattened.std(), 1e-8)
-                  # for ep in advantages]
+    discounted_rewards = [ep[action_idx] for action_idx, ep in zip(action_idxs, discounted_rewards)]
 
     # Return a Batch
     return Batch(states=all_states,
@@ -155,26 +138,23 @@ class VariableTimeSteps(gymnasium.Wrapper):
             info['sequential_reward'] = sequential_reward
             return state, total_reward, done, prem_done, info
 
-        time_steps = self._generate_time_steps(state)
-        """TEMPORARY"""
-        time_steps = 0
-        """TEMPORARY"""
+        extra_time_steps = self._generate_extra_time_steps(state)
 
-        for step in range(2, time_steps + 2):
+        for extra_step in range(1, extra_time_steps + 1):
             state, reward, done, prem_done, info = super().step(action)
             sequential_reward += [reward]
             total_reward += reward
 
             if done or prem_done:
-                info['time_steps'] = step
+                info['time_steps'] = extra_step + 1
                 info['sequential_reward'] = sequential_reward
                 return state, total_reward, done, prem_done, info
 
-        info['time_steps'] = time_steps + 1
+        info['time_steps'] = extra_time_steps + 1
         info['sequential_reward'] = sequential_reward
         return state, total_reward, done, prem_done, info
 
-    def _generate_time_steps(self, state):
+    def _generate_extra_time_steps(self, state):
         if self.fn is None:
             return np.random.randint(0, self.max_time_steps + 1)
 

@@ -108,44 +108,71 @@ def progress_bar(iteration, total_iterations):
     return
 
 
-def shuffle_batch(batch: Batch, random_key, steps=1000, batch_size=64):
-    # Define the random generator
-    rand_gen = np.random.default_rng(random_key[0].item())
-
+def shuffle_split_batch(batch: Batch, steps=1000, batch_size=64):
     # Change batch to list of tuples (agnostic to the labels)
-    data = []
-    for key, val in batch._asdict().items():
-        if val is None:
-            continue
-        data += [(key, np.array([step for episode in val for step in episode])
-                    if key != 'rewards' else [step for episode in val for step in episode])]
+    shuffled_batch = batch._asdict()
 
     # Create shuffled indexes
-    available_steps = len(data[0][1])
-    idxs = rand_gen.choice([i for i in range(available_steps)],
-                           size=(min(steps, available_steps) // batch_size, batch_size),
-                           replace=False)
+    available_steps = 0
+    for key, val in shuffled_batch.items():
+        if key in ['states', 'next_states', 'actions', 'advantages', 'action_logprobs', 'next_actions', 'dones']:
+            available_steps = len(val)
+            break
+
+    idxs = np.random.default_rng().choice([i for i in range(available_steps)],
+                                          size=(min(steps, available_steps) // batch_size, batch_size),
+                                          replace=False)
 
     # Iterate through and generate each set of shuffled samples
     for sample_idxs in idxs:
-        shuffled_batch = {'episode_rewards': batch.episode_rewards}
-
+        shuffled_batch = batch._asdict()
         # Iterate through each feature and shuffle
-        for key, val in data:
-
+        for key, val in shuffled_batch.items():
+            if val is None:
+                continue
             # Skip the episode rewards (not used for training)
             if key == 'episode_rewards':
-                continue
+                shuffled_batch[key] = val
             # For the rewards, keep as a list of (irregular) lists
             elif key == 'rewards':
                 shuffled_batch[key] = [val[i] for i in sample_idxs]
-
             # Return the remaining features as a NumPy array
             else:
                 shuffled_batch[key] = jnp.array(val[sample_idxs]).astype(jnp.float32) if val.dtype == np.float64 \
-                    else (jnp.array(val[sample_idxs]).astype(jnp.int32) if val.dtype == np.int64 else val[sample_idxs])
+                    else (jnp.array(val[sample_idxs]).astype(jnp.int32) if val.dtype == np.int64
+                          else jnp.array(val[sample_idxs]))
 
         yield Batch(**shuffled_batch)
+
+
+def downsample_batch(batch: Batch, random_key, steps):
+    flattened_batch = batch._asdict()
+    available_steps = 0
+    coordinates = {}
+    for key, val in flattened_batch.items():
+        if key in ['states', 'next_states', 'actions', 'advantages', 'action_logprobs', 'next_actions', 'dones']:
+            for i in range(len(val)):
+                for j in range(len(val[i])):
+                    coordinates[available_steps] = (i, j)
+                    available_steps += 1
+            break
+
+    flat_idx = np.random.default_rng(int(random_key[0])).choice([i for i in range(available_steps)],
+                                                                size=min(steps, available_steps),
+                                                                replace=False)
+
+    for key, val in flattened_batch.items():
+        if val is None:
+            continue
+        if key == 'rewards':
+            flattened_batch[key] = [val[coordinates[idx][0]][coordinates[idx][1]] for idx in flat_idx]
+        elif key == 'episode_rewards':
+            flattened_batch[key] = val
+        else:
+            flattened_batch[key] = np.array([val[coordinates[idx][0]][coordinates[idx][1]] for idx in flat_idx])
+
+    random_key = jax.random.split(random_key, num=1)[0]
+    return Batch(**flattened_batch), random_key
 
 
 def alter_batch(batch, **kwargs):
@@ -166,4 +193,3 @@ def alter_batch(batch, **kwargs):
     batch = Batch(**batch)
 
     return batch
-

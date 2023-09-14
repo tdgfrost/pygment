@@ -47,19 +47,6 @@ def update_policy(key: PRNGKey, actor: Model, batch: Batch) -> Tuple[Model, Info
     """
 
     # Calculate the Advantage
-    """
-    max_seq_len = max([len(seq) for seq in batch.rewards])
-    seq_rewards = jnp.array([[seq[i] if i < len(seq) else 0 for i in range(max_seq_len)] for seq in batch.rewards])
-
-    discounted_rewards = jax.lax.scan(lambda agg, reward: (agg * gamma + reward, agg * gamma + reward),
-                                      jnp.zeros(shape=seq_rewards.shape[0]), seq_rewards.transpose(),
-                                      reverse=True)[1].transpose()[:, 0]
-
-    gammas = jnp.ones(shape=discounted_rewards.shape[0]) * gamma
-    gammas = jnp.power(gammas, jnp.array([len(seq) for seq in batch.rewards]))
-
-    discounted_rewards = discounted_rewards + gammas * next_v * ~batch.dones
-    """
     advantage = batch.advantages
 
     # Get old action logprobs
@@ -109,8 +96,8 @@ def update_policy(key: PRNGKey, actor: Model, batch: Batch) -> Tuple[Model, Info
 
         # Return the loss value, plus metadata
         return actor_loss, {'actor_loss': actor_loss,
-                      'layer_outputs': layer_outputs,
-                      }
+                            'layer_outputs': layer_outputs,
+                            }
 
     # Calculate the updated model parameters using the loss function
     new_actor, info = actor.apply_gradient(actor_loss_fn)

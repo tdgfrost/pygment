@@ -8,7 +8,6 @@ from sklearn.cluster import KMeans
 import wandb
 from tqdm import tqdm
 from stable_baselines3.common.env_util import make_vec_env
-from stable_baselines3 import PPO
 
 # Set jax to CPU
 # jax.config.update('jax_platform_name', 'cpu')
@@ -18,19 +17,19 @@ from stable_baselines3 import PPO
 # Define config file - could change to FLAGS at some point
 config = {'seed': 123,
           'epochs': int(1e6),
-          'steps': 1000,
-          'batch_size': 64,
-          'n_envs': 512,
-          'gamma': 0.999,
-          'actor_lr': 5e-3,
-          'value_lr': 5e-3,
-          'hidden_dims': (256, 256),
+          'steps': 5000,
+          'batch_size': 32,
+          'n_envs': 20,
+          'gamma': 0.99,
+          'actor_lr': 0.001,
+          'value_lr': 0.001,
+          'hidden_dims': (64, 64),
           'clipping': 1,
           }
 
 if __name__ == "__main__":
     from agent import PPOAgent
-    from common import load_data, progress_bar, Batch, shuffle_batch, alter_batch
+    from common import load_data, progress_bar, Batch, shuffle_split_batch, alter_batch, downsample_batch
     from envs import VariableTimeSteps, EpisodeGenerator
 
     # Set whether to train and/or evaluate
@@ -52,6 +51,8 @@ if __name__ == "__main__":
                     random_state=123,
                     n_init='auto').fit(data[:int(1e6)])
     """
+
+
     # Create environment and wrap in time-delay wrapper
     def make_env(fn=None):
         environment = VariableTimeSteps(gymnasium.envs.make('LunarLander-v2', max_episode_steps=500),
@@ -60,8 +61,9 @@ if __name__ == "__main__":
 
 
     # env = make_env(lambda x: kmeans.predict(x.reshape(1, -1))[0] if len(x.shape) == 1 else kmeans.predict(x))
-    env = make_env(fn=None)
-    envs = make_vec_env(lambda: make_env(fn=None), n_envs=config['n_envs'])
+    extra_step_filter = lambda x: 5 if 0.8 < x[1] < 1.2 else 0
+    env = make_env(fn=extra_step_filter)
+    envs = make_vec_env(lambda: make_env(fn=extra_step_filter), n_envs=config['n_envs'])
 
     # Create episode generator
     sampler = EpisodeGenerator(envs, gamma=config['gamma'])
@@ -74,6 +76,7 @@ if __name__ == "__main__":
                      **config)
 
     # Prepare logging
+
     wandb.init(
         project="PPO",
         config=config,
@@ -89,28 +92,32 @@ if __name__ == "__main__":
         # Generate initial batch
         batch, key = sampler(agent, key=key)
 
+        # Select a random subset of the batch
+        batch, key = downsample_batch(batch, key, config['steps'])
+
         # Train agent
         for epoch in tqdm(range(config['epochs'])):
             actor_loss = 0
             critic_loss = 0
 
-            for update_iter in range(5):
+            iteration = 0
+            update_iters = 4
+            for update_iter in range(update_iters):
                 # Every iteration, the advantage should be re-calculated
-                batch_state_values = [np.array(agent.value(np.array(ep))[1]) for ep in batch.states]
-                advantages = [ep_r - ep_v for ep_r, ep_v in zip(batch.discounted_rewards, batch_state_values)]
-                adv_mean = np.concatenate(advantages).mean()
-                adv_std = np.maximum(np.concatenate(advantages).std(), 1e-8)
-                advantages = [(adv - adv_mean) / adv_std for adv in advantages]
+                batch_state_values = np.array(agent.value(batch.states)[1])
+                advantages = batch.discounted_rewards - batch_state_values
+                advantages = (advantages - advantages.mean()) / max(advantages.std(), 1e-8)
 
                 batch = alter_batch(batch, advantages=advantages)
 
                 # Shuffle the batch
-                shuffled_batch = shuffle_batch(batch,
-                                               key,
-                                               steps=config['steps'],
-                                               batch_size=config['batch_size'])
+                shuffled_batch = shuffle_split_batch(batch,
+                                                     steps=config['steps'],
+                                                     batch_size=config['batch_size'])
                 # Iterate through each sample in the batch
                 for sample in shuffled_batch:
+                    iteration += 1
+                    progress_bar(iteration, len(batch.actions) // config['batch_size'] * update_iters)
                     # Update the agent
                     loss_info = agent.update(sample)
 
@@ -124,15 +131,18 @@ if __name__ == "__main__":
             # Generate the next batch using the updated agent
             batch, key = sampler(agent, key=key)
 
+            # Select a random subset of the batch
+            batch, key = downsample_batch(batch, key, config['steps'])
+
             # Check the value function is training correctly
-            disc_r = np.array([r for ep in batch.discounted_rewards for r in ep])
-            v = np.array(agent.value(np.array([s for ep in batch.states for s in ep]))[1])
-            tmp_idx = np.random.permutation([i for i in range(len(disc_r))])[:5]
-            print('\nDiscounted rewards: ', disc_r[tmp_idx])
-            print('Value function: ', v[tmp_idx])
+            batch_state_values = np.array(agent.value(batch.states)[1])
+            tmp_idx = np.random.permutation([i for i in range(len(batch.discounted_rewards))])[:5]
+            print('\n\nDiscounted rewards: ', batch.discounted_rewards[tmp_idx])
+            print('Value function: ', batch_state_values[tmp_idx])
+            print('Episode rewards: ', batch.episode_rewards.mean(), '\n')
 
             # Calculate the average reward (for logging purposes)
-            average_reward = np.mean(batch.episode_rewards)
+            average_reward = batch.episode_rewards.mean()
 
             """
             # Record best loss

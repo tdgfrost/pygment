@@ -1,10 +1,10 @@
-import pygment as pm
+import originalpygment as pm
 import gymnasium as gym
 import numpy as np
 
 for target_reward in [140]:
-    load_prior_model = True
-    animate_only = True
+    load_prior_model = False
+    animate_only = False
     #target_reward = 220
 
     env = gym.make('LunarLander-v2', max_episode_steps=1000)
@@ -16,8 +16,8 @@ for target_reward in [140]:
         agent.load_model(f'/Users/thomasfrost/Documents/Github/pygment/pygment/pygment/samples/LunarLander PPO/2023_6_12_164457/model_{target_reward}.pt')
 
     agent.compile('adam', learning_rate=0.01)
-
-    agent.train(target_reward=target_reward, save_from=-100, save_interval=10, iterations=100000, sample_episodes=2000,
+    # Temporarily set save_from to 1000, i.e., disabled save
+    agent.train(target_reward=target_reward, save_from=1000, save_interval=10, iterations=100000, sample_episodes=2000,
                 parallel_envs=256, update_steps=1000, gamma=0.99) if not animate_only else None
 
     #_, _, _, _, _, dones, total_rewards = agent.explore(episodes=1000, parallel_envs=512, gamma=1)
