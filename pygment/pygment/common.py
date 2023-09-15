@@ -6,6 +6,10 @@ from jax import lax
 import jax
 from collections import namedtuple
 
+import matplotlib.pyplot as plt
+import matplotlib.patches as patches
+from matplotlib.animation import FuncAnimation
+
 # Specify types
 Params = flax.core.FrozenDict[str, Any]
 InfoDict = Dict[str, Any]
@@ -192,3 +196,73 @@ def alter_batch(batch, **kwargs):
     batch = Batch(**batch)
 
     return batch
+
+
+def evaluate_envs(policy, environments):
+    """
+    Evaluate the agent across vectorised episodes.
+
+    :param policy: policy to evaluate.
+    :param environments: envs to evaluate.
+    :return: array of total rewards for each episode.
+    """
+    nodes = environments.num_envs
+    # Initial parameters
+    key = jax.random.PRNGKey(123)
+    states = environments.reset()
+    dones = np.array([False for _ in range(nodes)])
+    idxs = np.array([i for i in range(nodes)])
+    all_rewards = np.array([0. for _ in range(nodes)])
+
+    while not dones.all():
+        progress_bar(dones.sum(), nodes)
+        # Step through environments
+        actions = policy.sample_action(states, key)[0]
+        states, rewards, new_dones, prem_dones = environments.step(actions)
+
+        # Update finished environments
+        prem_dones = np.array([d['TimeLimit.truncated'] for d in prem_dones])
+        dones[idxs] = np.any((new_dones, prem_dones), axis=0)[idxs]
+
+        # Update rewards
+        all_rewards[idxs] += np.array(rewards)[idxs]
+
+        # Update remaining parameters
+        idxs = np.where(~dones)[0]
+        states = np.array(states)
+        key = jax.random.split(key, num=1)[0]
+
+    return all_rewards
+
+
+def animate_blocked_environment(img_arrays: List[np.ndarray], save_path: str, patch, fps: int = 50):
+
+    # (0,0) is where the flags are centered.
+    # On the plot, this is based as (300, 300), with (0, 300) at the top
+    # So to calculate the correct y_plot, the formula is y_plot = 300 - (300 / 1.5) * y_state
+
+    # Define the function that will iterate over each frame to update
+    def update(i):
+        im.set_array(img_arrays[i])
+        return im,
+
+    # Define the plot - remove axes and keep it tight (no white space padding)
+    fig, ax = plt.subplots()
+    plt.axis('off')
+    plt.tight_layout()
+
+    # Plot the first frame and define as animated
+    im = ax.imshow(img_arrays[0], animated=True)
+
+    # Add the Rectangle patch to the plot
+    ax.add_patch(patch)
+
+    # Iterate over each frame and update the plot
+    animation_fig = FuncAnimation(fig, update, frames=len(img_arrays), interval=1000 / fps,
+                                  cache_frame_data=False)
+
+    # Save as a .gif in the specified path
+    animation_fig.save(save_path)
+
+    # Close the plot
+    plt.close()

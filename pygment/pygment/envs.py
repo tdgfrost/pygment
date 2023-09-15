@@ -128,14 +128,18 @@ class VariableTimeSteps(gymnasium.Wrapper):
         prem_done: bool
         info: Dict[str, Any]
         sequential_reward: List[float] = []
+        img_arrays: List[np.ndarray] = []
 
         state, reward, done, prem_done, info = super().step(action)
         sequential_reward += [reward]
         total_reward = reward
+        if self.render_mode == 'rgb_array':
+            img_arrays.append(self.render())
 
         if done or prem_done:
             info['time_steps'] = 1
             info['sequential_reward'] = sequential_reward
+            info['render_arrays'] = img_arrays
             return state, total_reward, done, prem_done, info
 
         extra_time_steps = self._generate_extra_time_steps(state)
@@ -145,13 +149,18 @@ class VariableTimeSteps(gymnasium.Wrapper):
             sequential_reward += [reward]
             total_reward += reward
 
+            if self.render_mode == 'rgb_array':
+                img_arrays.append(self.render())
+
             if done or prem_done:
                 info['time_steps'] = extra_step + 1
                 info['sequential_reward'] = sequential_reward
+                info['render_arrays'] = img_arrays
                 return state, total_reward, done, prem_done, info
 
         info['time_steps'] = extra_time_steps + 1
         info['sequential_reward'] = sequential_reward
+        info['render_arrays'] = img_arrays
         return state, total_reward, done, prem_done, info
 
     def _generate_extra_time_steps(self, state):
