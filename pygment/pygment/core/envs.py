@@ -2,10 +2,8 @@ from typing import Dict, Any, List
 
 import gymnasium
 import numpy as np
-import jax.numpy as jnp
 import jax
-from jax import jit
-from core.common import Batch
+from core.common import Batch, progress_bar
 from stable_baselines3.common.env_util import make_vec_env
 
 
@@ -14,13 +12,15 @@ def make_variable_env(env_id, fn=None, *args, **kwargs):
     return environment
 
 
-def generate_episodes(policy, envs, key=None, gamma=0.99):
+def generate_episodes(policy, envs, key=None, gamma=0.99, verbose=False, max_episode_steps=None):
     """
     Evaluate the agent across vectorised episodes.
 
     :param policy: policy to evaluate.
     :param envs: vectorised environments.
     :param key: random key.
+    :param gamma: discount factor.
+    :param verbose: whether to print progress bar.
     :return: array of total rewards for each episode.
     """
 
@@ -38,8 +38,12 @@ def generate_episodes(policy, envs, key=None, gamma=0.99):
     all_dones = [[] for _ in range(num_envs)]
     active_idx = np.array([i for i in range(num_envs)])
 
+    steps = 0
     # Complete all episodes
     while active_idx.any():
+        steps += 1
+        if verbose:
+            progress_bar(steps, max_episode_steps)
         # Step through environments
         actions, action_logprobs = policy.sample_action(states, key)
 
@@ -102,11 +106,13 @@ class EpisodeGenerator:
         self.envs = envs
         self.gamma = gamma
 
-    def __call__(self, policy, key):
+    def __call__(self, policy, key, verbose=False, max_episode_steps=None):
         return generate_episodes(policy,
                                  self.envs,
                                  key=key,
-                                 gamma=self.gamma)
+                                 gamma=self.gamma,
+                                 verbose=verbose,
+                                 max_episode_steps=max_episode_steps)
 
 
 class VariableTimeSteps(gymnasium.Wrapper):

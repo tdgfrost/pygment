@@ -3,12 +3,17 @@ import jax
 import numpy as np
 from stable_baselines3.common.env_util import make_vec_env
 import pickle
+import os
 
 # Define config file - could change to FLAGS at some point
-config = {'seed': 123,
+config = {'epochs': int(1e6),
+          'seed': 123,
           'n_episodes': 10000,
           'gamma': 0.99,
           'hidden_dims': (64, 64),
+          'max_episode_steps': 1000,
+          'top_bar_coord': 1.2,  # 0.9,
+          'bottom_bar_coord': 0.8,  # 0.5
           }
 
 if __name__ == "__main__":
@@ -21,12 +26,18 @@ if __name__ == "__main__":
     # ============================================================== #
 
     # Create agent
-    env = make_env('LunarLander-v2')
+    env = make_env('LunarLander-v2', max_episode_steps=config['max_episode_steps'])
     agent = PPOAgent(observations=env.observation_space.sample(),
                      action_dim=env.action_space.n,
                      opt_decay_schedule="cosine",
                      **config)
     del env
+
+    # Load previous checkpoints
+    reward = 1
+    filename = './experiments/Experiment_2/model_checkpoints'
+    agent.actor = agent.actor.load(os.path.join(filename, f'actor_{reward}'))
+    agent.value = agent.value.load(os.path.join(filename, f'value_{reward}'))
 
     # Create variable environment template (optional)
     def extra_step_filter(x):
@@ -38,7 +49,8 @@ if __name__ == "__main__":
         # Otherwise, normal time steps (no delay)
         return 0
 
-    envs = make_vec_env(lambda: make_variable_env('LunarLander-v2', fn=extra_step_filter),
+    envs = make_vec_env(lambda: make_variable_env('LunarLander-v2', fn=extra_step_filter,
+                                                  max_episode_steps=config['max_episode_steps']),
                         n_envs=config['n_episodes'])
 
     # ============================================================== #
@@ -52,11 +64,11 @@ if __name__ == "__main__":
     random_key = jax.random.PRNGKey(123)
 
     # Generate batch
-    batch, random_key = sampler(agent, key=random_key)
+    batch, random_key = sampler(agent, key=random_key, verbose=True, max_episode_steps=config['max_episode_steps'])
 
     # Flatten the batch
     batch, random_key = flatten_batch(batch, random_key)
 
     # Save batch
-    with open('./current_file.pkl', 'wb') as f:
+    with open(f'./dataset_reward_{reward}.pkl', 'wb') as f:
         pickle.dump(batch, f)
