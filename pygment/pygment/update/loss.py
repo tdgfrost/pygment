@@ -29,7 +29,7 @@ def convert_logits_to_action_logprobs(logits, actions, **kwargs):
     return action_logprobs
 
 
-def expectile_loss(diff, expectile=0.8, **kwargs):
+def expectile_loss(pred, batch, expectile=0.8, **kwargs):
     """
     Calculates the expectile of the Cauchy loss function for the residuals.
     Uses the formula L[ c^2/2 * log(loss^2 / c^2 + 1)]
@@ -39,21 +39,27 @@ def expectile_loss(diff, expectile=0.8, **kwargs):
     :param expectile: the expectile value
     :return: the loss term
     """
+    diff = pred - batch.discounted_rewards
 
     weight = jnp.where(diff > 0, (1 - expectile), expectile)
     return weight * jnp.log(diff ** 2 / 2 + 1)
 
 
-def mse_loss(pred, batch, **kwargs):
+def mc_mse_loss(pred, batch, **kwargs):
     return (pred - batch.discounted_rewards) ** 2
 
 
-def iql_loss(logits, batch, adv_filter, **kwargs):
+def td_mse_loss(pred, batch, next_state_values, gamma=0.99, **kwargs):
+    target = batch.reward + gamma * next_state_values * (1 - batch.dones)
+    return (pred - target) ** 2
+
+
+def iql_loss(logits, batch, **kwargs):
     """
     Calculate the advantage-filtered logprobs
 
     :param logits: logits from the actor model
-    :param actions: sample actions
+    :param batch: the batch of samples
     :param adv_filter: boolean filter for positive advantage actions
     :return: the advantage-filtered logprobs
     """
@@ -62,6 +68,7 @@ def iql_loss(logits, batch, adv_filter, **kwargs):
     action_logprobs = convert_logits_to_action_logprobs(logits, batch.actions)
 
     # Filter the logprobs using the advantage filter
+    adv_filter = nn.relu(jnp.sign(batch.advantages)).astype(jnp.bool_)
     action_logprobs = jnp.where(adv_filter, action_logprobs, 0.)
 
     # Return the advantage-filtered logprobs

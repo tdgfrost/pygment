@@ -2,7 +2,7 @@ from jax import Array
 
 from core.agent import Model
 from core.common import Params, InfoDict, Batch
-from update.loss import mse_loss, expectile_loss
+from update.loss import mc_mse_loss, td_mse_loss, expectile_loss
 
 import jax.numpy as jnp
 import jax
@@ -19,7 +19,8 @@ def update_v(value: Model, batch: Batch, **kwargs) -> Tuple[Model, InfoDict]:
     :return: a tuple containing the new model parameters, plus metadata
     """
 
-    loss_fn = {'mse': mse_loss,
+    loss_fn = {'mc_mse': mc_mse_loss,
+               'td_mse': td_mse_loss,
                'expectile': expectile_loss}
 
     def value_loss_fn(value_params: Params) -> tuple[Array, dict[str, Array]]:
@@ -54,7 +55,8 @@ def update_q(critic: Model, batch: Batch, **kwargs) -> Tuple[Model, InfoDict]:
     actions = batch.actions
     states = batch.states
 
-    loss_fn = {'mse': mse_loss,
+    loss_fn = {'mc_mse': mc_mse_loss,
+               'td_mse': td_mse_loss,
                'expectile': expectile_loss}
 
     def critic_loss_fn(critic_params: Params) -> tuple[Array, dict[str, Array]]:

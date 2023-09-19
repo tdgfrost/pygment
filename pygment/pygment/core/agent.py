@@ -156,7 +156,7 @@ class IQLAgent(BaseAgent):
             self.rng, self.actor, batch, **kwargs) if actor else (self.rng, self.actor, {})
 
         new_critic, critic_info = _update_critic_jit(
-            self.critic, batch, self.gamma, **kwargs) if critic else (self.critic, {})
+            self.critic, batch, **kwargs) if critic else (self.critic, {})
 
         new_value, value_info = _update_value_jit(
             self.value, batch, **kwargs) if value else (self.value, {})

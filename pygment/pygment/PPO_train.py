@@ -76,6 +76,8 @@ if __name__ == "__main__":
                 config=config,
             )
 
+        total_training_steps = 0
+
         # Create episode generator
         sampler = EpisodeGenerator(envs, gamma=config['gamma'])
 
@@ -125,13 +127,16 @@ if __name__ == "__main__":
 
                     # Update the agent
                     loss_info = agent.update(sample,
-                                             value_loss_fn={'mse': 0},
+                                             value_loss_fn={'mc_mse': 0},
                                              actor_loss_fn={'ppo': 0},
                                              clip_ratio=0.2)
 
                     # Update the loss
                     actor_loss += loss_info['actor_loss'].item()
                     critic_loss += loss_info['value_loss'].item()
+
+            # Update the total training steps
+            total_training_steps += len(batch.actions) // config['batch_size'] * config['batch_size'] * update_iters
 
             # Reset the jax key
             random_key = jax.random.split(random_key, 1)[0]
@@ -168,16 +173,15 @@ if __name__ == "__main__":
                 if int(average_reward) > best_reward:
                     best_reward = int(average_reward)
 
-                    agent.actor.save(os.path.join('./experiments',
-                                                  agent.path, f'actor_{best_reward}'))  # if actor else None
-                    agent.value.save(os.path.join('./experiments',
-                                                  agent.path, f'value_{best_reward}'))  # if value else None
+                    agent.actor.save(os.path.join(agent.path, f'actor_{best_reward}'))  # if actor else None
+                    agent.value.save(os.path.join(agent.path, f'value_{best_reward}'))  # if value else None
 
             if logging:
                 # Log results
                 wandb.log({'actor_loss': actor_loss,
                            'critic_loss': critic_loss,
-                           'episode_reward': average_reward})
+                           'episode_reward': average_reward,
+                           'step': total_training_steps})
 
             if best_reward > 300:
                 agent.actor.save(os.path.join('./experiments',
