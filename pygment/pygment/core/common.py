@@ -5,10 +5,7 @@ import flax
 from jax import lax
 import jax
 from collections import namedtuple
-
-import matplotlib.pyplot as plt
-import matplotlib.patches as patches
-from matplotlib.animation import FuncAnimation
+import pickle
 
 # Specify types
 Params = flax.core.FrozenDict[str, Any]
@@ -30,29 +27,31 @@ def load_data(path: str,
     :return: Dict of offline RL data
     """
 
-    # Load the numpy binaries for the offline data
+    # Load the saved Batch
+    with open(path + '/batch.pkl', 'rb') as f:
+        batch = pickle.load(f)
+    """
     loaded_data: dict[AnyStr, np.ndarray] = dict()
     for key, filename in [['state', 'all_states.npy'], ['actions', 'all_actions.npy'],
                           ['original_rewards', 'all_rewards.npy'], ['next_state', 'all_next_states.npy'],
                           ['next_action', 'all_next_actions.npy'], ['dones', 'all_dones.npy']]:
         loaded_data[key] = np.load(path + '/' + filename)
+    """
 
     # Pre-process rewards if required (normalise, standardise or none)
     if scale == "standardise":
-        loaded_data['rewards'] = (loaded_data['original_rewards'] - loaded_data['original_rewards'].mean()) / \
-                                 loaded_data['original_rewards'].std()
+        rewards = (batch.rewards - batch.rewards.mean()) / batch.rewards.std()
+        batch = alter_batch(batch, rewards=rewards)
 
     elif scale == "normalise":
-        loaded_data['rewards'] = (loaded_data['original_rewards'] - loaded_data['original_rewards'].min()) / (
-                loaded_data['original_rewards'].max() - loaded_data['original_rewards'].min())
-
-    else:
-        loaded_data['rewards'] = loaded_data['original_rewards']
+        rewards = (batch.rewards - batch.rewards.min()) / (batch.rewards.max() - batch.rewards.min())
+        batch = alter_batch(batch, rewards=rewards)
 
     # Calculate discounted rewards
-    loaded_data['discounted_rewards'] = calc_discounted_rewards(loaded_data['dones'], loaded_data['rewards'], gamma)
+    if batch.discounted_rewards is None:
+        batch.discounted_rewards = calc_discounted_rewards(batch.dones, batch.rewards, gamma)
 
-    return loaded_data
+    return batch
 
 
 def calc_discounted_rewards(dones, rewards, gamma):

@@ -15,30 +15,6 @@ def update_policy(actor: Model, batch: Batch, **kwargs) -> Tuple[Model, InfoDict
     :param batch: a Batch object of samples
     :return: a tuple containing the new model parameters, plus metadata
     """
-    """
-    # Calculate the optimal V(s') for the states in the batch
-    _, v = value(batch.states)
-
-    # Calculate the Q(s,a) for the states and actions in the batch
-    _, (q1, q2) = critic(batch.states)
-    q = jnp.minimum(q1, q2)
-    """
-    """
-    This is until jnp.take_along_axis works for metal backend.
-    
-    q = jnp.squeeze(jnp.take_along_axis(q, batch.actions, axis=-1), -1)
-    """
-    """
-    q = jax.lax.gather(q,
-                       jnp.concatenate((jnp.arange(len(batch.actions)).reshape(-1, 1), batch.actions), axis=1),
-                       jax.lax.GatherDimensionNumbers(
-                           offset_dims=tuple([]),
-                           collapsed_slice_dims=tuple([0, 1]),
-                           start_index_map=tuple([0, 1])), tuple([1, 1]))
-
-    # Calculate the advantages (with a boolean filter for positive advantages)
-    adv_filter = nn.relu(jnp.sign(q - v)).astype(jnp.bool_)
-    """
 
     loss_fn = {'ppo': ppo_loss,
                'iql': iql_loss}

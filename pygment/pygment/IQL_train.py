@@ -36,25 +36,12 @@ if __name__ == "__main__":
 
     # Set whether to train and/or evaluate
     train = True
+    logging = True
     evaluate = True
 
-    # Create environment
+    # Create agent
     dummy_env = make_env('LunarLander-v2')
 
-    # Load static dataset (dictionary) and convert to a 1D list of Experiences
-    data = load_data(path='../samples/GenerateStaticDataset/LunarLander/140 reward',
-                     scale='standardise',
-                     gamma=config['gamma'])
-
-    data = Batch(states=data['state'],
-                 actions=data['actions'][:, np.newaxis],
-                 rewards=data['rewards'],
-                 discounted_rewards=data['discounted_rewards'],
-                 next_states=data['next_state'],
-                 next_actions=data['next_action'][:, np.newaxis],
-                 dones=data['dones'])
-
-    # Create agent
     agent = IQLAgent(observations=dummy_env.observation_space.sample(),
                      action_dim=dummy_env.action_space.n,
                      dropout_rate=None,
@@ -62,6 +49,11 @@ if __name__ == "__main__":
                      **config)
 
     del dummy_env
+
+    # Load static dataset
+    data = load_data(path='./offline_datasets/LunarLander/',
+                     scale='standardise',
+                     gamma=config['gamma'])
 
     # Prepare logging tensorboard
     summary_writer = SummaryWriter('../experiments/tensorboard/current',

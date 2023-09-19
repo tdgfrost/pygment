@@ -1,12 +1,10 @@
 import os
-
 from gymnasium.envs import make as make_env
 import jax
 import numpy as np
 import wandb
 from tqdm import tqdm
 from stable_baselines3.common.env_util import make_vec_env
-from functools import partial
 
 # Set jax to CPU
 # jax.config.update('jax_platform_name', 'cpu')
@@ -16,7 +14,7 @@ from functools import partial
 # Define config file - could change to FLAGS at some point
 config = {'seed': 123,
           'epochs': int(1e6),
-          'steps': 5000,
+          'steps': None,
           'batch_size': 32,
           'n_envs': 20,
           'gamma': 0.99,
@@ -33,7 +31,6 @@ if __name__ == "__main__":
     from core.common import progress_bar, shuffle_split_batch, alter_batch, flatten_batch
     from core.evaluate import evaluate_envs, run_and_animate
     from core.envs import EpisodeGenerator, make_variable_env
-    from update.loss import ppo_loss, mse_loss, expectile_loss
 
     # ============================================================== #
     # ======================== PREPARATION ========================= #
@@ -45,12 +42,12 @@ if __name__ == "__main__":
     evaluate = True
 
     # Create agent
-    env = make_env('LunarLander-v2')
-    agent = PPOAgent(observations=env.observation_space.sample(),
-                     action_dim=env.action_space.n,
+    dummy_env = make_env('LunarLander-v2')
+    agent = PPOAgent(observations=dummy_env.observation_space.sample(),
+                     action_dim=dummy_env.action_space.n,
                      opt_decay_schedule="cosine",
                      **config)
-    del env
+    del dummy_env
 
     # Create variable environment template
     def extra_step_filter(x):
@@ -99,7 +96,7 @@ if __name__ == "__main__":
         batch = alter_batch(batch, **removed_data)
 
         # Flatten the batch (optional: downsample if steps specified)
-        batch, random_key = flatten_batch(batch, random_key, steps=None)
+        batch, random_key = flatten_batch(batch, random_key, steps=config['steps'])
 
         # Train agent
         for epoch in tqdm(range(config['epochs'])):
@@ -164,15 +161,16 @@ if __name__ == "__main__":
                 results = evaluate_envs(agent,
                                         environments=make_vec_env(lambda: make_variable_env('LunarLander-v2',
                                                                                             fn=extra_step_filter),
-                                                                  n_envs=200))
+                                                                  n_envs=1000))
                 average_reward = np.median(results)
-                print('\n\n', '='*50, f'\nMedian reward: {np.median(results)}, Best reward: {best_reward}\n', '='*50, '\n')
+                print('\n\n', '='*50, f'\nMedian reward: {np.median(results)}, Best reward: {best_reward}\n', '='*50,
+                      '\n')
                 if int(average_reward) > best_reward:
                     best_reward = int(average_reward)
-                    # count = 0
-                    agent.actor.save(os.path.join('../experiments',
+
+                    agent.actor.save(os.path.join('./experiments',
                                                   agent.path, f'actor_{best_reward}'))  # if actor else None
-                    agent.value.save(os.path.join('../experiments',
+                    agent.value.save(os.path.join('./experiments',
                                                   agent.path, f'value_{best_reward}'))  # if value else None
 
             if logging:
@@ -182,9 +180,9 @@ if __name__ == "__main__":
                            'episode_reward': average_reward})
 
             if best_reward > 300:
-                agent.actor.save(os.path.join('../experiments',
+                agent.actor.save(os.path.join('./experiments',
                                               agent.path, f'actor_best'))  # if actor else None
-                agent.value.save(os.path.join('../experiments',
+                agent.value.save(os.path.join('./experiments',
                                               agent.path, f'value_best'))
                 break
 
@@ -195,12 +193,12 @@ if __name__ == "__main__":
     if evaluate:
         # Load the best agent
         filename = agent.path  # './Experiment_2/model_checkpoints'
-        agent.actor = agent.actor.load(os.path.join('../experiments', f'{filename}', f'actor_best'))
-        agent.value = agent.value.load(os.path.join('../experiments', f'{filename}', f'value_best'))
+        agent.actor = agent.actor.load(os.path.join('./experiments', f'{filename}', f'actor_best'))
+        agent.value = agent.value.load(os.path.join('./experiments', f'{filename}', f'value_best'))
 
         # Create the vectorised set of environments
         envs = make_vec_env(lambda: make_variable_env('LunarLander-v2', fn=extra_step_filter),
-                            n_envs=1000)
+                            n_envs=5000)
 
         # Calculate the median reward
         results = evaluate_envs(agent, environments=envs)

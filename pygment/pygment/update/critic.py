@@ -16,7 +16,6 @@ def update_v(value: Model, batch: Batch, **kwargs) -> Tuple[Model, InfoDict]:
 
     :param value: the Value network to be updated
     :param batch: a Batch object of samples
-    :param loss_fn: the loss function to use
     :return: a tuple containing the new model parameters, plus metadata
     """
 
@@ -48,24 +47,12 @@ def update_q(critic: Model, batch: Batch, **kwargs) -> Tuple[Model, InfoDict]:
     Function to update the Q network
     :param critic: the critic network to be updated
     :param batch: a Batch object of samples
-    :param loss_fn: the loss function to use
     :return: a tuple containing the new model parameters, plus metadata
     """
-    """
-    # Unpack the states and actions
-    states = batch.states
-    actions = batch.actions
 
-    # Calculate the optimal V(s') for the next states in the batch
-    _, next_v = target_value(batch.next_states)
-
-    # Use this to calculate the target Q(s,a) for each state in the batch under an optimal V(s')
-    target_q = batch.rewards + gamma * (~batch.dones).astype(jnp.float32) * next_v
-    """
     # Unpack the actions, states, and discounted rewards from the batch of samples
     actions = batch.actions
     states = batch.states
-    discounted_rewards = batch.discounted_rewards
 
     loss_fn = {'mse': mse_loss,
                'expectile': expectile_loss}
