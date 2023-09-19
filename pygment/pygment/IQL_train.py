@@ -1,6 +1,7 @@
 from tqdm import tqdm
 import numpy as np
 import gymnasium
+from gymnasium.envs import make as make_env
 from tensorboardX import SummaryWriter
 import os
 import jax
@@ -27,15 +28,18 @@ config = {'seed': 123,
 
 
 if __name__ == "__main__":
-    from agent import IQLAgent
-    from common import load_data, progress_bar
+    from core.agent import IQLAgent
+    from core.common import load_data, progress_bar, Batch
+    from update.loss import expectile_loss, iql_loss, mse_loss
+    from core.evaluate import evaluate_envs, run_and_animate
+    from core.envs import make_variable_env
 
     # Set whether to train and/or evaluate
     train = True
     evaluate = True
 
     # Create environment
-    dummy_env = gymnasium.envs.make('LunarLander-v2')
+    dummy_env = make_env('LunarLander-v2')
 
     # Load static dataset (dictionary) and convert to a 1D list of Experiences
     data = load_data(path='../samples/GenerateStaticDataset/LunarLander/140 reward',
@@ -116,48 +120,6 @@ if __name__ == "__main__":
         max_episode_steps = 1000
         envs_to_evaluate = 1000
 
-        def make_env():
-            env = gymnasium.envs.make('LunarLander-v2', max_episode_steps=max_episode_steps)
-            return env
-
-        def evaluate_envs(policy, nodes=10):
-            """
-            Evaluate the agent across vectorised episodes.
-
-            :param policy: the policy agent to deploy
-            :param nodes: number of episodes to evaluate.
-            :return: array of total rewards for each episode.
-            """
-            envs = make_vec_env(make_env, n_envs=nodes)
-
-            # Initial parameters
-            key = jax.random.PRNGKey(123)
-            states = envs.reset()
-            dones = np.array([False for _ in range(nodes)])
-            idxs = np.array([i for i in range(nodes)])
-            all_rewards = np.array([0. for _ in range(nodes)])
-            step = 0
-
-            while not dones.all():
-                step += 1
-                progress_bar(step, max_episode_steps)
-                # Step through environments
-                actions = np.array(policy.sample_action(states, key))
-                states, rewards, new_dones, prem_dones = envs.step(actions)
-
-                # Update finished environments
-                prem_dones = np.array([d['TimeLimit.truncated'] for d in prem_dones])
-                dones[idxs] = np.any((new_dones, prem_dones), axis=0)[idxs]
-
-                # Update rewards
-                all_rewards[idxs] += np.array(rewards)[idxs]
-
-                # Update remaining parameters
-                idxs = np.where(~dones)[0]
-                states = np.array(states)
-                key = jax.random.split(key, num=1)[0]
-
-            return all_rewards
-
-        results = evaluate_envs(agent, envs_to_evaluate)
+        results = evaluate_envs(agent, make_vec_env('LunarLander-v2', n_envs=envs_to_evaluate))
         print(f'\nMedian reward: {np.median(results)}')
+

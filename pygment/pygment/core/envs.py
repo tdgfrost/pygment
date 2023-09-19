@@ -5,8 +5,13 @@ import numpy as np
 import jax.numpy as jnp
 import jax
 from jax import jit
-from common import Batch
+from core.common import Batch
 from stable_baselines3.common.env_util import make_vec_env
+
+
+def make_variable_env(env_id, fn=None, *args, **kwargs):
+    environment = VariableTimeSteps(gymnasium.envs.make(env_id, *args, **kwargs), fn=fn)
+    return environment
 
 
 def generate_episodes(policy, envs, key=None, gamma=0.99):

@@ -8,7 +8,12 @@ pygment/pygment/__pycache__
 pygment/originalpygment/__pycache__
 pygment/pygment (original)
 pygment/experiments
-pygment/pygment/PPO/__pycache__
-pygment/pygment/PPO/wandb
+pygment/pygment/__pycache__
+pygment/pygment/wandb
+pygment/pygment/core/__pycache__
+pygment/pygment/update/__pycache__
+pygment/pygment/experiments
+pygment/pygment_backup
+
 pygment/temp
 Pygment/.idea

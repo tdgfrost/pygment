@@ -1,47 +1,34 @@
 from jax import Array
 
-from agent import Model
-from common import Params, InfoDict, Batch
+from core.agent import Model
+from core.common import Params, InfoDict, Batch
+from update.loss import mse_loss, expectile_loss
 
 import jax.numpy as jnp
 import jax
 
-from typing import Tuple, Dict
+from typing import Tuple
 
 
-def loss(diff, expectile=0.8):
-    """
-    Calculates the expectile of the Cauchy loss function for the residuals.
-    Uses the formula L[ c^2/2 * log(loss^2 / c^2 + 1)]
-    In this case, c is set to sqrt(2), so the formula simplifies to L[log(loss^2/2 + 1)]
-
-    :param diff: the error term
-    :param expectile: the expectile value
-    :return: the loss term
-    """
-
-    weight = jnp.where(diff > 0, (1 - expectile), expectile)
-    return weight * jnp.log(diff ** 2 / 2 + 1)
-
-
-def update_v(value: Model, batch: Batch, expectile: float) -> Tuple[Model, InfoDict]:
+def update_v(value: Model, batch: Batch, **kwargs) -> Tuple[Model, InfoDict]:
     """
     Function to update the Value network
 
     :param value: the Value network to be updated
     :param batch: a Batch object of samples
-    :param expectile: the value of tau for expectile regression
+    :param loss_fn: the loss function to use
     :return: a tuple containing the new model parameters, plus metadata
     """
-    # Unpack the actions and discounted rewards from the batch of samples
-    discounted_rewards = batch.discounted_rewards
+
+    loss_fn = {'mse': mse_loss,
+               'expectile': expectile_loss}
 
     def value_loss_fn(value_params: Params) -> tuple[Array, dict[str, Array]]:
         # Generate V(s) for the sample states
         layer_outputs, v = value.apply({'params': value_params}, batch.states)
 
         # Calculate the loss for V using Q with expectile regression
-        value_loss = loss(v - discounted_rewards, expectile).mean()
+        value_loss = loss_fn[list(kwargs['value_loss_fn'].keys())[0]](v, batch, **kwargs).mean()
 
         # Return the loss value, plus metadata
         return value_loss, {
@@ -56,9 +43,15 @@ def update_v(value: Model, batch: Batch, expectile: float) -> Tuple[Model, InfoD
     return new_value, info
 
 
-def update_q(critic: Model, target_value: Model, batch: Batch,
-             gamma: float) -> Tuple[Model, InfoDict]:
-
+def update_q(critic: Model, batch: Batch, **kwargs) -> Tuple[Model, InfoDict]:
+    """
+    Function to update the Q network
+    :param critic: the critic network to be updated
+    :param batch: a Batch object of samples
+    :param loss_fn: the loss function to use
+    :return: a tuple containing the new model parameters, plus metadata
+    """
+    """
     # Unpack the states and actions
     states = batch.states
     actions = batch.actions
@@ -68,6 +61,14 @@ def update_q(critic: Model, target_value: Model, batch: Batch,
 
     # Use this to calculate the target Q(s,a) for each state in the batch under an optimal V(s')
     target_q = batch.rewards + gamma * (~batch.dones).astype(jnp.float32) * next_v
+    """
+    # Unpack the actions, states, and discounted rewards from the batch of samples
+    actions = batch.actions
+    states = batch.states
+    discounted_rewards = batch.discounted_rewards
+
+    loss_fn = {'mse': mse_loss,
+               'expectile': expectile_loss}
 
     def critic_loss_fn(critic_params: Params) -> tuple[Array, dict[str, Array]]:
         # Generate Q values from each of the two critic networks
@@ -95,7 +96,9 @@ def update_q(critic: Model, target_value: Model, batch: Batch,
                                 start_index_map=tuple([0, 1])), tuple([1, 1]))
 
         # Calculate the loss for the critic networks using the target Q values with MSE
-        critic_loss = ((q1 - target_q)**2).mean() + ((q2 - target_q)**2).mean()
+        critic_loss_1 = loss_fn[list(kwargs['critic_loss_fn'].keys())[0]](q1, batch, **kwargs).mean()
+        critic_loss_2 = loss_fn[list(kwargs['critic_loss_fn'].keys())[0]](q2, batch, **kwargs).mean()
+        critic_loss = critic_loss_1 + critic_loss_2
 
         # Return the loss value, plus metadata
         return critic_loss, {
