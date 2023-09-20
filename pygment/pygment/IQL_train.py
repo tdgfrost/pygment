@@ -31,14 +31,13 @@ config = {'seed': 123,
 
 if __name__ == "__main__":
     from core.agent import IQLAgent
-    from core.common import load_data, progress_bar, Batch
-    from update.loss import expectile_loss, iql_loss, mse_loss
+    from core.common import load_data
     from core.evaluate import evaluate_envs, run_and_animate
     from core.envs import make_variable_env
 
     # Set whether to train and/or evaluate
     train = True
-    logging = True
+    logging = False
     evaluate = True
 
     # Create agent
@@ -53,7 +52,8 @@ if __name__ == "__main__":
     del dummy_env
 
     # Load static dataset
-    data = load_data(path='./offline_datasets/LunarLander/',
+    print('Loading and processing dataset...')
+    data = load_data(path='./offline_datasets/LunarLander/dataset_1/dataset_reward_1.pkl',
                      scale='standardise',
                      gamma=config['gamma'])
 

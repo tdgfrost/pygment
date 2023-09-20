@@ -1,11 +1,12 @@
 import numpy as np
 import jax.numpy as jnp
-from typing import AnyStr, Dict, Any, List
+from typing import AnyStr, Dict, Any
 import flax
 from jax import lax
 import jax
 from collections import namedtuple
 import pickle
+import os
 
 # Specify types
 Params = flax.core.FrozenDict[str, Any]
@@ -28,7 +29,7 @@ def load_data(path: str,
     """
 
     # Load the saved Batch
-    with open(path + '/batch.pkl', 'rb') as f:
+    with open(path, 'rb') as f:
         batch = pickle.load(f)
     """
     loaded_data: dict[AnyStr, np.ndarray] = dict()
@@ -40,16 +41,29 @@ def load_data(path: str,
 
     # Pre-process rewards if required (normalise, standardise or none)
     if scale == "standardise":
-        rewards = (batch.rewards - batch.rewards.mean()) / batch.rewards.std()
-        batch = alter_batch(batch, rewards=rewards)
+        rewards = np.concatenate(batch.rewards)
+        rewards_mean = rewards.mean()
+        rewards_std = np.maximum(rewards.std(), 1e-8)
+        rewards = [[(r - rewards_mean) / rewards_std for r in seq] for seq in batch.rewards]
+
+        discounted_rewards = calc_discounted_rewards(batch.dones, rewards, gamma)
+
+        batch = alter_batch(batch, rewards=rewards, discounted_rewards=discounted_rewards)
 
     elif scale == "normalise":
-        rewards = (batch.rewards - batch.rewards.min()) / (batch.rewards.max() - batch.rewards.min())
-        batch = alter_batch(batch, rewards=rewards)
+        rewards = np.concatenate(batch.rewards)
+        rewards_max = rewards.max()
+        rewards_min = rewards.min()
+        rewards = [[(r - rewards_min) / (rewards_max - rewards_min) for r in seq] for seq in batch.rewards]
+
+        discounted_rewards = calc_discounted_rewards(batch.dones, rewards, gamma)
+
+        batch = alter_batch(batch, rewards=rewards, discounted_rewards=discounted_rewards)
 
     # Calculate discounted rewards
     if batch.discounted_rewards is None:
-        batch.discounted_rewards = calc_discounted_rewards(batch.dones, batch.rewards, gamma)
+        discounted_rewards = calc_discounted_rewards(batch.dones, batch.rewards, gamma)
+        batch = alter_batch(batch, discounted_rewards=discounted_rewards)
 
     return batch
 
@@ -62,24 +76,35 @@ def calc_discounted_rewards(dones, rewards, gamma):
     :param gamma: Discount factor
     :return: Array of discounted rewards
     """
-    # Identify the relative length of each trajectory
-    idxs = np.where(dones)[0]
-    idxs = np.insert(idxs, 0, -1)
-    idxs = np.diff(idxs)
+    # Create the relevant indexes for various upcoming tasks:
+    #   - action_idxs: the index of the first step in each episode (subdivided by actions)
+    action_idxs = np.where(dones)[0] + 1
+    action_idxs = np.insert(action_idxs, 0, 0)
 
-    # Identify shape (samples, maximum traj length)
-    samples = len(idxs)
-    length = np.max(idxs)
+    #   - episode_lengths: the length of each episode (subdivided into environment steps)
+    episode_lengths = np.array([sum([len(traj) for traj in rewards[start:end]])
+                                for start, end in zip(action_idxs[:-1], action_idxs[1:])])
 
-    # Create a mask of that shape
+    #   - traj_idxs: the index of each action taken, relative to each step of the environment
+    traj_lengths = np.array([len(traj) for traj in rewards])
+    traj_lengths = np.insert(traj_lengths, 0, 0)
+    traj_idxs = np.cumsum(traj_lengths)[:-1]
+
+    # Create a zero-padded array of the rewards
+    #   - Start by finding the number of samples and maximum length of an episode (subdivided into environment steps)
+    samples = len(episode_lengths)
+    length = np.max(episode_lengths)
+
+    #   - Create a mask of that shape
     mask = np.zeros((samples, length))
-    for sample, end in enumerate(idxs):
+    for sample, end in enumerate(episode_lengths):
         mask[sample, :end] = True
     mask = mask.astype(bool)
 
-    # Create a standard array of that shape, and allocate the rewards using the mask
+    #   - Create a zero-padded array of the rewards using the above mask
     discounted_rewards = np.zeros((samples, length))
-    discounted_rewards[mask] = rewards
+    flattened_rewards = np.concatenate(rewards)
+    discounted_rewards[mask] = flattened_rewards
 
     # Use JAX/lax to calculate the discounted rewards for each row
     discounted_rewards = lax.scan(lambda agg, reward: (gamma * agg + reward, gamma * agg + reward),
@@ -88,6 +113,9 @@ def calc_discounted_rewards(dones, rewards, gamma):
 
     # Finally, convert the array back to a 1D (numpy) array
     discounted_rewards = np.array(discounted_rewards[mask])
+
+    # And index by the actions taken, not the environment steps
+    discounted_rewards = discounted_rewards[traj_idxs]
 
     return discounted_rewards
 
