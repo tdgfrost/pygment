@@ -14,6 +14,8 @@ pygment/pygment/core/__pycache__
 pygment/pygment/update/__pycache__
 pygment/pygment/experiments
 pygment/pygment_backup
+pygment/pygment/offline_datasets
+
 
 pygment/temp
 Pygment/.idea

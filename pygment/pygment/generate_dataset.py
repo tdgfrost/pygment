@@ -70,5 +70,5 @@ if __name__ == "__main__":
     batch, random_key = flatten_batch(batch, random_key)
 
     # Save batch
-    with open(f'./dataset_reward_{reward}.pkl', 'wb') as f:
+    with open(f'./offline_datasets/LunarLander/dataset_reward_{reward}.pkl', 'wb') as f:
         pickle.dump(batch, f)
