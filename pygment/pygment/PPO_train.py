@@ -14,6 +14,7 @@ from stable_baselines3.common.env_util import make_vec_env
 # Define config file - could change to FLAGS at some point
 config = {'seed': 123,
           'epochs': int(1e6),
+          'continual_learning': True,
           'steps': None,
           'batch_size': 32,
           'n_envs': 20,

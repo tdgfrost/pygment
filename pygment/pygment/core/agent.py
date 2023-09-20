@@ -1,5 +1,5 @@
 from core.net import Model, ValueNet, ActorNet, DoubleCriticNet
-from core.common import Batch, InfoDict
+from core.common import Batch, InfoDict, alter_batch
 from update.actions import _update_jit, _update_value_jit, _update_critic_jit, _update_actor_jit
 
 import os
@@ -47,13 +47,20 @@ class BaseAgent:
         idxs = np.random.default_rng().choice(len(data.dones),
                                               size=batch_size,
                                               replace=False)
-        return Batch(states=data.states[idxs],
-                     actions=data.actions[idxs],
-                     rewards=data.rewards[idxs],
-                     discounted_rewards=data.discounted_rewards[idxs],
-                     next_states=data.next_states[idxs],
-                     next_actions=data.next_actions[idxs],
-                     dones=data.dones[idxs])
+
+        batch = data._asdict()
+
+        for key, val in batch.items():
+            if val is None:
+                continue
+            if key == 'rewards':
+                batch[key] = [val[i] for i in idxs]
+            elif key == 'episode_rewards':
+                batch[key] = val
+            else:
+                batch[key] = val[idxs]
+
+        return Batch(**batch)
 
 
 class IQLAgent(BaseAgent):
@@ -74,6 +81,7 @@ class IQLAgent(BaseAgent):
                  epochs: Optional[int] = None,
                  opt_decay_schedule: str = "cosine",
                  clipping: float = 0.01,
+                 continual_learning: bool = False,
                  *args,
                  **kwargs):
 
@@ -107,15 +115,18 @@ class IQLAgent(BaseAgent):
         # Set models
         self.actor = Model.create(ActorNet(hidden_dims, self.action_dim),
                                   inputs=[self.actor_key, observations],
-                                  optim=optimiser)
+                                  optim=optimiser,
+                                  continual_learning=continual_learning)
 
         self.critic = Model.create(DoubleCriticNet(hidden_dims, self.action_dim),
                                    inputs=[self.critic_key, observations],
-                                   optim=optax.adam(learning_rate=critic_lr))
+                                   optim=optax.adam(learning_rate=critic_lr),
+                                   continual_learning=continual_learning)
 
         self.value = Model.create(ValueNet(hidden_dims),
                                   inputs=[self.value_key, observations],
-                                  optim=optax.adam(learning_rate=value_lr))
+                                  optim=optax.adam(learning_rate=value_lr),
+                                  continual_learning=continual_learning)
 
     def update(self, batch: Batch, **kwargs) -> InfoDict:
         """
@@ -294,4 +305,3 @@ class PPOAgent(BaseAgent):
         log_probs = nn.log_softmax(logits, axis=-1)
         action = jax.random.categorical(key, logits, axis=-1)
         return action, log_probs
-

@@ -1,4 +1,4 @@
-from tqdm import tqdm
+import jax
 import numpy as np
 from gymnasium.envs import make as make_env
 import os
@@ -13,9 +13,9 @@ import wandb
 
 # Define config file - could change to FLAGS at some point
 config = {'seed': 123,
-          'epochs': int(1e6),
+          'epochs': int(1e4),
           'steps': None,
-          'batch_size': 32,
+          'batch_size': int(1e5),
           'n_envs': 20,
           'expectile': 0.5,
           'gamma': 0.99,
@@ -31,13 +31,13 @@ config = {'seed': 123,
 
 if __name__ == "__main__":
     from core.agent import IQLAgent
-    from core.common import load_data
+    from core.common import load_data, progress_bar, alter_batch, Batch, filter_to_action, calc_traj_discounted_rewards
     from core.evaluate import evaluate_envs, run_and_animate
     from core.envs import make_variable_env
 
     # Set whether to train and/or evaluate
     train = True
-    logging = False
+    logging = True
     evaluate = True
 
     # Create agent
@@ -77,7 +77,7 @@ if __name__ == "__main__":
             os.environ['WANDB_BASE_URL'] = "http://localhost:8080"
             # Prepare logging
             wandb.init(
-                project="PPO-VariableTimeSteps",
+                project="IQL-VariableTimeSteps",
                 config=config,
             )
 
@@ -88,11 +88,28 @@ if __name__ == "__main__":
             total_training_steps = 0
             count = 0
 
-            for epoch in tqdm(range(config['epochs'])):
+            for epoch in range(config['epochs']):
+                if epoch > 0 and epoch % 100 == 0:
+                    print(f'\n\n{epoch} epochs complete!\n\n')
+                progress_bar(epoch % 100, 100)
                 batch = agent.sample(data,
                                      config['batch_size'])
 
-                next_state_values = agent.value(batch.next_states) if value else None
+                # Calculate next state values, discounted rewards (for critic update), and current advantages
+                next_state_values = agent.value(batch.next_states)[1] if critic else None
+                rewards = calc_traj_discounted_rewards(batch.rewards, config['gamma'])
+
+                advantages = filter_to_action(jnp.minimum(*agent.critic(batch.states)[1]),
+                                              batch.actions) - agent.value(batch.states)[1] if actor else None
+                batch = alter_batch(batch, advantages=advantages)
+
+                # Remove excess from the batch
+                excess_data = {}
+                batch = batch._asdict()
+                for key in ['episode_rewards', 'next_states', 'next_actions', 'action_logprobs']:
+                    excess_data[key] = batch[key]
+                    batch[key] = None
+                batch = Batch(**batch)
 
                 loss_info = agent.update_async(batch,
                                                actor,
@@ -103,6 +120,7 @@ if __name__ == "__main__":
                                                actor_loss_fn={'iql': 0},
                                                expectile=config['expectile'],
                                                gamma=config['gamma'],
+                                               rewards=rewards,
                                                next_state_values=next_state_values,)
 
                 total_training_steps += config['batch_size']
@@ -128,10 +146,11 @@ if __name__ == "__main__":
                 # Log intermittently
                 if logging:
                     # Log results
-                    wandb.log({'actor_loss': loss_info['actor_loss'],
-                               'critic_loss': loss_info['critic_loss'],
-                               'value_loss': loss_info['value_loss'],
-                               'step': total_training_steps})
+                    logged_results = {}
+                    for key, trigger in [['actor', actor], ['value', value], ['critic', critic]]:
+                        if trigger:
+                            logged_results[f'{key}_loss'] = loss_info[f'{key}_loss']
+                    wandb.log(logged_results, step=total_training_steps)
 
     # ============================================================== #
     # ======================== EVALUATION ========================== #

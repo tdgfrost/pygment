@@ -1,6 +1,7 @@
 import jax
 import jax.numpy as jnp
 import flax.linen as nn
+from core.common import filter_to_action
 
 
 def convert_logits_to_action_logprobs(logits, actions, **kwargs):
@@ -13,7 +14,7 @@ def convert_logits_to_action_logprobs(logits, actions, **kwargs):
                                                       actions,
                                                       axis=-1), -1)
     """
-
+    """
     action_logprobs = jax.lax.gather(logprobs,
                                      jnp.concatenate((jnp.arange(len(actions)).reshape(-1, 1),
                                                       actions.reshape(-1, 1)), axis=1),
@@ -21,6 +22,8 @@ def convert_logits_to_action_logprobs(logits, actions, **kwargs):
                                          offset_dims=tuple([]),
                                          collapsed_slice_dims=tuple([0, 1]),
                                          start_index_map=tuple([0, 1])), tuple([1, 1]))
+    """
+    action_logprobs = filter_to_action(logprobs, actions)
 
     action_logprobs = jnp.where(jnp.isinf(action_logprobs),
                                 -1000,
@@ -49,8 +52,11 @@ def mc_mse_loss(pred, batch, **kwargs):
     return (pred - batch.discounted_rewards) ** 2
 
 
-def td_mse_loss(pred, batch, next_state_values, gamma=0.99, **kwargs):
-    target = batch.reward + gamma * next_state_values * (1 - batch.dones)
+def td_mse_loss(pred, batch, rewards, next_state_values, gamma=0.99, **kwargs):
+    gammas = jnp.ones(shape=len(pred)) * gamma
+    gammas = jnp.power(gammas, jnp.array([len(traj) for traj in batch.rewards]))
+
+    target = rewards + gammas * next_state_values * (1 - batch.dones)
     return (pred - target) ** 2
 
 

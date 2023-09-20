@@ -120,6 +120,21 @@ def calc_discounted_rewards(dones, rewards, gamma):
     return discounted_rewards
 
 
+def calc_traj_discounted_rewards(rewards, gamma):
+    max_len = max([len(traj) for traj in rewards])
+    samples = len(rewards)
+    mask = np.array([[True if i < len(traj) else False for i in range(max_len)] for traj in rewards])
+    discounted_rewards = np.zeros((samples, max_len))
+    discounted_rewards[mask] = np.concatenate(rewards)
+
+    gammas = np.ones(shape=max_len) * gamma
+    gammas = np.power(gammas, np.arange(max_len))
+
+    discounted_rewards = np.sum(discounted_rewards * gammas, axis=-1)
+
+    return discounted_rewards
+
+
 def progress_bar(iteration, total_iterations):
     """
     Print a progress bar to the console
@@ -226,4 +241,14 @@ def alter_batch(batch, **kwargs):
     batch = Batch(**batch)
 
     return batch
+
+
+def filter_to_action(array, actions):
+    return jax.lax.gather(array,
+                          jnp.concatenate((jnp.arange(len(actions)).reshape(-1, 1),
+                                           actions.reshape(-1, 1)), axis=1),
+                          jax.lax.GatherDimensionNumbers(
+                              offset_dims=tuple([]),
+                              collapsed_slice_dims=tuple([0, 1]),
+                              start_index_map=tuple([0, 1])), tuple([1, 1]))
 

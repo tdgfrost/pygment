@@ -214,6 +214,7 @@ class Model:
     params: Params
     optim: Optional[optax.GradientTransformation] = struct.field(
         pytree_node=False)
+    continual_learning: bool = False
     opt_state: Optional[optax.OptState] = None
     initializer = nn.initializers.he_normal()
     checkpointer = orbax.checkpoint.Checkpointer(orbax.checkpoint.PyTreeCheckpointHandler())
@@ -229,7 +230,8 @@ class Model:
     def create(cls,
                model_def: nn.Module,
                inputs: Sequence[jnp.ndarray],
-               optim: Optional[optax.GradientTransformation] = None
+               optim: Optional[optax.GradientTransformation] = None,
+               continual_learning: bool = False,
                ) -> 'Model':
         """
         Class method to create a new instance of the Model class (with some necessary pre-processing).
@@ -237,6 +239,7 @@ class Model:
         :param model_def: the neural network architecture
         :param inputs: dummy input data to initialise the network
         :param optim: the optimiser
+        :param continual_learning: whether to use continual learning
         :return: an instance of the Model class
         """
 
@@ -270,6 +273,7 @@ class Model:
         return cls(network=model_def,
                    params=params,
                    optim=optim,
+                   continual_learning=continual_learning,
                    opt_state=opt_state,
                    ages=ages,
                    util=util,
@@ -314,12 +318,22 @@ class Model:
         new_params = optax.apply_updates(self.params, updates)
 
         # Identify the lowest utility nodes to be replaced - as per "Loss of Plasticity in Deep Continual Learning"
+        """
+        Work in progress - attempting to make continual learning a boolean option
+        
+        features_to_replace, num_features_to_replace = jax.lax.switch(self.continual_learning.astype(int),
+                                                                      [lambda x, y: (None, None),
+                                                                       self.choose_features,
+                                                                       ], info['layer_outputs'], new_params)
+        """
+        """
         features_to_replace, num_features_to_replace = self.choose_features(outputs=info['layer_outputs'],
                                                                             new_params=new_params)
+        
 
         # Update the new parameters with re-initialised low utility nodes, as required
         new_params = self.gen_new_features(features_to_replace, new_params)
-
+        """
         # Returns a COPY with the new parameters and optimiser state, as well as the metadata
         return self.replace(params=new_params,
                             opt_state=new_opt_state), info

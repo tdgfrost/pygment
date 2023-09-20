@@ -1,7 +1,7 @@
 from jax import Array
 
 from core.agent import Model
-from core.common import Params, InfoDict, Batch
+from core.common import Params, InfoDict, Batch, filter_to_action
 from update.loss import mc_mse_loss, td_mse_loss, expectile_loss
 
 import jax.numpy as jnp
@@ -70,7 +70,7 @@ def update_q(critic: Model, batch: Batch, **kwargs) -> Tuple[Model, InfoDict]:
         q1 = jnp.squeeze(jnp.take_along_axis(q1, actions, axis=-1), -1)
         q2 = jnp.squeeze(jnp.take_along_axis(q2, actions, axis=-1), -1)
         """
-
+        """
         q1 = jax.lax.gather(q1,
                             jnp.concatenate((jnp.arange(len(actions)).reshape(-1, 1), actions), axis=1),
                             jax.lax.GatherDimensionNumbers(
@@ -83,6 +83,9 @@ def update_q(critic: Model, batch: Batch, **kwargs) -> Tuple[Model, InfoDict]:
                                 offset_dims=tuple([]),
                                 collapsed_slice_dims=tuple([0, 1]),
                                 start_index_map=tuple([0, 1])), tuple([1, 1]))
+        """
+        q1 = filter_to_action(q1, actions)
+        q2 = filter_to_action(q2, actions)
 
         # Calculate the loss for the critic networks using the target Q values with MSE
         critic_loss_1 = loss_fn[list(kwargs['critic_loss_fn'].keys())[0]](q1, batch, **kwargs).mean()
