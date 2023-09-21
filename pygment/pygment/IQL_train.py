@@ -15,9 +15,12 @@ import wandb
 config = {'seed': 123,
           'epochs': int(1e6),
           'early_stopping': 200,
-          'batch_size': 1024,
+          'value_batch_size': 1024,
+          'critic_batch_size': 1024,
+          'actor_batch_size': 1024 / (1-0.9),
+          # Need to separate out batch sizes for value/critic networks (all data) and actor (only the subsampled data)
           'expectile': 0.9,
-          'gamma': 0.99,
+          'gamma': 0.999,
           'actor_lr': 0.001,
           'value_lr': 0.001,
           'critic_lr': 0.001,
@@ -101,7 +104,7 @@ if __name__ == "__main__":
                     print(f'\n\n{epoch} epochs complete!\n')
                 progress_bar(epoch % 100, 100)
                 batch = agent.sample(data,
-                                     config['batch_size'])
+                                     config[f'{current_net}_batch_size'])
 
                 # Calculate next state values, discounted rewards (for critic update), and current advantages
                 next_state_values = agent.value(batch.next_states)[1] if is_net('critic') else None
@@ -129,7 +132,7 @@ if __name__ == "__main__":
                                                next_state_values=next_state_values,
                                                **{current_net: True})
 
-                total_training_steps += config['batch_size']
+                total_training_steps += config[f'{current_net}_batch_size']
 
                 # Record best loss
                 if loss_info[loss_key] < best_loss:

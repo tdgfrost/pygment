@@ -1,6 +1,8 @@
 from typing import Tuple
 
 from jax import Array
+import jax.numpy as jnp
+import flax.linen as nn
 
 from core.common import Batch, InfoDict, Params
 from core.agent import Model
@@ -31,8 +33,11 @@ def update_policy(actor: Model, batch: Batch, **kwargs) -> Tuple[Model, InfoDict
         layer_outputs, logits = actor.apply({'params': actor_params},
                                             batch.states)
 
-        # Convert this to advantage-filtered logprobs
-        actor_loss = loss_fn[list(kwargs['actor_loss_fn'].keys())[0]](logits, batch, **kwargs).mean()
+        # Convert this to advantage-filtered logprobs - instead of overall mean, we take the 'mean' of the valid actions
+        num_of_valid_actions = jnp.sum(nn.relu(jnp.sign(batch.advantages)).astype(jnp.bool_))
+        actor_loss = loss_fn[list(kwargs['actor_loss_fn'].keys())[0]](logits,
+                                                                      batch,
+                                                                      **kwargs).sum() / num_of_valid_actions
 
         # Return the loss value, plus metadata
         return actor_loss, {'actor_loss': actor_loss,
