@@ -29,7 +29,7 @@ config = {'seed': 123,
 
 if __name__ == "__main__":
     from core.agent import PPOAgent
-    from core.common import progress_bar, shuffle_split_batch, alter_batch, flatten_batch
+    from core.common import progress_bar, shuffle_split_batch, alter_batch, flatten_batch, downsample_batch
     from core.evaluate import evaluate_envs, run_and_animate
     from core.envs import EpisodeGenerator, make_variable_env
 
@@ -99,7 +99,7 @@ if __name__ == "__main__":
         batch = alter_batch(batch, **removed_data)
 
         # Flatten the batch (optional: downsample if steps specified)
-        batch, random_key = flatten_batch(batch, random_key, steps=config['steps'])
+        batch, random_key = downsample_batch(flatten_batch(batch), random_key, steps=config['steps'])
 
         # Train agent
         for epoch in tqdm(range(config['epochs'])):
@@ -155,7 +155,7 @@ if __name__ == "__main__":
             batch = alter_batch(batch, **removed_data)
 
             # Select a random subset of the batch
-            batch, random_key = flatten_batch(batch, random_key, config['steps'])
+            batch, random_key = downsample_batch(flatten_batch(batch), random_key, steps=config['steps'])
 
             # Calculate the average reward, log and print it
             average_reward = np.median(excess_data['episode_rewards'])

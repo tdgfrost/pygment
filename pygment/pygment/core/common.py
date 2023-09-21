@@ -190,7 +190,7 @@ def shuffle_split_batch(batch: Batch, steps=1000, batch_size=64):
         yield Batch(**shuffled_batch)
 
 
-def flatten_batch(batch: Batch, random_key, steps=None):
+def flatten_batch(batch: Batch):
     flattened_batch = batch._asdict()
     available_steps = 0
     coordinates = {}
@@ -202,12 +202,7 @@ def flatten_batch(batch: Batch, random_key, steps=None):
                     available_steps += 1
             break
 
-    if steps is None:
-        flat_idx = np.array([i for i in range(available_steps)])
-    else:
-        flat_idx = np.random.default_rng(int(random_key[0])).choice([i for i in range(available_steps)],
-                                                                    size=min(steps, available_steps),
-                                                                    replace=False)
+    flat_idx = np.array([i for i in range(available_steps)])
 
     for key, val in flattened_batch.items():
         if val is None:
@@ -219,8 +214,33 @@ def flatten_batch(batch: Batch, random_key, steps=None):
         else:
             flattened_batch[key] = np.array([val[coordinates[idx][0]][coordinates[idx][1]] for idx in flat_idx])
 
+    return Batch(**flattened_batch)
+
+
+def downsample_batch(batch: Batch, random_key, steps=None):
+    downsampled_batch = batch._asdict()
+    available_steps = len(downsampled_batch['states'])
+
+    if steps is None:
+        return Batch(**downsampled_batch), random_key
+
+    else:
+        flat_idx = np.random.default_rng(int(random_key[0])).choice([i for i in range(available_steps)],
+                                                                    size=min(steps, available_steps),
+                                                                    replace=False)
+
+    for key, val in downsampled_batch.items():
+        if val is None:
+            continue
+        if key == 'rewards':
+            downsampled_batch[key] = [val[idx] for idx in flat_idx]
+        elif key == 'episode_rewards':
+            downsampled_batch[key] = val
+        else:
+            downsampled_batch[key] = val[flat_idx]
+
     random_key = jax.random.split(random_key, num=1)[0]
-    return Batch(**flattened_batch), random_key
+    return Batch(**downsampled_batch), random_key
 
 
 def alter_batch(batch, **kwargs):

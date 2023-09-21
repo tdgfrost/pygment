@@ -28,11 +28,11 @@ class BaseAgent:
         :param path: optional path to save the agent to.
         """
         now = dt.datetime.now()
-        now = f'./experiments/{now.year}_{now.month}_{now.day:02}_{now.hour:02}{now.minute:02}{now.second:02}'
+        now = f'{now.year}_{now.month}_{now.day:02}_{now.hour:02}{now.minute:02}{now.second:02}'
         if path is None:
             self.path = now
         else:
-            self.path = os.path.join(path, now.lstrip('./'))
+            self.path = os.path.join(path, now)
 
     @staticmethod
     def sample(data,

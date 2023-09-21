@@ -25,9 +25,10 @@ def evaluate_envs(policy, environments):
     dones = np.array([False for _ in range(nodes)])
     idxs = np.array([i for i in range(nodes)])
     all_rewards = np.array([0. for _ in range(nodes)])
-
+    step = 0
     while not dones.all():
-        progress_bar(dones.sum(), nodes)
+        step += 1
+        progress_bar(step, 1000)
         # Step through environments
         actions = policy.sample_action(states, key)[0]
         states, rewards, new_dones, prem_dones = environments.step(actions)

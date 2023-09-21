@@ -34,10 +34,9 @@ if __name__ == "__main__":
     del env
 
     # Load previous checkpoints
-    reward = 1
-    filename = './experiments/Experiment_2/model_checkpoints'
+    reward = 190
+    filename = './experiments/PPO/Experiment_2/model_checkpoints'
     agent.actor = agent.actor.load(os.path.join(filename, f'actor_{reward}'))
-    agent.value = agent.value.load(os.path.join(filename, f'value_{reward}'))
 
     # Create variable environment template (optional)
     def extra_step_filter(x):
