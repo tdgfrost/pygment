@@ -19,7 +19,7 @@ Batch = namedtuple('Batch', fields, defaults=(None,) * len(fields))
 
 def load_data(path: str,
               scale: str,
-              gamma: float = 0.99) -> Dict[AnyStr, np.ndarray]:
+              gamma: float = 0.99) -> Batch:
     """
     Load data from path
     :param path: Provide a path to the folder containing the data

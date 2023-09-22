@@ -34,6 +34,8 @@ class BaseAgent:
         else:
             self.path = os.path.join(path, now)
 
+        self.networks = []
+
     @staticmethod
     def sample(data,
                batch_size):
@@ -61,6 +63,17 @@ class BaseAgent:
                 batch[key] = val[idxs]
 
         return Batch(**batch)
+
+    def standardise_inputs(self, inputs: np.ndarray):
+        """
+        Standardises the inputs to the networks.
+
+        :param inputs: inputs to the networks.
+        :return: standardised inputs.
+        """
+        for network in self.networks:
+            network.__dict__['input_mean'] = np.mean(inputs, axis=0)
+            network.__dict__['input_std'] = np.maximum(np.std(inputs, axis=0), 1e-8)
 
 
 class IQLAgent(BaseAgent):
@@ -127,6 +140,8 @@ class IQLAgent(BaseAgent):
                                   inputs=[self.value_key, observations],
                                   optim=optax.adam(learning_rate=value_lr),
                                   continual_learning=continual_learning)
+
+        self.networks = [self.actor, self.critic, self.value]
 
     def update(self, batch: Batch, **kwargs) -> InfoDict:
         """
@@ -260,6 +275,8 @@ class PPOAgent(BaseAgent):
         self.value = Model.create(ValueNet(hidden_dims),
                                   inputs=[self.value_key, observations],
                                   optim=optax.adam(learning_rate=value_lr))
+
+        self.networks = [self.actor, self.value]
 
     def update(self, batch: Batch, **kwargs) -> InfoDict:
         """

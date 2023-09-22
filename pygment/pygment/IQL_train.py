@@ -14,13 +14,13 @@ import wandb
 # Define config file - could change to FLAGS at some point
 config = {'seed': 123,
           'epochs': int(1e6),
-          'early_stopping': 200,
-          'value_batch_size': 1024,
-          'critic_batch_size': 1024,
-          'actor_batch_size': 1024 / (1-0.9),
+          'early_stopping': 1000,
+          'value_batch_size': 256,
+          'critic_batch_size': 256,
+          'actor_batch_size': int(256 / (1-0.9)),
           # Need to separate out batch sizes for value/critic networks (all data) and actor (only the subsampled data)
           'expectile': 0.9,
-          'gamma': 0.999,
+          'gamma': 0.99,
           'actor_lr': 0.001,
           'value_lr': 0.001,
           'critic_lr': 0.001,
@@ -60,9 +60,12 @@ if __name__ == "__main__":
 
     # Load static dataset
     print('Loading and processing dataset...')
-    data = load_data(path='./offline_datasets/LunarLander/dataset_4/dataset_combined.pkl',
+    data = load_data(path='./offline_datasets/LunarLander/dataset_2/dataset_reward_85.pkl',
                      scale='standardise',
                      gamma=config['gamma'])
+
+    # Standardise the state inputs
+    agent.standardise_inputs(data.states)
 
     # Make sure this matches with the desired dataset's extra_step metadata
     def extra_step_filter(x):
@@ -108,12 +111,14 @@ if __name__ == "__main__":
 
                 # Calculate next state values, discounted rewards (for critic update), and current advantages
                 next_state_values = agent.value(batch.next_states)[1] if is_net('critic') else None
-                rewards = calc_traj_discounted_rewards(batch.rewards, config['gamma'])
+                rewards = calc_traj_discounted_rewards(batch.rewards, config['gamma']) if is_net('critic') else None
 
                 advantages = (filter_to_action(jnp.minimum(*agent.critic(batch.states)[1]),
                                                batch.actions)
                               - agent.value(batch.states)[1]) if is_net('actor') else None
                 batch = alter_batch(batch, advantages=advantages)
+
+                # Standardise the advantages!
 
                 # Remove excess from the batch
                 excess_data = {}
@@ -173,7 +178,9 @@ if __name__ == "__main__":
 
         print('\n\n', '=' * 50, '\n', ' ' * 3, '\U0001F514' * 3, ' ' * 1, f'Evaluating network', ' ' * 2,
               '\U0001F514' * 3, '\n', '=' * 50)
-        results = evaluate_envs(agent, make_vec_env('LunarLander-v2', n_envs=envs_to_evaluate))
+        results = evaluate_envs(agent, make_vec_env(lambda: make_variable_env('LunarLander-v2',
+                                                                              fn=extra_step_filter),
+                                                    n_envs=envs_to_evaluate))
         print(f'\nMedian reward: {np.median(results)}')
 
         # Animate the agent's performance

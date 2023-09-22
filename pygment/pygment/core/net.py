@@ -82,13 +82,16 @@ class ValueNet(nn.Module):
     activations: Callable[[jnp.ndarray], jnp.ndarray] = nn.relu
 
     @nn.compact
-    def __call__(self, observations: jnp.ndarray) -> tuple[dict[str, dict[int, Any]], Array]:
+    def __call__(self, observations: jnp.ndarray, input_mean=0, input_std=1) -> tuple[dict[str, dict[int, Any]], Array]:
         """
         Value network forward pass.
 
         :param observations: input data for the forward pass
         :return: output of the value network
         """
+
+        # Standardise the input data
+        observations = (observations - input_mean) / input_std
 
         # Do a forward pass with the MLP
         layer_outputs, value = MLP((*self.hidden_dims, 1),
@@ -113,7 +116,7 @@ class CriticNet(nn.Module):
     activations: Callable[[jnp.ndarray], jnp.ndarray] = nn.relu
 
     @nn.compact
-    def __call__(self, observations: jnp.ndarray) -> tuple[dict[str, dict[int, Any]], Any]:
+    def __call__(self, observations: jnp.ndarray, input_mean=0, input_std=1) -> tuple[dict[str, dict[int, Any]], Any]:
         """
         Critic network forward pass.
 
@@ -127,6 +130,10 @@ class CriticNet(nn.Module):
         
         Instead, we just treat the action as another input to the network.
         """
+        # Standardise the input data
+        observations = (observations - input_mean) / input_std
+
+        # Forward pass
         layer_outputs, critic = MLP((*self.hidden_dims, self.action_dims),
                                     activations=self.activations)(observations)
 
@@ -149,13 +156,15 @@ class DoubleCriticNet(nn.Module):
     activations: Callable[[jnp.ndarray], jnp.ndarray] = nn.relu
 
     @nn.compact
-    def __call__(self, observations: jnp.ndarray) -> tuple[dict[str, dict[int, Any]], tuple[Any, Any]]:
+    def __call__(self, observations: jnp.ndarray, input_mean=0, input_std=1) -> tuple[dict[str, dict[int, Any]], tuple[Any, Any]]:
         """
         Double critic network forward pass.
 
         :param observations: input data for each critic's forward pass
         :return: output of each critic network
         """
+        # Standardise the input data
+        observations = (observations - input_mean) / input_std
 
         # Forward pass for each critic network MLP
         layer_outputs_q1, critic1 = MLP((*self.hidden_dims, self.action_dims),
@@ -183,13 +192,15 @@ class ActorNet(nn.Module):
     activations: Callable[[jnp.ndarray], jnp.ndarray] = nn.relu
 
     @nn.compact
-    def __call__(self, observations: jnp.ndarray) -> tuple[dict[str, dict[int, Any]], Any]:
+    def __call__(self, observations: jnp.ndarray, input_mean=0, input_std=1) -> tuple[dict[str, dict[int, Any]], Any]:
         """
         Actor network forward pass.
 
         :param observations: input data for the forward pass
         :return: output of the actor network
         """
+        # Standardise the input data
+        observations = (observations - input_mean) / input_std
 
         # Forward pass with the MLP
         layer_outputs, logits = MLP((*self.hidden_dims, self.action_dims))(observations)
@@ -225,6 +236,8 @@ class Model:
     decay_rate: float = 0.99
     replacement_rate: float = 0.01
     maturity_threshold: int = 50
+    input_mean: float = 0
+    input_std: float = 1
 
     @classmethod
     def create(cls,
@@ -289,11 +302,16 @@ class Model:
         :return: output of the neural network
         """
 
-        return self.network.apply({'params': self.params}, *args)
+        return self.network.apply({'params': self.params}, *args,
+                                  input_mean=self.input_mean,
+                                  input_std=self.input_std)
 
     @jit
     def apply(self, *args, **kwargs):
-        return self.network.apply(*args, **kwargs)
+        return self.network.apply(*args,
+                                  input_mean=self.input_mean,
+                                  input_std=self.input_std,
+                                  **kwargs)
 
     def apply_gradient(self, loss_fn) -> Tuple['Model', Any]:
         """
