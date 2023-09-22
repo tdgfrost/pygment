@@ -34,10 +34,16 @@ def update_policy(actor: Model, batch: Batch, **kwargs) -> Tuple[Model, InfoDict
                                             batch.states)
 
         # Convert this to advantage-filtered logprobs - instead of overall mean, we take the 'mean' of the valid actions
+        """
         num_of_valid_actions = jnp.sum(nn.relu(jnp.sign(batch.advantages)).astype(jnp.bool_))
+        actor_loss = loss_fn[list(kwargs['actor_loss_fn'].keys())[0]](logits, 
+                                                                        batch, **kwargs).sum() / num_of_valid_actions
+        """
+        # EXPERIMENTAL (also need to update loss function)
+        # - try to move towards positive advantages and away from negative advantages
         actor_loss = loss_fn[list(kwargs['actor_loss_fn'].keys())[0]](logits,
                                                                       batch,
-                                                                      **kwargs).sum() / num_of_valid_actions
+                                                                      **kwargs).mean()
 
         # Return the loss value, plus metadata
         return actor_loss, {'actor_loss': actor_loss,

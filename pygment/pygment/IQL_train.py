@@ -17,9 +17,10 @@ config = {'seed': 123,
           'early_stopping': 1000,
           'value_batch_size': 256,
           'critic_batch_size': 256,
-          'actor_batch_size': int(256 / (1-0.9)),
+          'actor_batch_size': int(256 / (1-0.5)),
+          #'actor_batch_size': 256,
           # Need to separate out batch sizes for value/critic networks (all data) and actor (only the subsampled data)
-          'expectile': 0.9,
+          'expectile': 0.5,
           'gamma': 0.99,
           'actor_lr': 0.001,
           'value_lr': 0.001,
@@ -29,6 +30,7 @@ config = {'seed': 123,
           'top_bar_coord': 1.2,  # 0.9,
           'bottom_bar_coord': 0.8,  # 0.5
           }
+
 
 if __name__ == "__main__":
     from core.agent import IQLAgent
@@ -100,6 +102,10 @@ if __name__ == "__main__":
             best_loss = jnp.inf
             total_training_steps = 0
             count = 0
+
+            # Keep track of the best loss values
+            wandb.define_metric(f'{current_net}_loss', summary='min')
+
             def is_net(x): return x == current_net
 
             for epoch in range(config['epochs']):
@@ -116,9 +122,14 @@ if __name__ == "__main__":
                 advantages = (filter_to_action(jnp.minimum(*agent.critic(batch.states)[1]),
                                                batch.actions)
                               - agent.value(batch.states)[1]) if is_net('actor') else None
-                batch = alter_batch(batch, advantages=advantages)
 
-                # Standardise the advantages!
+                # EXPERIMENTAL!! - add advantage normalisation
+                """
+                advantages = (advantages - jnp.mean(advantages)) / (jnp.maximum(jnp.std(advantages), 1e-8)) \
+                    if is_net('actor') else None
+                """
+
+                batch = alter_batch(batch, advantages=advantages)
 
                 # Remove excess from the batch
                 excess_data = {}
@@ -155,6 +166,7 @@ if __name__ == "__main__":
                             os.path.join(model_dir, 'model_checkpoints/critic')) if is_net('critic') else agent.critic
                         agent.value = agent.value.load(
                             os.path.join(model_dir, 'model_checkpoints/value')) if is_net('value') else agent.value
+
                         break
 
                 # Log intermittently

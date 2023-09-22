@@ -38,12 +38,12 @@ def expectile_loss(pred, batch, expectile=0.8, **kwargs):
     Uses the formula L[ c^2/2 * log(loss^2 / c^2 + 1)]
     In this case, c is set to sqrt(2), so the formula simplifies to L[log(loss^2/2 + 1)]
 
-    :param diff: the error term
+    :param pred: the predicted values
+    :param batch: Batch containing the target values
     :param expectile: the expectile value
     :return: the loss term
     """
     diff = pred - batch.discounted_rewards
-
     weight = jnp.where(diff > 0, (1 - expectile), expectile)
     return weight * jnp.log(diff ** 2 / 2 + 1)
 
@@ -77,6 +77,11 @@ def iql_loss(logits, batch, **kwargs):
     adv_filter = nn.relu(jnp.sign(batch.advantages)).astype(jnp.bool_)
     action_logprobs = jnp.where(adv_filter, action_logprobs, 0.)
 
+    # EXPERIMENTAL - try to move towards positive advantages and away from negative advantages
+    """
+    adv_filter = jnp.exp(5 * batch.advantages)
+    action_logprobs *= adv_filter
+    """
     # Return the advantage-filtered logprobs
     return -action_logprobs
 
