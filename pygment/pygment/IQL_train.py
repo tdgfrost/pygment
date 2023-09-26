@@ -5,6 +5,7 @@ import os
 import jax.numpy as jnp
 from stable_baselines3.common.env_util import make_vec_env
 import wandb
+import flax.linen as nn
 
 # Set jax to CPU
 # jax.config.update('jax_platform_name', 'cpu')
@@ -17,14 +18,16 @@ config = {'seed': 123,
           'early_stopping': 1000,
           'value_batch_size': 256,
           'critic_batch_size': 256,
+          'interval_batch_size': 256,
           'actor_batch_size': int(256 / (1-0.5)),
           #'actor_batch_size': 256,
           # Need to separate out batch sizes for value/critic networks (all data) and actor (only the subsampled data)
-          'expectile': 0.5,
+          'expectile': 0.3,
           'gamma': 0.99,
           'actor_lr': 0.001,
           'value_lr': 0.001,
           'critic_lr': 0.001,
+          'interval_lr': 0.001,
           'hidden_dims': (64, 64),
           'clipping': 1,
           'top_bar_coord': 1.2,  # 0.9,
@@ -43,12 +46,22 @@ if __name__ == "__main__":
     logging = True
     evaluate = True
 
+    # Load static dataset
+    print('Loading and processing dataset...')
+    data = load_data(path='./offline_datasets/LunarLander/dataset_4/dataset_combined.pkl',
+                     scale='standardise',
+                     gamma=config['gamma'])
+
+    intervals = np.array([len(traj) for traj in data.rewards])
+    interval_range = intervals.max() - intervals.min() + 1  # Range is inclusive so add 1 to this number
+
     # Create agent
     dummy_env = make_env('LunarLander-v2')
 
     agent = IQLAgent(observations=dummy_env.observation_space.sample(),
                      action_dim=dummy_env.action_space.n,
-                     dropout_rate=None,
+                     interval_dim=interval_range,
+                     interval_min=intervals.min(),
                      opt_decay_schedule="cosine",
                      **config)
 
@@ -59,12 +72,6 @@ if __name__ == "__main__":
         f.close()
 
     del dummy_env
-
-    # Load static dataset
-    print('Loading and processing dataset...')
-    data = load_data(path='./offline_datasets/LunarLander/dataset_2/dataset_reward_85.pkl',
-                     scale='standardise',
-                     gamma=config['gamma'])
 
     # Standardise the state inputs
     agent.standardise_inputs(data.states)
@@ -94,7 +101,12 @@ if __name__ == "__main__":
                 config=config,
             )
 
-        for current_net in ['value', 'critic', 'actor']:
+        #for current_net in ['interval', 'value', 'critic', 'actor']:
+        temp = '/Users/thomasfrost/Documents/Github/pygment/pygment/pygment/pygment/experiments/IQL/Experiment_9/model_checkpoints'
+        agent.critic = agent.critic.load(os.path.join(temp, 'critic'))
+        agent.value = agent.value.load(os.path.join(temp, 'value'))
+        agent.interval = agent.interval.load(os.path.join(temp, 'interval'))
+        for current_net in ['actor']:
             print('\n\n', '=' * 50, '\n', ' ' * 3, '\U0001F483' * 3, ' ' * 1, f'Training {current_net} network', ' ' * 2,
                   '\U0001F483' * 3, '\n', '=' * 50, '\n')
             # loss_key = f"{'value' if value else ('critic' if critic else 'actor')}_loss"
@@ -103,8 +115,9 @@ if __name__ == "__main__":
             total_training_steps = 0
             count = 0
 
-            # Keep track of the best loss values
-            wandb.define_metric(f'{current_net}_loss', summary='min')
+            if logging:
+                # Keep track of the best loss values
+                wandb.define_metric(f'{current_net}_loss', summary='min')
 
             def is_net(x): return x == current_net
 
@@ -115,19 +128,49 @@ if __name__ == "__main__":
                 batch = agent.sample(data,
                                      config[f'{current_net}_batch_size'])
 
-                # Calculate next state values, discounted rewards (for critic update), and current advantages
-                next_state_values = agent.value(batch.next_states)[1] if is_net('critic') else None
-                rewards = calc_traj_discounted_rewards(batch.rewards, config['gamma']) if is_net('critic') else None
+                # Calculate next state values
+                rewards = None
+                next_state_values = None
+                if is_net('critic'):
+                    # Calculate the real TD value from next_state_value + current_state rewards
+                    next_state_values = agent.value(batch.next_states)[1]
+                    next_state_intervals = nn.softmax(agent.interval(batch.next_states)[1], axis=-1)
+                    next_state_values = (next_state_values * next_state_intervals).sum(-1)
 
-                advantages = (filter_to_action(jnp.minimum(*agent.critic(batch.states)[1]),
-                                               batch.actions)
-                              - agent.value(batch.states)[1]) if is_net('actor') else None
+                    rewards = calc_traj_discounted_rewards(batch.rewards, config['gamma'])
+                    len_actions = jnp.array([len(traj) for traj in batch.rewards])
+                    gammas = jnp.ones(shape=len(rewards)) * config['gamma']
+                    gammas = jnp.power(gammas, len_actions)
+                    rewards = rewards + gammas * next_state_values * (1 - batch.dones)
 
-                # EXPERIMENTAL!! - add advantage normalisation
-                """
-                advantages = (advantages - jnp.mean(advantages)) / (jnp.maximum(jnp.std(advantages), 1e-8)) \
-                    if is_net('actor') else None
-                """
+                    # Then calculate the rest of the theoretical current state values,
+                    # and insert the real TD value at the appropriate place
+                    current_state_values = agent.value(batch.states)[1]
+                    current_state_mask = jnp.array([[False if bool_idx != action_len else True for bool_idx in range(interval_range)]
+                                                    for action_len in len_actions - intervals.min()])
+
+                    current_state_values = current_state_values.at[current_state_mask].set(rewards)
+
+                    # Finally, multiply by the probability distribution and sum for an average
+                    current_state_intervals = nn.softmax(agent.interval(batch.states)[1], axis=-1)
+                    discounted_rewards = (current_state_intervals * current_state_values).sum(-1)
+
+                    batch = alter_batch(batch, discounted_rewards=discounted_rewards)
+
+                # Calculate advantages
+                advantages = None
+                if is_net('actor'):
+                    critic_values = filter_to_action(jnp.minimum(*agent.critic(batch.states)[1]),
+                                                     batch.actions)
+
+                    state_values = agent.value(batch.states)[1]
+                    state_intervals = nn.softmax(agent.interval(batch.states)[1], axis=-1)
+                    state_values = (state_values * state_intervals).sum(-1)
+
+                    advantages = critic_values - state_values
+
+                    # Try normalising advantages
+                    advantages = (advantages - advantages.mean()) / jnp.maximum(advantages.std(), 1e-8)
 
                 batch = alter_batch(batch, advantages=advantages)
 
@@ -140,12 +183,14 @@ if __name__ == "__main__":
                 batch = Batch(**batch)
                 loss_info = agent.update_async(batch,
                                                value_loss_fn={'expectile': 0},
-                                               critic_loss_fn={'td_mse': 0},
+                                               #critic_loss_fn={'td_mse': 0},
+                                               critic_loss_fn={'mc_mse': 0},
                                                actor_loss_fn={'iql': 0},
                                                expectile=config['expectile'],
                                                gamma=config['gamma'],
                                                rewards=rewards,
                                                next_state_values=next_state_values,
+                                               interval_min=intervals.min(),
                                                **{current_net: True})
 
                 total_training_steps += config[f'{current_net}_batch_size']
@@ -157,16 +202,20 @@ if __name__ == "__main__":
                     agent.actor.save(os.path.join(model_dir, 'model_checkpoints/actor')) if is_net('actor') else None
                     agent.critic.save(os.path.join(model_dir, 'model_checkpoints/critic')) if is_net('critic') else None
                     agent.value.save(os.path.join(model_dir, 'model_checkpoints/value')) if is_net('value') else None
+                    agent.interval.save(os.path.join(model_dir, 'model_checkpoints/interval')) if is_net('interval') else None
                 else:
                     count += 1
                     if count > config['early_stopping']:
+                        """
                         agent.actor = agent.actor.load(
                             os.path.join(model_dir, 'model_checkpoints/actor')) if is_net('actor') else agent.actor
                         agent.critic = agent.critic.load(
                             os.path.join(model_dir, 'model_checkpoints/critic')) if is_net('critic') else agent.critic
                         agent.value = agent.value.load(
                             os.path.join(model_dir, 'model_checkpoints/value')) if is_net('value') else agent.value
-
+                        agent.interval = agent.interval.load(
+                            os.path.join(model_dir, 'model_checkpoints/interval')) if is_net('interval') else agent.interval
+                        """
                         break
 
                 # Log intermittently

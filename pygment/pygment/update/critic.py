@@ -6,6 +6,7 @@ from update.loss import mc_mse_loss, td_mse_loss, expectile_loss
 
 import jax.numpy as jnp
 import jax
+import optax
 
 from typing import Tuple
 
@@ -23,9 +24,15 @@ def update_v(value: Model, batch: Batch, **kwargs) -> Tuple[Model, InfoDict]:
                'td_mse': td_mse_loss,
                'expectile': expectile_loss}
 
+    # Unpack the actions, states, and discounted rewards from the batch of samples
+    states = batch.states
+    len_actions = jnp.array([len(traj) for traj in batch.rewards]) - kwargs['interval_min']
+
     def value_loss_fn(value_params: Params) -> tuple[Array, dict[str, Array]]:
         # Generate V(s) for the sample states
-        layer_outputs, v = value.apply({'params': value_params}, batch.states)
+        layer_outputs, v = value.apply({'params': value_params}, states)
+
+        v = filter_to_action(v, len_actions)
 
         # Calculate the loss for V using Q with expectile regression
         value_loss = loss_fn[list(kwargs['value_loss_fn'].keys())[0]](v, batch, **kwargs).mean()
@@ -70,20 +77,7 @@ def update_q(critic: Model, batch: Batch, **kwargs) -> Tuple[Model, InfoDict]:
         q1 = jnp.squeeze(jnp.take_along_axis(q1, actions, axis=-1), -1)
         q2 = jnp.squeeze(jnp.take_along_axis(q2, actions, axis=-1), -1)
         """
-        """
-        q1 = jax.lax.gather(q1,
-                            jnp.concatenate((jnp.arange(len(actions)).reshape(-1, 1), actions), axis=1),
-                            jax.lax.GatherDimensionNumbers(
-                                offset_dims=tuple([]),
-                                collapsed_slice_dims=tuple([0, 1]),
-                                start_index_map=tuple([0, 1])), tuple([1, 1]))
-        q2 = jax.lax.gather(q2,
-                            jnp.concatenate((jnp.arange(len(actions)).reshape(-1, 1), actions), axis=1),
-                            jax.lax.GatherDimensionNumbers(
-                                offset_dims=tuple([]),
-                                collapsed_slice_dims=tuple([0, 1]),
-                                start_index_map=tuple([0, 1])), tuple([1, 1]))
-        """
+
         q1 = filter_to_action(q1, actions)
         q2 = filter_to_action(q2, actions)
 
@@ -103,3 +97,34 @@ def update_q(critic: Model, batch: Batch, **kwargs) -> Tuple[Model, InfoDict]:
 
     # Return the new model parameters, plus loss metadata
     return new_critic, info
+
+
+def update_interval(interval: Model, batch: Batch, **kwargs) -> Tuple[Model, InfoDict]:
+    """
+    Function to update the Q network
+    :param interval: the interval network to be updated
+    :param batch: a Batch object of samples
+    :return: a tuple containing the new model parameters, plus metadata
+    """
+
+    # Unpack the actions, states, and discounted rewards from the batch of samples
+    states = batch.states
+    len_actions = jnp.array([len(traj) for traj in batch.rewards]) - kwargs['interval_min']
+
+    def interval_loss_fn(interval_params: Params) -> tuple[Array, dict[str, Array]]:
+        # Generate Q values from each of the two critic networks
+        layer_outputs, logits = interval.apply({'params': interval_params}, states)
+
+        interval_loss = optax.softmax_cross_entropy_with_integer_labels(logits, len_actions).mean()
+
+        # Return the loss value, plus metadata
+        return interval_loss, {
+            'interval_loss': interval_loss,
+            'layer_outputs': layer_outputs,
+        }
+
+    # Calculate the updated model parameters using the loss function
+    new_interval, info = interval.apply_gradient(interval_loss_fn)
+
+    # Return the new model parameters, plus loss metadata
+    return new_interval, info

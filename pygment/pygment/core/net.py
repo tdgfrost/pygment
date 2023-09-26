@@ -79,6 +79,7 @@ class ValueNet(nn.Module):
     """
 
     hidden_dims: Sequence[int]
+    output_dims: int = 1
     activations: Callable[[jnp.ndarray], jnp.ndarray] = nn.relu
 
     @nn.compact
@@ -94,11 +95,11 @@ class ValueNet(nn.Module):
         observations = (observations - input_mean) / input_std
 
         # Do a forward pass with the MLP
-        layer_outputs, value = MLP((*self.hidden_dims, 1),
+        layer_outputs, value = MLP((*self.hidden_dims, self.output_dims),
                                    activations=self.activations)(observations)
 
         # Return the output
-        return {'MLP_0': layer_outputs}, jnp.squeeze(value, -1)
+        return {'MLP_0': layer_outputs}, value
 
 
 class CriticNet(nn.Module):

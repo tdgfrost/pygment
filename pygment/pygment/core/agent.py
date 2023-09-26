@@ -1,6 +1,6 @@
-from core.net import Model, ValueNet, ActorNet, DoubleCriticNet
+from core.net import Model, ValueNet, ActorNet, DoubleCriticNet, CriticNet
 from core.common import Batch, InfoDict, alter_batch
-from update.actions import _update_jit, _update_value_jit, _update_critic_jit, _update_actor_jit
+from update.actions import _update_jit, _update_value_jit, _update_critic_jit, _update_actor_jit, _update_interval_jit
 
 import os
 import datetime as dt
@@ -85,9 +85,12 @@ class IQLAgent(BaseAgent):
                  seed: int,
                  observations: np.ndarray,
                  action_dim: int,
+                 interval_dim: int,
+                 interval_min: int,
                  actor_lr: float = 3e-4,
                  value_lr: float = 3e-4,
                  critic_lr: float = 3e-4,
+                 interval_lr: float = 3e-4,
                  hidden_dims: Sequence[int] = (256, 256),
                  gamma: float = 0.99,
                  expectile: float = 0.8,
@@ -103,10 +106,11 @@ class IQLAgent(BaseAgent):
 
         # Set random seed
         rng = jax.random.PRNGKey(seed)
-        self.rng, self.actor_key, self.critic_key, self.value_key = jax.random.split(rng, 4)
+        self.rng, self.actor_key, self.critic_key, self.interval_key, self.value_key = jax.random.split(rng, 5)
 
         # Set parameters
         self.action_dim = action_dim
+        self.interval_dim = interval_dim
 
         # Set hyperparameters
         self.expectile = expectile
@@ -136,7 +140,12 @@ class IQLAgent(BaseAgent):
                                    optim=optax.adam(learning_rate=critic_lr),
                                    continual_learning=continual_learning)
 
-        self.value = Model.create(ValueNet(hidden_dims),
+        self.interval = Model.create(CriticNet(hidden_dims, self.interval_dim),
+                                     inputs=[self.interval_key, observations],
+                                     optim=optax.adam(learning_rate=interval_lr),
+                                     continual_learning=continual_learning)
+
+        self.value = Model.create(ValueNet(hidden_dims, self.interval_dim),
                                   inputs=[self.value_key, observations],
                                   optim=optax.adam(learning_rate=value_lr),
                                   continual_learning=continual_learning)
@@ -165,7 +174,7 @@ class IQLAgent(BaseAgent):
         # Return the metadata
         return info
 
-    def update_async(self, batch: Batch, actor: bool = False,
+    def update_async(self, batch: Batch, interval:bool = False, actor: bool = False,
                      critic: bool = False, value: bool = False, **kwargs) -> InfoDict:
         """
         Updates the agent's networks asynchronously.
@@ -178,6 +187,10 @@ class IQLAgent(BaseAgent):
         """
 
         # Create an updated copy of the required networks
+        new_interval, interval_info = _update_interval_jit(
+            self.interval, batch, **kwargs) if interval else (self.interval, {}
+        )
+
         new_rng, new_actor, actor_info = _update_actor_jit(
             self.rng, self.actor, batch, **kwargs) if actor else (self.rng, self.actor, {})
 
@@ -192,9 +205,11 @@ class IQLAgent(BaseAgent):
         self.actor = new_actor
         self.critic = new_critic
         self.value = new_value
+        self.interval = new_interval
 
         # Return the metadata
         return {
+            **interval_info,
             **critic_info,
             **value_info,
             **actor_info
