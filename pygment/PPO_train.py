@@ -51,6 +51,17 @@ if __name__ == "__main__":
                 allow_val_change=True,
             )
 
+            hidden_dim = wandb.config['dims']
+
+            wandb.config.update({'hidden_dims': (hidden_dim, hidden_dim),
+                                 'seed': 123,
+                                 'epochs': 300,
+                                 'continual_learning': True,
+                                 'steps': None,
+                                 'top_bar_coord': 1.2,
+                                 'bottom_bar_coord': 0.8,
+             })
+
             config = wandb.config
 
             wandb.define_metric('actor_loss', summary='min')
@@ -70,9 +81,6 @@ if __name__ == "__main__":
             wandb.define_metric('value_loss', summary='min')
             wandb.define_metric('episode_reward', summary='max')
             """
-
-        hidden_dim = config['dims']
-        config['hidden_dims'] = (hidden_dim, hidden_dim)
 
         # Create agent
         dummy_env = make_env('LunarLander-v2')
@@ -118,6 +126,7 @@ if __name__ == "__main__":
         random_key = jax.random.PRNGKey(123)
 
         # Sample first batch
+        print('\nSampling...')
         batch, random_key = sampler(agent, key=random_key, verbose=True)
 
         # Remove anything not needed for jitted training
@@ -130,7 +139,6 @@ if __name__ == "__main__":
         batch = alter_batch(batch, **removed_data)
 
         # Flatten the batch (optional: downsample if steps specified)
-        print('\nSampling...')
         batch, random_key = downsample_batch(flatten_batch(batch), random_key, steps=config['steps'])
 
         # Train agent
