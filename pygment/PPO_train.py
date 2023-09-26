@@ -70,6 +70,9 @@ if __name__ == "__main__":
             wandb.define_metric('episode_reward', summary='max')
             """
 
+        hidden_dim = config['hidden_dims']
+        config['hidden_dims'] = (hidden_dim, hidden_dim)
+
         # Create agent
         dummy_env = make_env('LunarLander-v2')
         agent = PPOAgent(observations=dummy_env.observation_space.sample(),
