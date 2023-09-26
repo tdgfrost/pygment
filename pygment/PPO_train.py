@@ -70,12 +70,16 @@ if __name__ == "__main__":
     # Train agent
     if train:
         if logging:
-            os.environ['WANDB_BASE_URL'] = "http://localhost:8080"
+            # os.environ['WANDB_BASE_URL'] = "http://localhost:8080"
             # Prepare logging
             wandb.init(
                 project="PPO-VariableTimeSteps",
                 config=config,
             )
+            # Keep track of the best loss values
+            wandb.define_metric('actor_loss', summary='min')
+            wandb.define_metric('value_loss', summary='min')
+            wandb.define_metric('episode_reward', summary='max')
 
         total_training_steps = 0
 
@@ -182,7 +186,8 @@ if __name__ == "__main__":
                 wandb.log({'actor_loss': actor_loss,
                            'critic_loss': critic_loss,
                            'episode_reward': average_reward,
-                           'step': total_training_steps})
+                           'gradient_step': epoch,
+                           'training_step': total_training_steps})
 
             if best_reward > 300:
                 agent.actor.save(os.path.join('./experiments',
