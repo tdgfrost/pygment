@@ -17,7 +17,7 @@ config = {'seed': 123,
           'continual_learning': True,
           'steps': None,
           'batch_size': 32,
-          'n_envs': 500,
+          'n_envs': 20,
           'gamma': 0.99,
           'actor_lr': 0.001,
           'value_lr': 0.001,
@@ -98,7 +98,7 @@ if __name__ == "__main__":
         random_key = jax.random.PRNGKey(123)
 
         # Sample first batch
-        batch, random_key = sampler(agent, key=random_key)
+        batch, random_key = sampler(agent, key=random_key, verbose=True)
 
         # Remove anything not needed for jitted training
         excess_data = {}
@@ -110,6 +110,7 @@ if __name__ == "__main__":
         batch = alter_batch(batch, **removed_data)
 
         # Flatten the batch (optional: downsample if steps specified)
+        print('\nSampling...')
         batch, random_key = downsample_batch(flatten_batch(batch), random_key, steps=config['steps'])
 
         # Train agent
@@ -155,7 +156,8 @@ if __name__ == "__main__":
             random_key = jax.random.split(random_key, 1)[0]
 
             # Generate the next batch using the updated agent
-            batch, random_key = sampler(agent, key=random_key)
+            print('\nSampling...')
+            batch, random_key = sampler(agent, key=random_key, verbose=True)
 
             # Remove anything not needed for training
             excess_data = {}
@@ -174,8 +176,26 @@ if __name__ == "__main__":
             print(f'\nEpisode rewards: {average_reward}\n')
 
             # Checkpoint the model
+            if epoch % 20 == 0:
+                print('Evaluating...')
+                results = evaluate_envs(agent,
+                                        environments=make_vec_env(lambda: make_variable_env('LunarLander-v2',
+                                                                                            fn=extra_step_filter),
+                                                                  n_envs=1000))
+                average_reward = np.median(results)
+                print('\n\n', '=' * 50, f'\nMedian reward: {np.median(results)}, Best reward: {best_reward}\n',
+                      '=' * 50,
+                      '\n')
+                if int(average_reward) > best_reward:
+                    best_reward = int(average_reward)
+
+                    agent.actor.save(
+                        os.path.join(model_dir, f'model_checkpoints/actor_{best_reward}'))  # if actor else None
+                    agent.value.save(
+                        os.path.join(model_dir, f'model_checkpoints/value_{best_reward}'))  # if value else None
+            """
             if int(average_reward) > best_reward:
-                """
+                
                 print('Evaluating performance...')
                 results = evaluate_envs(agent,
                                         environments=make_vec_env(lambda: make_variable_env('LunarLander-v2',
@@ -185,12 +205,11 @@ if __name__ == "__main__":
                 print('\n\n', '='*50, f'\nMedian reward: {np.median(results)}, Best reward: {best_reward}\n', '='*50,
                       '\n')
                 if int(average_reward) > best_reward:
+                    best_reward = int(average_reward)
+    
+                    agent.actor.save(os.path.join(model_dir, f'model_checkpoints/actor_{best_reward}'))  # if actor else None
+                    agent.value.save(os.path.join(model_dir, f'model_checkpoints/value_{best_reward}'))  # if value else None
                 """
-                best_reward = int(average_reward)
-
-                agent.actor.save(os.path.join(model_dir, f'model_checkpoints/actor_{best_reward}'))  # if actor else None
-                agent.value.save(os.path.join(model_dir, f'model_checkpoints/value_{best_reward}'))  # if value else None
-
             if logging:
                 # Log results
                 wandb.log({'actor_loss': actor_loss,
