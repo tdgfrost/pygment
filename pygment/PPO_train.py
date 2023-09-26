@@ -57,8 +57,6 @@ if __name__ == "__main__":
         f.write(str(config))
         f.close()
 
-    del dummy_env
-
     # Create variable environment template
     def extra_step_filter(x):
         # If in rectangle
