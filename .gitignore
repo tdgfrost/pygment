@@ -3,18 +3,12 @@
 .idea
 pygment/.DS_Store
 pygment/__pycache__
-pygment/samples
-pygment/pygment/__pycache__
-pygment/originalpygment/__pycache__
-pygment/pygment (original)
+pygment/__pycache__
+pygment/wandb
+pygment/core/__pycache__
+pygment/update/__pycache__
 pygment/experiments
-pygment/pygment/__pycache__
-pygment/pygment/wandb
-pygment/pygment/core/__pycache__
-pygment/pygment/update/__pycache__
-pygment/pygment/experiments
-pygment/pygment_backup
-pygment/pygment/offline_datasets
+pygment/offline_datasets
 
 
 pygment/temp

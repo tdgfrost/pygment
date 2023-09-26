@@ -101,12 +101,7 @@ if __name__ == "__main__":
                 config=config,
             )
 
-        #for current_net in ['interval', 'value', 'critic', 'actor']:
-        temp = '/Users/thomasfrost/Documents/Github/pygment/pygment/pygment/pygment/experiments/IQL/Experiment_9/model_checkpoints'
-        agent.critic = agent.critic.load(os.path.join(temp, 'critic'))
-        agent.value = agent.value.load(os.path.join(temp, 'value'))
-        agent.interval = agent.interval.load(os.path.join(temp, 'interval'))
-        for current_net in ['actor']:
+        for current_net in ['interval', 'value', 'critic', 'actor']:
             print('\n\n', '=' * 50, '\n', ' ' * 3, '\U0001F483' * 3, ' ' * 1, f'Training {current_net} network', ' ' * 2,
                   '\U0001F483' * 3, '\n', '=' * 50, '\n')
             # loss_key = f"{'value' if value else ('critic' if critic else 'actor')}_loss"
