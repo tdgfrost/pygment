@@ -125,7 +125,6 @@ if __name__ == "__main__":
 
                 # Shuffle the batch
                 shuffled_batch = shuffle_split_batch(batch,
-                                                     steps=config['steps'],
                                                      batch_size=config['batch_size'])
                 # Iterate through each sample in the batch
                 for sample in shuffled_batch:

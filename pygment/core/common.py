@@ -154,7 +154,7 @@ def progress_bar(iteration, total_iterations):
     return
 
 
-def shuffle_split_batch(batch: Batch, steps=1000, batch_size=64):
+def shuffle_split_batch(batch: Batch, batch_size=64):
     # Change batch to list of tuples (agnostic to the labels)
     shuffled_batch = batch._asdict()
 
@@ -166,7 +166,7 @@ def shuffle_split_batch(batch: Batch, steps=1000, batch_size=64):
             break
 
     idxs = np.random.default_rng().choice([i for i in range(available_steps)],
-                                          size=(min(steps, available_steps) // batch_size, batch_size),
+                                          size=(available_steps // batch_size, batch_size),
                                           replace=False)
 
     # Iterate through and generate each set of shuffled samples
