@@ -43,11 +43,10 @@ if __name__ == "__main__":
     evaluate_bool = False
 
 
-    def train(config=config):
+    def train():
         if logging_bool:
             wandb.init(
                 project="PPO-VariableTimeSteps",
-                config=config,
                 allow_val_change=True,
             )
 
@@ -61,8 +60,8 @@ if __name__ == "__main__":
                                  'top_bar_coord': 1.2,
                                  'bottom_bar_coord': 0.8,
                                  'n_envs': 20,
-                                 }
-                                )
+                                 },
+                                allow_val_change=True)
 
             config = wandb.config
 
