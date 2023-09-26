@@ -47,7 +47,8 @@ if __name__ == "__main__":
         if logging_bool:
             wandb.init(
                 project="PPO-VariableTimeSteps",
-                config=config
+                config=config,
+                allow_val_change=True,
             )
 
             config = wandb.config
