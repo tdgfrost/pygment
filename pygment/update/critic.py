@@ -26,13 +26,15 @@ def update_v(value: Model, batch: Batch, **kwargs) -> Tuple[Model, InfoDict]:
 
     # Unpack the actions, states, and discounted rewards from the batch of samples
     states = batch.states
-    len_actions = jnp.array([len(traj) for traj in batch.rewards]) - kwargs['interval_min']
+    if 'interval_min' in kwargs:
+        len_actions = jnp.array([len(traj) for traj in batch.rewards]) - kwargs['interval_min']
 
     def value_loss_fn(value_params: Params) -> tuple[Array, dict[str, Array]]:
         # Generate V(s) for the sample states
         layer_outputs, v = value.apply({'params': value_params}, states)
 
-        v = filter_to_action(v, len_actions)
+        if 'interval_min' in kwargs:
+            v = filter_to_action(v, len_actions)
 
         # Calculate the loss for V using Q with expectile regression
         value_loss = loss_fn[list(kwargs['value_loss_fn'].keys())[0]](v, batch, **kwargs).mean()

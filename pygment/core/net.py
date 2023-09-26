@@ -99,7 +99,10 @@ class ValueNet(nn.Module):
                                    activations=self.activations)(observations)
 
         # Return the output
-        return {'MLP_0': layer_outputs}, value
+        if value.shape[-1] == 1:
+            return {'MLP_0': layer_outputs}, jnp.squeeze(value, -1)
+        else:
+            return {'MLP_0': layer_outputs}, value
 
 
 class CriticNet(nn.Module):
