@@ -51,7 +51,7 @@ if __name__ == "__main__":
 
     # Load static dataset
     print('Loading and processing dataset...')
-    data = load_data(path='./offline_datasets/LunarLander/?',
+    data = load_data(path='./offline_datasets/LunarLander/dataset_reward_4.pkl',
                      scale='standardise',
                      gamma=config['gamma'])
 
