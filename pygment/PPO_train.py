@@ -17,7 +17,7 @@ config = {'seed': 123,
           'continual_learning': True,
           'steps': None,
           'batch_size': 32,
-          'n_envs': 20,
+          'n_envs': 500,
           'gamma': 0.99,
           'actor_lr': 0.001,
           'value_lr': 0.001,
@@ -48,6 +48,15 @@ if __name__ == "__main__":
                      action_dim=dummy_env.action_space.n,
                      opt_decay_schedule="cosine",
                      **config)
+    del dummy_env
+
+    # Set model directory
+    model_dir = os.path.join('./experiments/IQL', agent.path)
+    os.makedirs(model_dir, exist_ok=True)
+    with open(os.path.join(model_dir, 'config.txt'), 'w') as f:
+        f.write(str(config))
+        f.close()
+
     del dummy_env
 
     # Create variable environment template
@@ -168,6 +177,7 @@ if __name__ == "__main__":
 
             # Checkpoint the model
             if int(average_reward) > best_reward:
+                """
                 print('Evaluating performance...')
                 results = evaluate_envs(agent,
                                         environments=make_vec_env(lambda: make_variable_env('LunarLander-v2',
@@ -177,10 +187,11 @@ if __name__ == "__main__":
                 print('\n\n', '='*50, f'\nMedian reward: {np.median(results)}, Best reward: {best_reward}\n', '='*50,
                       '\n')
                 if int(average_reward) > best_reward:
-                    best_reward = int(average_reward)
+                """
+                best_reward = int(average_reward)
 
-                    agent.actor.save(os.path.join(agent.path, f'actor_{best_reward}'))  # if actor else None
-                    agent.value.save(os.path.join(agent.path, f'value_{best_reward}'))  # if value else None
+                agent.actor.save(os.path.join(model_dir, f'model_checkpoints/actor_{best_reward}'))  # if actor else None
+                agent.value.save(os.path.join(model_dir, f'model_checkpoints/value_{best_reward}'))  # if value else None
 
             if logging:
                 # Log results
@@ -191,10 +202,8 @@ if __name__ == "__main__":
                            'training_step': total_training_steps})
 
             if best_reward > 300:
-                agent.actor.save(os.path.join('./experiments',
-                                              agent.path, f'actor_best'))  # if actor else None
-                agent.value.save(os.path.join('./experiments',
-                                              agent.path, f'value_best'))
+                agent.actor.save(os.path.join(model_dir, 'model_checkpoints/actor_best'))  # if actor else None
+                agent.value.save(os.path.join(model_dir, 'model_checkpoints/value_best'))
                 break
 
     # ============================================================== #
@@ -203,9 +212,9 @@ if __name__ == "__main__":
 
     if evaluate:
         # Load the best agent
-        filename = agent.path  # './Experiment_2/model_checkpoints'
-        agent.actor = agent.actor.load(os.path.join('./experiments', f'{filename}', f'actor_best'))
-        agent.value = agent.value.load(os.path.join('./experiments', f'{filename}', f'value_best'))
+        filename = os.path.join('./experiments/IQL', agent.path)
+        agent.actor = agent.actor.load(os.path.join(model_dir, 'actor_best'))
+        agent.value = agent.value.load(os.path.join(model_dir, 'value_best'))
 
         # Create the vectorised set of environments
         envs = make_vec_env(lambda: make_variable_env('LunarLander-v2', fn=extra_step_filter),
