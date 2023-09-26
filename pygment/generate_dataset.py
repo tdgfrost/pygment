@@ -66,7 +66,7 @@ if __name__ == "__main__":
     batch, random_key = sampler(agent, key=random_key, verbose=True, max_episode_steps=config['max_episode_steps'])
 
     # Flatten the batch
-    batch, random_key = flatten_batch(batch, random_key)
+    batch, random_key = flatten_batch(batch)
 
     # Create directory if it doesn't exist
     os.makedirs('./offline_datasets/LunarLander/', exist_ok=True)
