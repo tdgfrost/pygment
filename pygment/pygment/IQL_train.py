@@ -94,7 +94,7 @@ if __name__ == "__main__":
     # Train agent
     if train:
         if logging:
-            os.environ['WANDB_BASE_URL'] = "http://localhost:8080"
+            # os.environ['WANDB_BASE_URL'] = "http://localhost:8080"
             # Prepare logging
             wandb.init(
                 project="IQL-VariableTimeSteps",
