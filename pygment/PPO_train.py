@@ -42,7 +42,6 @@ if __name__ == "__main__":
     logging_bool = True
     evaluate_bool = False
 
-
     # Create variable environment template
     def extra_step_filter(x):
         # If in rectangle
@@ -102,7 +101,6 @@ if __name__ == "__main__":
         # ============================================================== #
 
         # Train agent
-
         total_training_steps = 0
 
         # Create episode generator
@@ -197,12 +195,12 @@ if __name__ == "__main__":
                                         environments=make_vec_env(lambda: make_variable_env('LunarLander-v2',
                                                                                             fn=extra_step_filter),
                                                                   n_envs=1000))
-                average_reward = np.median(results)
+                evaluate_reward = np.median(results)
                 print('\n\n', '=' * 50, f'\nMedian reward: {np.median(results)}, Best reward: {best_reward}\n',
                       '=' * 50,
                       '\n')
-                if int(average_reward) > best_reward:
-                    best_reward = int(average_reward)
+                if int(evaluate_reward) > best_reward:
+                    best_reward = int(evaluate_reward)
 
                     agent.actor.save(
                         os.path.join(model_dir, f'model_checkpoints/actor_{best_reward}'))  # if actor else None
@@ -226,12 +224,16 @@ if __name__ == "__main__":
                     agent.value.save(os.path.join(model_dir, f'model_checkpoints/value_{best_reward}'))  # if value else None
                 """
             if logging_bool:
-                # Log results
-                wandb.log({'actor_loss': actor_loss,
+                logged_results = {'actor_loss': actor_loss,
                            'critic_loss': critic_loss,
-                           'episode_reward': average_reward,
                            'gradient_step': epoch,
-                           'training_step': total_training_steps})
+                           'training_step': total_training_steps}
+
+                if epoch % 20 == 0:
+                    logged_results['episode_reward'] = evaluate_reward
+
+                # Log results
+                wandb.log(logged_results)
 
             if best_reward > 300:
                 agent.actor.save(os.path.join(model_dir, 'model_checkpoints/actor_best'))  # if actor else None
