@@ -5,6 +5,7 @@ import numpy as np
 import wandb
 from tqdm import tqdm
 from stable_baselines3.common.env_util import make_vec_env
+import yaml
 
 # Set jax to CPU
 # jax.config.update('jax_platform_name', 'cpu')
@@ -38,9 +39,8 @@ if __name__ == "__main__":
     # ============================================================== #
 
     # Set whether to train and/or evaluate
-    train = True
-    logging = True
-    evaluate = True
+    logging_bool = True
+    evaluate_bool = False
 
     # Create agent
     dummy_env = make_env('LunarLander-v2')
@@ -67,6 +67,7 @@ if __name__ == "__main__":
         # Otherwise, normal time steps (no delay)
         return 0
 
+
     envs = make_vec_env(lambda: make_variable_env('LunarLander-v2', fn=extra_step_filter),
                         n_envs=config['n_envs'])
 
@@ -75,18 +76,32 @@ if __name__ == "__main__":
     # ============================================================== #
 
     # Train agent
-    if train:
-        if logging:
+    def train(config=config):
+        if logging_bool:
+            wandb.init(
+                project="PPO-VariableTimeSteps",
+                config=config
+            )
+
+            config = wandb.config
+
+            wandb.define_metric('actor_loss', summary='min')
+            wandb.define_metric('value_loss', summary='min')
+            wandb.define_metric('episode_reward', summary='max')
+
+            """
             # os.environ['WANDB_BASE_URL'] = "http://localhost:8080"
             # Prepare logging
             wandb.init(
                 project="PPO-VariableTimeSteps",
                 config=config,
             )
+            
             # Keep track of the best loss values
             wandb.define_metric('actor_loss', summary='min')
             wandb.define_metric('value_loss', summary='min')
             wandb.define_metric('episode_reward', summary='max')
+            """
 
         total_training_steps = 0
 
@@ -210,7 +225,7 @@ if __name__ == "__main__":
                     agent.actor.save(os.path.join(model_dir, f'model_checkpoints/actor_{best_reward}'))  # if actor else None
                     agent.value.save(os.path.join(model_dir, f'model_checkpoints/value_{best_reward}'))  # if value else None
                 """
-            if logging:
+            if logging_bool:
                 # Log results
                 wandb.log({'actor_loss': actor_loss,
                            'critic_loss': critic_loss,
@@ -223,11 +238,19 @@ if __name__ == "__main__":
                 agent.value.save(os.path.join(model_dir, 'model_checkpoints/value_best'))
                 break
 
+    # Set up hyperparameter sweep
+    if logging_bool:
+        with open('./ppo_config.yaml', 'r') as f:
+            config = yaml.safe_load(f)
+        sweep_id = wandb.sweep(config, project="PPO-VariableTimeSteps")
+
+        wandb.agent(sweep_id, function=train, count=20)
+
     # ============================================================== #
     # ======================== EVALUATION ========================== #
     # ============================================================== #
 
-    if evaluate:
+    if evaluate_bool:
         # Load the best agent
         filename = os.path.join('./experiments/PPO', agent.path)
         agent.actor = agent.actor.load(os.path.join(model_dir, 'actor_best'))
