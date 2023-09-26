@@ -107,7 +107,7 @@ class EpisodeGenerator:
         self.envs = envs
         self.gamma = gamma
 
-    def __call__(self, policy, key, verbose=False, max_episode_steps=None):
+    def __call__(self, policy, key, verbose=False, max_episode_steps=1000):
         return generate_episodes(policy,
                                  self.envs,
                                  key=key,
