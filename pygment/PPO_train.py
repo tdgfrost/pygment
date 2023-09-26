@@ -106,6 +106,8 @@ if __name__ == "__main__":
         batch, random_key = downsample_batch(flatten_batch(batch), random_key, steps=config['steps'])
 
         # Train agent
+        print('\n\n', '=' * 50, '\n', ' ' * 3, '\U0001F483' * 3, ' ' * 1, f'Training network...', ' ' * 2,
+              '\U0001F483' * 3, '\n', '=' * 50, '\n')
         for epoch in tqdm(range(config['epochs'])):
             actor_loss = 0
             critic_loss = 0
@@ -211,9 +213,14 @@ if __name__ == "__main__":
                             n_envs=5000)
 
         # Calculate the median reward
+        print('\n\n', '=' * 50, '\n', ' ' * 3, '\U0001F514' * 3, ' ' * 1, f'Evaluating network', ' ' * 2,
+              '\U0001F514' * 3, '\n', '=' * 50)
+
         results = evaluate_envs(agent, environments=envs)
         print(f'\nMedian reward: {np.median(results)}')
 
         # Animate the agent's performance
+        print('\n\n', '=' * 50, '\n', ' ' * 3, '\U0001F4FA' * 3, ' ' * 1, f'Generating gifs', ' ' * 2,
+              '\U0001F4FA' * 3, '\n', '=' * 50)
         env = make_variable_env('LunarLander-v2', fn=extra_step_filter, render_mode='rgb_array')
         run_and_animate(agent, env, runs=20, directory=os.path.join(agent.path, 'gifs'), **config)
