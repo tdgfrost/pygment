@@ -70,7 +70,7 @@ if __name__ == "__main__":
             wandb.define_metric('episode_reward', summary='max')
             """
 
-        hidden_dim = config['hidden_dims']
+        hidden_dim = config['dims']
         config['hidden_dims'] = (hidden_dim, hidden_dim)
 
         # Create agent
