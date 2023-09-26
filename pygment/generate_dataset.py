@@ -34,8 +34,8 @@ if __name__ == "__main__":
     del env
 
     # Load previous checkpoints
-    reward = 190
-    filename = './experiments/PPO/Experiment_2/model_checkpoints'
+    reward = 4
+    filename = './experiments/PPO/Experiment_1/model_checkpoints'
     agent.actor = agent.actor.load(os.path.join(filename, f'actor_{reward}'))
 
     # Create variable environment template (optional)
@@ -67,6 +67,9 @@ if __name__ == "__main__":
 
     # Flatten the batch
     batch, random_key = flatten_batch(batch, random_key)
+
+    # Create directory if it doesn't exist
+    os.makedirs('./offline_datasets/LunarLander/', exist_ok=True)
 
     # Save batch
     with open(f'./offline_datasets/LunarLander/dataset_reward_{reward}.pkl', 'wb') as f:
