@@ -60,7 +60,9 @@ if __name__ == "__main__":
                                  'steps': None,
                                  'top_bar_coord': 1.2,
                                  'bottom_bar_coord': 0.8,
-             })
+                                 'n_envs': 20,
+                                 }
+                                )
 
             config = wandb.config
 
