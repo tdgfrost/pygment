@@ -12,7 +12,7 @@ def make_variable_env(env_id, fn=None, *args, **kwargs):
     return environment
 
 
-def generate_episodes(policy, envs, key=None, gamma=0.99, verbose=False, max_episode_steps=None):
+def generate_episodes(policy, envs, key=None, gamma=0.99, verbose=False, max_episode_steps=1000):
     """
     Evaluate the agent across vectorised episodes.
 
@@ -21,6 +21,7 @@ def generate_episodes(policy, envs, key=None, gamma=0.99, verbose=False, max_epi
     :param key: random key.
     :param gamma: discount factor.
     :param verbose: whether to print progress bar.
+    :param max_episode_steps: maximum number of steps per episode.
     :return: array of total rewards for each episode.
     """
 
