@@ -42,40 +42,7 @@ if __name__ == "__main__":
     logging_bool = True
     evaluate_bool = False
 
-    # Create agent
-    dummy_env = make_env('LunarLander-v2')
-    agent = PPOAgent(observations=dummy_env.observation_space.sample(),
-                     action_dim=dummy_env.action_space.n,
-                     opt_decay_schedule="cosine",
-                     **config)
-    del dummy_env
 
-    # Set model directory
-    model_dir = os.path.join('./experiments/PPO', agent.path)
-    os.makedirs(model_dir, exist_ok=True)
-    with open(os.path.join(model_dir, 'config.txt'), 'w') as f:
-        f.write(str(config))
-        f.close()
-
-    # Create variable environment template
-    def extra_step_filter(x):
-        # If in rectangle
-        if config['bottom_bar_coord'] < x[1] < config['top_bar_coord']:
-            # with p == 0.05, delay by 20 steps
-            if np.random.uniform() < 0.05:
-                return 20
-        # Otherwise, normal time steps (no delay)
-        return 0
-
-
-    envs = make_vec_env(lambda: make_variable_env('LunarLander-v2', fn=extra_step_filter),
-                        n_envs=config['n_envs'])
-
-    # ============================================================== #
-    # ========================= TRAINING =========================== #
-    # ============================================================== #
-
-    # Train agent
     def train(config=config):
         if logging_bool:
             wandb.init(
@@ -96,12 +63,46 @@ if __name__ == "__main__":
                 project="PPO-VariableTimeSteps",
                 config=config,
             )
-            
+
             # Keep track of the best loss values
             wandb.define_metric('actor_loss', summary='min')
             wandb.define_metric('value_loss', summary='min')
             wandb.define_metric('episode_reward', summary='max')
             """
+
+        # Create agent
+        dummy_env = make_env('LunarLander-v2')
+        agent = PPOAgent(observations=dummy_env.observation_space.sample(),
+                         action_dim=dummy_env.action_space.n,
+                         opt_decay_schedule="cosine",
+                         **config)
+        del dummy_env
+
+        # Set model directory
+        model_dir = os.path.join('./experiments/PPO', agent.path)
+        os.makedirs(model_dir, exist_ok=True)
+        with open(os.path.join(model_dir, 'config.txt'), 'w') as f:
+            f.write(str(config))
+            f.close()
+
+        # Create variable environment template
+        def extra_step_filter(x):
+            # If in rectangle
+            if config['bottom_bar_coord'] < x[1] < config['top_bar_coord']:
+                # with p == 0.05, delay by 20 steps
+                if np.random.uniform() < 0.05:
+                    return 20
+            # Otherwise, normal time steps (no delay)
+            return 0
+
+        envs = make_vec_env(lambda: make_variable_env('LunarLander-v2', fn=extra_step_filter),
+                            n_envs=config['n_envs'])
+
+        # ============================================================== #
+        # ========================= TRAINING =========================== #
+        # ============================================================== #
+
+        # Train agent
 
         total_training_steps = 0
 
