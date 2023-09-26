@@ -134,7 +134,7 @@ class VariableTimeSteps(gymnasium.Wrapper):
         self.max_time_steps = max_time_steps
 
     def step(self, action):
-        state: np.ndarray
+        next_state: np.ndarray
         reward: float
         done: bool
         prem_done: bool
@@ -142,7 +142,7 @@ class VariableTimeSteps(gymnasium.Wrapper):
         sequential_reward: List[float] = []
         img_arrays: List[np.ndarray] = []
 
-        state, reward, done, prem_done, info = super().step(action)
+        next_state, reward, done, prem_done, info = super().step(action)
         sequential_reward += [reward]
         total_reward = reward
         if self.render_mode == 'rgb_array':
@@ -152,12 +152,12 @@ class VariableTimeSteps(gymnasium.Wrapper):
             info['time_steps'] = 1
             info['sequential_reward'] = sequential_reward
             info['render_arrays'] = img_arrays
-            return state, total_reward, done, prem_done, info
+            return next_state, total_reward, done, prem_done, info
 
-        extra_time_steps = self._generate_extra_time_steps(state)
+        extra_time_steps = self._generate_extra_time_steps(next_state)
 
         for extra_step in range(1, extra_time_steps + 1):
-            state, reward, done, prem_done, info = super().step(action)
+            next_state, reward, done, prem_done, info = super().step(action)
             sequential_reward += [reward]
             total_reward += reward
 
@@ -168,12 +168,12 @@ class VariableTimeSteps(gymnasium.Wrapper):
                 info['time_steps'] = extra_step + 1
                 info['sequential_reward'] = sequential_reward
                 info['render_arrays'] = img_arrays
-                return state, total_reward, done, prem_done, info
+                return next_state, total_reward, done, prem_done, info
 
         info['time_steps'] = extra_time_steps + 1
         info['sequential_reward'] = sequential_reward
         info['render_arrays'] = img_arrays
-        return state, total_reward, done, prem_done, info
+        return next_state, total_reward, done, prem_done, info
 
     def _generate_extra_time_steps(self, state):
         if self.fn is None:

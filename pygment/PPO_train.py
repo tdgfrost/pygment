@@ -5,6 +5,7 @@ import numpy as np
 import wandb
 from tqdm import tqdm
 from stable_baselines3.common.env_util import make_vec_env
+import yaml
 
 # Set jax to CPU
 # jax.config.update('jax_platform_name', 'cpu')
@@ -38,55 +39,83 @@ if __name__ == "__main__":
     # ============================================================== #
 
     # Set whether to train and/or evaluate
-    train = True
-    logging = True
-    evaluate = True
+    logging_bool = True
+    evaluate_bool = False
 
-    # Create agent
-    dummy_env = make_env('LunarLander-v2')
-    agent = PPOAgent(observations=dummy_env.observation_space.sample(),
-                     action_dim=dummy_env.action_space.n,
-                     opt_decay_schedule="cosine",
-                     **config)
-    del dummy_env
 
-    # Set model directory
-    model_dir = os.path.join('./experiments/PPO', agent.path)
-    os.makedirs(model_dir, exist_ok=True)
-    with open(os.path.join(model_dir, 'config.txt'), 'w') as f:
-        f.write(str(config))
-        f.close()
+    def train():
+        if logging_bool:
+            wandb.init(
+                project="PPO-VariableTimeSteps",
+                allow_val_change=True,
+            )
 
-    # Create variable environment template
-    def extra_step_filter(x):
-        # If in rectangle
-        if config['bottom_bar_coord'] < x[1] < config['top_bar_coord']:
-            # with p == 0.05, delay by 20 steps
-            if np.random.uniform() < 0.05:
-                return 20
-        # Otherwise, normal time steps (no delay)
-        return 0
+            hidden_dim = wandb.config['dims']
 
-    envs = make_vec_env(lambda: make_variable_env('LunarLander-v2', fn=extra_step_filter),
-                        n_envs=config['n_envs'])
+            wandb.config.update({'hidden_dims': (hidden_dim, hidden_dim),
+                                 'seed': 123,
+                                 'epochs': 300,
+                                 'continual_learning': True,
+                                 'steps': None,
+                                 'top_bar_coord': 1.2,
+                                 'bottom_bar_coord': 0.8,
+                                 'n_envs': 20,
+                                 },
+                                allow_val_change=True)
 
-    # ============================================================== #
-    # ========================= TRAINING =========================== #
-    # ============================================================== #
+            config = wandb.config
 
-    # Train agent
-    if train:
-        if logging:
+            wandb.define_metric('actor_loss', summary='min')
+            wandb.define_metric('value_loss', summary='min')
+            wandb.define_metric('episode_reward', summary='max')
+
+            """
             # os.environ['WANDB_BASE_URL'] = "http://localhost:8080"
             # Prepare logging
             wandb.init(
                 project="PPO-VariableTimeSteps",
                 config=config,
             )
+
             # Keep track of the best loss values
             wandb.define_metric('actor_loss', summary='min')
             wandb.define_metric('value_loss', summary='min')
             wandb.define_metric('episode_reward', summary='max')
+            """
+
+        # Create agent
+        dummy_env = make_env('LunarLander-v2')
+        agent = PPOAgent(observations=dummy_env.observation_space.sample(),
+                         action_dim=dummy_env.action_space.n,
+                         opt_decay_schedule="cosine",
+                         **config)
+        del dummy_env
+
+        # Set model directory
+        model_dir = os.path.join('./experiments/PPO', agent.path)
+        os.makedirs(model_dir, exist_ok=True)
+        with open(os.path.join(model_dir, 'config.txt'), 'w') as f:
+            f.write(str(config))
+            f.close()
+
+        # Create variable environment template
+        def extra_step_filter(x):
+            # If in rectangle
+            if config['bottom_bar_coord'] < x[1] < config['top_bar_coord']:
+                # with p == 0.05, delay by 20 steps
+                if np.random.uniform() < 0.05:
+                    return 20
+            # Otherwise, normal time steps (no delay)
+            return 0
+
+        envs = make_vec_env(lambda: make_variable_env('LunarLander-v2', fn=extra_step_filter),
+                            n_envs=config['n_envs'])
+
+        # ============================================================== #
+        # ========================= TRAINING =========================== #
+        # ============================================================== #
+
+        # Train agent
 
         total_training_steps = 0
 
@@ -98,6 +127,7 @@ if __name__ == "__main__":
         random_key = jax.random.PRNGKey(123)
 
         # Sample first batch
+        print('\nSampling...')
         batch, random_key = sampler(agent, key=random_key, verbose=True)
 
         # Remove anything not needed for jitted training
@@ -110,7 +140,6 @@ if __name__ == "__main__":
         batch = alter_batch(batch, **removed_data)
 
         # Flatten the batch (optional: downsample if steps specified)
-        print('\nSampling...')
         batch, random_key = downsample_batch(flatten_batch(batch), random_key, steps=config['steps'])
 
         # Train agent
@@ -210,7 +239,7 @@ if __name__ == "__main__":
                     agent.actor.save(os.path.join(model_dir, f'model_checkpoints/actor_{best_reward}'))  # if actor else None
                     agent.value.save(os.path.join(model_dir, f'model_checkpoints/value_{best_reward}'))  # if value else None
                 """
-            if logging:
+            if logging_bool:
                 # Log results
                 wandb.log({'actor_loss': actor_loss,
                            'critic_loss': critic_loss,
@@ -223,11 +252,19 @@ if __name__ == "__main__":
                 agent.value.save(os.path.join(model_dir, 'model_checkpoints/value_best'))
                 break
 
+    # Set up hyperparameter sweep
+    if logging_bool:
+        with open('./ppo_config.yaml', 'r') as f:
+            config = yaml.safe_load(f)
+        sweep_id = wandb.sweep(config, project="PPO-VariableTimeSteps")
+
+        wandb.agent(sweep_id, function=train, count=20)
+
     # ============================================================== #
     # ======================== EVALUATION ========================== #
     # ============================================================== #
 
-    if evaluate:
+    if evaluate_bool:
         # Load the best agent
         filename = os.path.join('./experiments/PPO', agent.path)
         agent.actor = agent.actor.load(os.path.join(model_dir, 'actor_best'))
