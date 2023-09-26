@@ -51,7 +51,7 @@ if __name__ == "__main__":
     del dummy_env
 
     # Set model directory
-    model_dir = os.path.join('./experiments/IQL', agent.path)
+    model_dir = os.path.join('./experiments/PPO', agent.path)
     os.makedirs(model_dir, exist_ok=True)
     with open(os.path.join(model_dir, 'config.txt'), 'w') as f:
         f.write(str(config))
@@ -229,7 +229,7 @@ if __name__ == "__main__":
 
     if evaluate:
         # Load the best agent
-        filename = os.path.join('./experiments/IQL', agent.path)
+        filename = os.path.join('./experiments/PPO', agent.path)
         agent.actor = agent.actor.load(os.path.join(model_dir, 'actor_best'))
         agent.value = agent.value.load(os.path.join(model_dir, 'value_best'))
 

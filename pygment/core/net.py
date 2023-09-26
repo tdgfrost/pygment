@@ -355,7 +355,7 @@ class Model:
 
         # Update the new parameters with re-initialised low utility nodes, as required
         new_params = self.gen_new_features(features_to_replace, new_params)
-        
+
         # Returns a COPY with the new parameters and optimiser state, as well as the metadata
         return self.replace(params=new_params,
                             opt_state=new_opt_state), info
