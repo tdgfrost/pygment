@@ -77,7 +77,7 @@ if __name__ == "__main__":
             )
 
             hidden_dim = wandb.config['dims']
-            actor_batch_size = wandb.config['actor_batch_size']
+            actor_batch_size = wandb.config['actor_batch_size_unadj']
             expectile = wandb.config['expectile']
 
             wandb.config.update({'hidden_dims': (hidden_dim, hidden_dim),
