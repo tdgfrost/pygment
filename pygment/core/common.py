@@ -13,7 +13,7 @@ Params = flax.core.FrozenDict[str, Any]
 InfoDict = Dict[str, Any]
 PRNGKey = Any
 fields = ['states', 'actions', 'rewards', 'discounted_rewards', 'episode_rewards',
-          'next_states', 'next_actions', 'dones', 'action_logprobs', 'advantages']
+          'next_states', 'next_actions', 'dones', 'action_logprobs', 'advantages', 'len_actions']
 Batch = namedtuple('Batch', fields, defaults=(None,) * len(fields))
 
 
