@@ -223,11 +223,13 @@ if __name__ == "__main__":
                 if loss_info[loss_key] < best_loss:
                     best_loss = loss_info[loss_key]
                     count = 0
+                    """
                     agent.actor.save(os.path.join(model_dir, 'model_checkpoints/actor')) if is_net('actor') else None
                     agent.critic.save(os.path.join(model_dir, 'model_checkpoints/critic')) if is_net('critic') else None
                     agent.value.save(os.path.join(model_dir, 'model_checkpoints/value')) if is_net('value') else None
                     agent.interval.save(os.path.join(model_dir, 'model_checkpoints/interval')) if is_net(
                         'interval') else None
+                    """
                 else:
                     count += 1
                     if count > config['early_stopping']:
@@ -241,6 +243,14 @@ if __name__ == "__main__":
                         agent.interval = agent.interval.load(
                             os.path.join(model_dir, 'model_checkpoints/interval')) if is_net('interval') else agent.interval
                         """
+                        agent.actor.save(os.path.join(model_dir, 'model_checkpoints/actor')) if is_net(
+                            'actor') else None
+                        agent.critic.save(os.path.join(model_dir, 'model_checkpoints/critic')) if is_net(
+                            'critic') else None
+                        agent.value.save(os.path.join(model_dir, 'model_checkpoints/value')) if is_net(
+                            'value') else None
+                        agent.interval.save(os.path.join(model_dir, 'model_checkpoints/interval')) if is_net(
+                            'interval') else None
                         break
 
                 # Log intermittently
