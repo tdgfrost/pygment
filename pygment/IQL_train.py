@@ -43,7 +43,7 @@ if __name__ == "__main__":
 
     # Set whether to train and/or evaluate
     logging_bool = True
-    evaluate_bool = True
+    evaluate_bool = False
 
     # ============================================================== #
     # ========================= TRAINING =========================== #
@@ -243,6 +243,16 @@ if __name__ == "__main__":
                                       'gradient_step': epoch,
                                       f'{current_net}_loss': loss_info[f'{current_net}_loss']}
                     wandb.log(logged_results)
+
+        # Evaluate agent
+        n_envs = 1000
+        print('\n\n', '=' * 50, '\n', ' ' * 3, '\U0001F514' * 3, ' ' * 1, f'Evaluating network', ' ' * 2,
+              '\U0001F514' * 3, '\n', '=' * 50)
+        episode_rewards = evaluate_envs(agent, make_vec_env(lambda: make_variable_env('LunarLander-v2',
+                                                                              fn=extra_step_filter),
+                                                    n_envs=n_envs))
+        print(f'\nMedian reward: {np.median(episode_rewards)}')
+        wandb.log({'median_reward': np.median(episode_rewards)})
 
     if logging_bool:
         with open('./iql_config.yaml', 'r') as f:
