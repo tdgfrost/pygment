@@ -68,6 +68,21 @@ def load_data(path: str,
     return batch
 
 
+def move_to_gpu(batch: Batch, gpu_keys: list, gpu_key='gpu') -> Batch:
+    gpu_batch = batch._asdict()
+
+    for key, value in gpu_batch.items():
+        if value is None:
+            continue
+        if key in gpu_keys:
+            if type(value) == jnp.ndarray:
+                gpu_batch[key] = jax.device_put(value, jax.devices(gpu_key)[0])
+            else:
+                gpu_batch[key] = jnp.array(value)
+
+    return Batch(**gpu_batch)
+
+
 def calc_discounted_rewards(dones, rewards, gamma):
     """
     Calculate discounted rewards

@@ -111,13 +111,12 @@ def update_interval(interval: Model, batch: Batch, **kwargs) -> Tuple[Model, Inf
 
     # Unpack the actions, states, and discounted rewards from the batch of samples
     states = batch.states
-    len_actions = jnp.array([len(traj) for traj in batch.rewards]) - kwargs['interval_min']
 
     def interval_loss_fn(interval_params: Params) -> tuple[Array, dict[str, Array]]:
         # Generate Q values from each of the two critic networks
         layer_outputs, logits = interval.apply({'params': interval_params}, states)
 
-        interval_loss = optax.softmax_cross_entropy_with_integer_labels(logits, len_actions).mean()
+        interval_loss = optax.softmax_cross_entropy_with_integer_labels(logits, kwargs['len_actions']).mean()
 
         # Return the loss value, plus metadata
         return interval_loss, {

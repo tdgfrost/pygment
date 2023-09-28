@@ -37,7 +37,8 @@ config = {'seed': 123,
 
 if __name__ == "__main__":
     from core.agent import IQLAgent
-    from core.common import load_data, progress_bar, alter_batch, Batch, filter_to_action, calc_traj_discounted_rewards
+    from core.common import (load_data, progress_bar, alter_batch, Batch, filter_to_action, calc_traj_discounted_rewards,
+                             move_to_gpu)
     from core.evaluate import evaluate_envs, run_and_animate
     from core.envs import make_variable_env
 
@@ -57,6 +58,10 @@ if __name__ == "__main__":
 
     intervals = np.array([len(traj) for traj in data.rewards])
     interval_range = intervals.max() - intervals.min() + 1  # Range is inclusive so add 1 to this number
+
+    # Move to GPU
+    data = move_to_gpu(data, gpu_keys=['states', 'actions', 'discounted_rewards', 'episode_rewards',
+                                       'next_states', 'dones', 'action_logprobs'])
 
     # Make sure this matches with the desired dataset's extra_step metadata
     def extra_step_filter(x):
@@ -189,6 +194,11 @@ if __name__ == "__main__":
                     # Try normalising advantages
                     advantages = (advantages - advantages.mean()) / jnp.maximum(advantages.std(), 1e-8)
 
+                # For interval training:
+                len_actions = None
+                if is_net('interval'):
+                    len_actions = jnp.array([len(traj) for traj in batch.rewards]) - intervals.min()
+
                 batch = alter_batch(batch, advantages=advantages)
 
                 # Remove excess from the batch
@@ -207,7 +217,7 @@ if __name__ == "__main__":
                                                gamma=config['gamma'],
                                                rewards=rewards,
                                                next_state_values=next_state_values,
-                                               interval_min=intervals.min(),
+                                               len_actions=len_actions,
                                                **{current_net: True})
 
                 total_training_steps += config[f'{current_net}_batch_size']
