@@ -70,7 +70,7 @@ if __name__ == "__main__":
     # Make sure this matches with the desired dataset's extra_step metadata
     def extra_step_filter(x):
         # If in rectangle
-        if config['bottom_bar_coord'] < x[1] < config['top_bar_coord']:
+        if 0.8 < x[1] < 1.2:
             # with p == 0.05, delay by 20 steps
             if np.random.uniform() < 0.05:
                 return 20
@@ -256,8 +256,8 @@ if __name__ == "__main__":
         print('\n\n', '=' * 50, '\n', ' ' * 3, '\U0001F514' * 3, ' ' * 1, f'Evaluating network', ' ' * 2,
               '\U0001F514' * 3, '\n', '=' * 50)
         episode_rewards = evaluate_envs(agent, make_vec_env(lambda: make_variable_env('LunarLander-v2',
-                                                                              fn=extra_step_filter),
-                                                    n_envs=n_envs))
+                                                                                      fn=extra_step_filter),
+                                                            n_envs=n_envs))
         print(f'\nMedian reward: {np.median(episode_rewards)}')
         wandb.log({'median_reward': np.median(episode_rewards)})
 
