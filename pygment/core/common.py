@@ -138,13 +138,32 @@ def calc_discounted_rewards(dones, rewards, gamma):
 def calc_traj_discounted_rewards(rewards, gamma):
     max_len = max([len(traj) for traj in rewards])
     samples = len(rewards)
-    mask = np.array([[True if i < len(traj) else False for i in range(max_len)] for traj in rewards])
+
+    # Define the 'empty' array of boolean masks
+    mask = np.zeros(shape=(len(rewards), max_len),
+                    dtype=np.bool_)
+
+    # Identify the 'end point' of each trajectory
+    idxs = np.column_stack((np.arange(len(rewards)), [len(traj) - 1 for traj in rewards]))
+    mask[idxs[:, 0], idxs[:, 1]] = True
+
+    # Create an accumulator function, which will backtrace the "True" mask label back to the first index for those rows
+    def scan_fn(accumulator, current): return max(accumulator, current)
+    accumulator = np.frompyfunc(scan_fn, 2, 1)
+
+    # Apply only to the rows where the mask isn't in the first position to begin with
+    mask[np.where(np.where(mask)[1] > 0)[0]] = np.flip(accumulator.accumulate(
+        np.flip(mask[np.where(np.where(mask)[1] > 0)[0]], -1), axis=-1), -1)
+
+    # Create a zero-padded array of the rewards using the above mask
     discounted_rewards = np.zeros((samples, max_len))
     discounted_rewards[mask] = np.concatenate(rewards)
 
+    # Create the gammas and apply to the discounted rewards
     gammas = np.ones(shape=max_len) * gamma
     gammas = np.power(gammas, np.arange(max_len))
 
+    # Sum up each trajectory into a single value
     discounted_rewards = np.sum(discounted_rewards * gammas, axis=-1)
 
     return discounted_rewards
