@@ -258,16 +258,20 @@ if __name__ == "__main__":
                                                                                       fn=extra_step_filter),
                                                             n_envs=n_envs))
         print(f'\nMedian reward: {np.median(episode_rewards)}')
+        print(f'\nMean reward: {np.mean(episode_rewards)}')
 
         with open('rewards.txt', 'w') as f:
             f.write(f'Baseline reward: {baseline_reward}\n')
             f.write(f'Median reward: {np.median(episode_rewards)}\n')
+            f.write(f'Mean reward: {np.mean(episode_rewards)}\n')
             f.close()
 
         if logging_bool:
             wandb.define_metric('median_reward', summary='max')
+            wandb.define_metric('mean_reward', summary='max')
 
             wandb.log({'median_reward': np.median(episode_rewards)})
+            wandb.log({'mean_reward': np.mean(episode_rewards)})
 
     # Run the train script
     train()
@@ -300,6 +304,7 @@ if __name__ == "__main__":
                                                                               fn=extra_step_filter),
                                                     n_envs=envs_to_evaluate))
         print(f'\nMedian reward: {np.median(results)}')
+        print(f'\nMean reward: {np.mean(results)}')
 
         # Animate the agent's performance
         print('\n\n', '=' * 50, '\n', ' ' * 3, '\U0001F4FA' * 3, ' ' * 1, f'Generating gifs', ' ' * 2,
