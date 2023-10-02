@@ -15,7 +15,7 @@ import yaml
 
 # Define config file - could change to FLAGS at some point
 config = {'seed': 123,
-          'epochs': int(1e6),
+          'epochs': int(1e4),
           'early_stopping': 1000,
           'value_batch_size': 256,
           'critic_batch_size': 256,
@@ -198,22 +198,22 @@ if __name__ == "__main__":
                                                **{current_net: True})
 
                 total_training_steps += config[f'{current_net}_batch_size']
-
+                """
                 # Record best loss
                 if loss_info[loss_key] < best_loss:
                     best_loss = loss_info[loss_key]
                     count = 0
-                    """
+                    '''
                     agent.actor.save(os.path.join(model_dir, 'model_checkpoints/actor')) if is_net('actor') else None
                     agent.critic.save(os.path.join(model_dir, 'model_checkpoints/critic')) if is_net('critic') else None
                     agent.value.save(os.path.join(model_dir, 'model_checkpoints/value')) if is_net('value') else None
                     agent.interval.save(os.path.join(model_dir, 'model_checkpoints/interval')) if is_net(
                         'interval') else None
-                    """
+                    '''
                 else:
                     count += 1
                     if count > config['early_stopping']:
-                        """
+                        '''
                         agent.actor = agent.actor.load(
                             os.path.join(model_dir, 'model_checkpoints/actor')) if is_net('actor') else agent.actor
                         agent.critic = agent.critic.load(
@@ -222,7 +222,7 @@ if __name__ == "__main__":
                             os.path.join(model_dir, 'model_checkpoints/value')) if is_net('value') else agent.value
                         agent.interval = agent.interval.load(
                             os.path.join(model_dir, 'model_checkpoints/interval')) if is_net('interval') else agent.interval
-                        """
+                        '''
                         agent.actor.save(os.path.join(model_dir, 'model_checkpoints/actor')) if is_net(
                             'actor') else None
                         agent.critic.save(os.path.join(model_dir, 'model_checkpoints/critic')) if is_net(
@@ -240,7 +240,7 @@ if __name__ == "__main__":
                                       'gradient_step': epoch,
                                       f'{current_net}_loss': loss_info[f'{current_net}_loss']}
                     wandb.log(logged_results)
-
+                """
         # Evaluate agent
         n_envs = 1000
         print('\n\n', '=' * 50, '\n', ' ' * 3, '\U0001F514' * 3, ' ' * 1, f'Evaluating network', ' ' * 2,
