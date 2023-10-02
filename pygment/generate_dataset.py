@@ -34,8 +34,8 @@ if __name__ == "__main__":
     del env
 
     # Load previous checkpoints
-    reward = 4
-    filename = './experiments/PPO/Experiment_1/model_checkpoints'
+    reward = -1
+    filename = './experiments/PPO/Experiment_2/model_checkpoints'
     agent.actor = agent.actor.load(os.path.join(filename, f'actor_{reward}'))
 
     # Create variable environment template (optional)
