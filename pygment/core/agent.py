@@ -55,14 +55,14 @@ class BaseAgent:
         for key, val in batch.items():
             if val is None:
                 continue
-            if key == 'rewards':
+            if type(val) == list:
                 batch[key] = [val[i] for i in idxs]
             elif key == 'episode_rewards':
                 batch[key] = val
             else:
                 batch[key] = val[idxs]
 
-        return Batch(**batch)
+        return Batch(**batch), idxs
 
     def standardise_inputs(self, inputs: np.ndarray):
         """

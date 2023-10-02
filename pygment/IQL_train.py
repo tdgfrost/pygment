@@ -42,7 +42,7 @@ if __name__ == "__main__":
     from core.envs import make_variable_env
 
     # Set whether to train and/or evaluate
-    logging_bool = True
+    logging_bool = False
     evaluate_bool = False
 
     # Update actor batch size to match expectile
@@ -59,16 +59,23 @@ if __name__ == "__main__":
                      scale='standardise',
                      gamma=config['gamma'])
 
-    intervals = np.array([len(traj) for traj in data.rewards])
+    intervals = jnp.array([len(traj) for traj in data.rewards])
     interval_range = intervals.max() - intervals.min() + 1  # Range is inclusive so add 1 to this number
 
-    # Calculate len_actions
+    # Calculate len_actions and state_masks (for later, before moving to GPU)
     len_actions = jnp.array([len(traj) for traj in data.rewards]) - intervals.min()
-    data = alter_batch(data, len_actions=len_actions)
+    rewards = calc_traj_discounted_rewards(data.rewards, config['gamma'])
+    data = alter_batch(data, rewards=rewards, len_actions=len_actions)
+    del rewards
+
+    state_masks = jnp.zeros(shape=(len(data.len_actions), interval_range),
+                            dtype=jnp.bool_)
+    idxs = jnp.column_stack((jnp.arange(len(data.len_actions)), data.len_actions))
+    state_masks = state_masks.at[idxs[:, 0], idxs[:, 1]].set(True)
 
     # Move to GPU
     data = move_to_gpu(data, gpu_keys=['states', 'actions', 'discounted_rewards', 'episode_rewards',
-                                       'next_states', 'dones', 'action_logprobs', 'len_actions'])
+                                       'next_states', 'dones', 'action_logprobs', 'len_actions', 'rewards'])
 
     # Make sure this matches with the desired dataset's extra_step metadata
     def extra_step_filter(x):
@@ -93,8 +100,8 @@ if __name__ == "__main__":
 
         agent = IQLAgent(observations=dummy_env.observation_space.sample(),
                          action_dim=dummy_env.action_space.n,
-                         interval_dim=interval_range,
-                         interval_min=intervals.min(),
+                         interval_dim=interval_range.item(),
+                         interval_min=intervals.min().item(),
                          opt_decay_schedule="cosine",
                          **config)
 
@@ -130,11 +137,10 @@ if __name__ == "__main__":
                 if epoch > 0 and epoch % 100 == 0:
                     print(f'\n\n{epoch} epochs complete!\n')
                 progress_bar(epoch % 100, 100)
-                batch = agent.sample(data,
-                                     config[f'{current_net}_batch_size'])
+                batch, idxs = agent.sample(data,
+                                           config[f'{current_net}_batch_size'])
 
                 # Calculate next state values
-                rewards = None
                 next_state_values = None
                 if is_net('critic'):
                     # Calculate the real TD value from next_state_value + current_state rewards
@@ -142,19 +148,23 @@ if __name__ == "__main__":
                     next_state_intervals = nn.softmax(agent.interval(batch.next_states)[1], axis=-1)
                     next_state_values = (next_state_values * next_state_intervals).sum(-1)
 
-                    rewards = calc_traj_discounted_rewards(batch.rewards, config['gamma'])
-                    gammas = jnp.ones(shape=len(rewards)) * config['gamma']
+                    gammas = jnp.ones(shape=len(batch.rewards)) * config['gamma']
                     gammas = jnp.power(gammas, batch.len_actions + intervals.min())
-                    rewards = rewards + gammas * next_state_values * (1 - batch.dones)
+                    rewards = batch.rewards + gammas * next_state_values * (1 - batch.dones)
+                    batch = alter_batch(batch, rewards=rewards)
+                    del rewards
 
                     # Then calculate the rest of the theoretical current state values,
                     # and insert the real TD value at the appropriate place
                     current_state_values = agent.value(batch.states)[1]
+                    current_state_mask = state_masks[idxs]
+                    """
                     current_state_mask = jnp.array(
                         [[False if bool_idx != action_len else True for bool_idx in range(interval_range)]
                          for action_len in batch.len_actions])
+                    """
 
-                    current_state_values = current_state_values.at[current_state_mask].set(rewards)
+                    current_state_values = current_state_values.at[current_state_mask].set(batch.rewards)
 
                     # Finally, multiply by the probability distribution and sum for an average
                     current_state_intervals = nn.softmax(agent.interval(batch.states)[1], axis=-1)
@@ -193,7 +203,6 @@ if __name__ == "__main__":
                                                actor_loss_fn={'iql': 0},
                                                expectile=config['expectile'],
                                                gamma=config['gamma'],
-                                               rewards=rewards,
                                                next_state_values=next_state_values,
                                                **{current_net: True})
 
