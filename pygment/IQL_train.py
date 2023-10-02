@@ -9,14 +9,14 @@ import flax.linen as nn
 import yaml
 
 # Set jax to CPU
-# jax.config.update('jax_platform_name', 'cpu')
+jax.config.update('jax_platform_name', 'cpu')
 # jax.config.update("jax_debug_nans", True)
 # jax.config.update('jax_disable_jit', True)
 
 # Define config file - could change to FLAGS at some point
 config = {'seed': 123,
           'epochs': int(1e4),
-          'early_stopping': 1000,
+          'early_stopping': jnp.array(1000),
           'value_batch_size': 256,
           'critic_batch_size': 256,
           'interval_batch_size': 256,
@@ -122,9 +122,9 @@ if __name__ == "__main__":
                   '\U0001F483' * 3, '\n', '=' * 50, '\n')
             # loss_key = f"{'value' if value else ('critic' if critic else 'actor')}_loss"
             loss_key = f'{current_net}_loss'
-            best_loss = jnp.inf
-            total_training_steps = 0
-            count = 0
+            best_loss = jnp.array(jnp.inf)
+            total_training_steps = jnp.array(0)
+            count = jnp.array(0)
 
             if logging_bool:
                 # Keep track of the best loss values
@@ -207,11 +207,11 @@ if __name__ == "__main__":
                                                **{current_net: True})
 
                 total_training_steps += config[f'{current_net}_batch_size']
-                """
+
                 # Record best loss
                 if loss_info[loss_key] < best_loss:
                     best_loss = loss_info[loss_key]
-                    count = 0
+                    count = jnp.array(0)
                     '''
                     agent.actor.save(os.path.join(model_dir, 'model_checkpoints/actor')) if is_net('actor') else None
                     agent.critic.save(os.path.join(model_dir, 'model_checkpoints/critic')) if is_net('critic') else None
@@ -220,7 +220,7 @@ if __name__ == "__main__":
                         'interval') else None
                     '''
                 else:
-                    count += 1
+                    count += jnp.array(1)
                     if count > config['early_stopping']:
                         '''
                         agent.actor = agent.actor.load(
@@ -241,7 +241,7 @@ if __name__ == "__main__":
                         agent.interval.save(os.path.join(model_dir, 'model_checkpoints/interval')) if is_net(
                             'interval') else None
                         break
-                """
+
                 # Log intermittently
                 if logging_bool:
                     # Log results
@@ -249,7 +249,7 @@ if __name__ == "__main__":
                                       'gradient_step': epoch,
                                       f'{current_net}_loss': loss_info[f'{current_net}_loss']}
                     wandb.log(logged_results)
-                
+
         # Evaluate agent
         n_envs = 1000
         print('\n\n', '=' * 50, '\n', ' ' * 3, '\U0001F514' * 3, ' ' * 1, f'Evaluating network', ' ' * 2,
