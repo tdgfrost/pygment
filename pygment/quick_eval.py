@@ -75,7 +75,7 @@ if __name__ == "__main__":
                                                                           fn=extra_step_filter),
                                                 n_envs=envs_to_evaluate))
     print(f'\nMedian reward: {np.median(results)}')
-    print(f'\nMean reward: {np.mean(results)}')
+    print(f'Mean reward: {np.mean(results)}')
 
     # Animate the agent's performance
     if gif_bool:

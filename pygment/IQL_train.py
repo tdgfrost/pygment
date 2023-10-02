@@ -258,7 +258,7 @@ if __name__ == "__main__":
                                                                                       fn=extra_step_filter),
                                                             n_envs=n_envs))
         print(f'\nMedian reward: {np.median(episode_rewards)}')
-        print(f'\nMean reward: {np.mean(episode_rewards)}')
+        print(f'Mean reward: {np.mean(episode_rewards)}')
 
         with open(os.path.join(model_dir, 'rewards.txt'), 'w') as f:
             f.write(f'Baseline reward: {baseline_reward}\n')
