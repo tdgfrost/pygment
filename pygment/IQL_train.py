@@ -241,7 +241,7 @@ if __name__ == "__main__":
                         agent.interval.save(os.path.join(model_dir, 'model_checkpoints/interval')) if is_net(
                             'interval') else None
                         break
-
+                """
                 # Log intermittently
                 if logging_bool:
                     # Log results
@@ -249,7 +249,7 @@ if __name__ == "__main__":
                                       'gradient_step': epoch,
                                       f'{current_net}_loss': loss_info[f'{current_net}_loss']}
                     wandb.log(logged_results)
-                """
+                
         # Evaluate agent
         n_envs = 1000
         print('\n\n', '=' * 50, '\n', ' ' * 3, '\U0001F514' * 3, ' ' * 1, f'Evaluating network', ' ' * 2,
