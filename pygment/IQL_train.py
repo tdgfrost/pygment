@@ -260,7 +260,7 @@ if __name__ == "__main__":
         print(f'\nMedian reward: {np.median(episode_rewards)}')
         print(f'\nMean reward: {np.mean(episode_rewards)}')
 
-        with open('rewards.txt', 'w') as f:
+        with open(os.path.join(model_dir, 'rewards.txt'), 'w') as f:
             f.write(f'Baseline reward: {baseline_reward}\n')
             f.write(f'Median reward: {np.median(episode_rewards)}\n')
             f.write(f'Mean reward: {np.mean(episode_rewards)}\n')
