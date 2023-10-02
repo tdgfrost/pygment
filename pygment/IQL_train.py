@@ -20,10 +20,9 @@ config = {'seed': 123,
           'value_batch_size': 256,
           'critic_batch_size': 256,
           'interval_batch_size': 256,
-          'actor_batch_size': int(256 / (1 - 0.5)),
-          # 'actor_batch_size': 256,
+          'actor_batch_size': 256,
           # Need to separate out batch sizes for value/critic networks (all data) and actor (only the subsampled data)
-          'expectile': 0.3,
+          'expectile': 0.5,
           'gamma': 0.99,
           'actor_lr': 0.001,
           'value_lr': 0.001,
@@ -45,6 +44,9 @@ if __name__ == "__main__":
     # Set whether to train and/or evaluate
     logging_bool = True
     evaluate_bool = False
+
+    # Update actor batch size to match expectile
+    config['actor_batch_size'] = int(config['actor_batch_size'] / (1 - config['expectile']))
 
     # ============================================================== #
     # ========================= TRAINING =========================== #
@@ -70,7 +72,7 @@ if __name__ == "__main__":
     # Make sure this matches with the desired dataset's extra_step metadata
     def extra_step_filter(x):
         # If in rectangle
-        if 0.8 < x[1] < 1.2:
+        if config['top_bar_coord'] < x[1] < config['bottom_bar_coord']:
             # with p == 0.05, delay by 20 steps
             if np.random.uniform() < 0.05:
                 return 20
@@ -82,31 +84,8 @@ if __name__ == "__main__":
         if logging_bool:
             wandb.init(
                 project="IQL-VariableTimeSteps",
-                allow_val_change=True,
+                config=config,
             )
-
-            hidden_dim = wandb.config['dims']
-            actor_batch_size = wandb.config['actor_batch_size_unadj']
-            expectile = wandb.config['expectile']
-
-            wandb.config.update({'hidden_dims': (hidden_dim, hidden_dim),
-                                 'actor_batch_size': int(actor_batch_size/(1-expectile)),
-                                 'seed': 123,
-                                 'epochs': int(1e6),
-                                 'early_stopping': 1000,
-                                 'continual_learning': True,
-                                 'steps': None,
-                                 'top_bar_coord': 1.2,
-                                 'bottom_bar_coord': 0.8,
-                                 'n_envs': 20,
-                                 },
-                                allow_val_change=True)
-
-            config = wandb.config
-
-            wandb.define_metric('actor_loss', summary='min')
-            wandb.define_metric('value_loss', summary='min')
-            wandb.define_metric('episode_reward', summary='max')
 
         # Create agent
         dummy_env = make_env('LunarLander-v2')
@@ -269,14 +248,14 @@ if __name__ == "__main__":
                                                                                       fn=extra_step_filter),
                                                             n_envs=n_envs))
         print(f'\nMedian reward: {np.median(episode_rewards)}')
-        wandb.log({'median_reward': np.median(episode_rewards)})
 
-    if logging_bool:
-        with open('./iql_config.yaml', 'r') as f:
-            config = yaml.safe_load(f)
-        sweep_id = wandb.sweep(config, project="IQL-VariableTimeSteps")
+        if logging_bool:
+            wandb.define_metric('median_reward', summary='max')
 
-        wandb.agent(sweep_id, function=train, count=20)
+            wandb.log({'median_reward': np.median(episode_rewards)})
+
+    # Run the train script
+    train()
 
     # ============================================================== #
     # ======================== EVALUATION ========================== #
