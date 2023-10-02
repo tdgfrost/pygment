@@ -11,7 +11,6 @@ config = {'seed': 123,
           'clipping': 1,
           'top_bar_coord': 1.2,  # 0.9,
           'bottom_bar_coord': 0.8,  # 0.5
-          'opt_decay_schedule': None
           }
 
 if __name__ == "__main__":
@@ -54,7 +53,7 @@ if __name__ == "__main__":
                      action_dim=dummy_env.action_space.n,
                      interval_dim=interval_range.item(),
                      interval_min=intervals.min().item(),
-                     opt_decay_schedule="cosine",
+                     opt_decay_schedule='none',
                      **config)
 
     del dummy_env
