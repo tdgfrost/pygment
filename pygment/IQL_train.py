@@ -281,8 +281,8 @@ if __name__ == "__main__":
 
         agent = IQLAgent(observations=dummy_env.observation_space.sample(),
                          action_dim=dummy_env.action_space.n,
-                         interval_dim=interval_range,
-                         interval_min=intervals.min(),
+                         interval_dim=interval_range.item(),
+                         interval_min=intervals.min().item(),
                          opt_decay_schedule="cosine",
                          **config)
 
