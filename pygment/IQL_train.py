@@ -54,7 +54,8 @@ if __name__ == "__main__":
 
     # Load static dataset
     print('Loading and processing dataset...')
-    data = load_data(path='./offline_datasets/LunarLander/dataset_reward_4.pkl',
+    baseline_reward = 4
+    data = load_data(path=f'./offline_datasets/LunarLander/dataset_reward_{baseline_reward}.pkl',
                      scale='standardise',
                      gamma=config['gamma'])
 
@@ -248,6 +249,11 @@ if __name__ == "__main__":
                                                                                       fn=extra_step_filter),
                                                             n_envs=n_envs))
         print(f'\nMedian reward: {np.median(episode_rewards)}')
+
+        with open('rewards.txt', 'w') as f:
+            f.write(f'Baseline reward: {baseline_reward}\n')
+            f.write(f'Median reward: {np.median(episode_rewards)}\n')
+            f.close()
 
         if logging_bool:
             wandb.define_metric('median_reward', summary='max')
