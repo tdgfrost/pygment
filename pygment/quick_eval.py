@@ -36,7 +36,7 @@ if __name__ == "__main__":
     # Make sure this matches with the desired dataset's extra_step metadata
     def extra_step_filter(x):
         # If in rectangle
-        if config['top_bar_coord'] < x[1] < config['bottom_bar_coord']:
+        if config['bottom_bar_coord'] < x[1] < config['top_bar_coord']:
             # with p == 0.05, delay by 20 steps
             if np.random.uniform() < 0.05:
                 return 20
@@ -71,6 +71,7 @@ if __name__ == "__main__":
 
     print('\n\n', '=' * 50, '\n', ' ' * 3, '\U0001F514' * 3, ' ' * 1, f'Evaluating network', ' ' * 2,
           '\U0001F514' * 3, '\n', '=' * 50)
+
     results = evaluate_envs(agent, make_vec_env(lambda: make_variable_env('LunarLander-v2',
                                                                           fn=extra_step_filter),
                                                 n_envs=envs_to_evaluate))
