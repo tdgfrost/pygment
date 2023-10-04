@@ -1,6 +1,5 @@
 from core.common import Params
 from typing import Sequence, Callable, Optional, Tuple, Any
-import os
 
 import jax.numpy as jnp
 import numpy as np

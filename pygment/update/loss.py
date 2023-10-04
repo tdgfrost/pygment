@@ -117,3 +117,34 @@ def ppo_loss(logits, batch, clip_ratio=0.2, **kwargs):
     # Return the loss term
     return loss
 
+
+def log_softmax_cross_entropy(logits, labels, **kwargs):
+    logits_max = jnp.max(logits, axis=-1, keepdims=True)
+    logits -= jax.lax.stop_gradient(logits_max)
+
+    label_logits = filter_to_action(logits, labels)
+    log_normalizers = jnp.log(jnp.sum(jnp.exp(logits), axis=-1))
+
+    return log_normalizers - label_logits
+
+
+def continuous_ranked_probability_score(logits, labels, **kwargs):
+    probs = nn.softmax(logits, axis=-1)
+    """
+    Annoyingly, jnp.cumsum doesn't work on metal backend, so the following code is replaced with
+    jax.lax workaround
+    
+    cum_probs = probs.cumsum(-1)
+    """
+    cum_probs = jax.lax.scan(lambda agg, current: (agg + current, agg + current),
+                             jnp.zeros(shape=probs.shape[0]),
+                             probs.transpose())[1].transpose()
+
+    label_bool = jnp.arange(cum_probs.shape[-1]).reshape(1, -1) >= labels.reshape(-1, 1)
+    crps_score = (cum_probs - label_bool) ** 2
+
+    return crps_score
+
+
+def ordinal_crossentropy(logits, labels, **kwargs):
+    pass

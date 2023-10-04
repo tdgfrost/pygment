@@ -4,15 +4,15 @@ from update.actions import _update_jit, _update_value_jit, _update_critic_jit, _
 
 import os
 import datetime as dt
+import pickle
 
 import numpy as np
-import jax.numpy as jnp
 import jax
 from jax import jit
 import flax.linen as nn
 import optax
 
-from typing import List, Optional, Sequence, Dict
+from typing import Optional, Sequence
 
 
 class BaseAgent:
@@ -64,16 +64,34 @@ class BaseAgent:
 
         return Batch(**batch), idxs
 
-    def standardise_inputs(self, inputs: np.ndarray):
+    def standardise_inputs(self, inputs: np.ndarray = None, path: str = None):
         """
         Standardises the inputs to the networks.
 
         :param inputs: inputs to the networks.
+        :param path: path to pre-saved data
         :return: standardised inputs.
         """
-        for network in self.networks:
-            network.__dict__['input_mean'] = np.mean(inputs, axis=0)
-            network.__dict__['input_std'] = np.maximum(np.std(inputs, axis=0), 1e-8)
+        if path is not None:
+            with open(path, 'rb') as f:
+                saved_data = pickle.load(f)
+                f.close()
+
+            for network in self.networks:
+                network.__dict__['input_mean'] = saved_data['input_mean']
+                network.__dict__['input_std'] = saved_data['input_std']
+
+        else:
+            input_mean = np.mean(inputs, axis=0)
+            input_std = np.maximum(np.std(inputs, axis=0), 1e-8)
+            with open(os.path.join(self.path, 'standardised_data.pkl'), 'wb') as f:
+                pickle.dump({'input_mean': input_mean,
+                             'input_std': input_std}, f)
+                f.close()
+
+            for network in self.networks:
+                network.__dict__['input_mean'] = input_mean
+                network.__dict__['input_std'] = input_std
 
 
 class IQLAgent(BaseAgent):
@@ -85,8 +103,8 @@ class IQLAgent(BaseAgent):
                  seed: int,
                  observations: np.ndarray,
                  action_dim: int,
-                 interval_dim: int,
                  interval_min: int,
+                 interval_dim: int,
                  actor_lr: float = 3e-4,
                  value_lr: float = 3e-4,
                  critic_lr: float = 3e-4,

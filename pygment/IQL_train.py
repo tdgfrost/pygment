@@ -6,12 +6,13 @@ import jax.numpy as jnp
 from stable_baselines3.common.env_util import make_vec_env
 import wandb
 import flax.linen as nn
+import pickle
 import yaml
 
 # Set jax to CPU
 # jax.config.update('jax_platform_name', 'cpu')
 # jax.config.update("jax_debug_nans", True)
-# jax.config.update('jax_disable_jit', True)
+jax.config.update('jax_disable_jit', True)
 
 # Define config file - could change to FLAGS at some point
 config = {'seed': 123,
@@ -42,7 +43,7 @@ if __name__ == "__main__":
     from core.envs import make_variable_env
 
     # Set whether to train and/or evaluate
-    logging_bool = True
+    logging_bool = False
     evaluate_bool = False
 
     # Update actor batch size to match expectile
@@ -54,8 +55,8 @@ if __name__ == "__main__":
 
     # Load static dataset
     print('Loading and processing dataset...')
-    baseline_reward = -1
-    data = load_data(path=f'./offline_datasets/LunarLander/dataset_reward_{baseline_reward}.pkl',
+    baseline_reward = 0
+    data = load_data(path=f'./offline_datasets/LunarLander/1.0_probability/dataset_reward_{baseline_reward}.pkl',
                      scale='standardise',
                      gamma=config['gamma'])
 
@@ -82,8 +83,8 @@ if __name__ == "__main__":
         # If in rectangle
         if config['bottom_bar_coord'] < x[1] < config['top_bar_coord']:
             # with p == 0.05, delay by 20 steps
-            if np.random.uniform() < 0.05:
-                return 20
+            #if np.random.uniform() < 0.05:
+            return 20
         # Otherwise, normal time steps (no delay)
         return 0
 
@@ -106,6 +107,7 @@ if __name__ == "__main__":
                          **config)
 
         model_dir = os.path.join('./experiments/IQL', agent.path)
+        agent.path = model_dir
         os.makedirs(model_dir, exist_ok=True)
         with open(os.path.join(model_dir, 'config.txt'), 'w') as f:
             f.write(str(config))
@@ -120,7 +122,10 @@ if __name__ == "__main__":
             print('\n\n', '=' * 50, '\n', ' ' * 3, '\U0001F483' * 3, ' ' * 1, f'Training {current_net} network',
                   ' ' * 2,
                   '\U0001F483' * 3, '\n', '=' * 50, '\n')
-            # loss_key = f"{'value' if value else ('critic' if critic else 'actor')}_loss"
+
+            def is_net(x):
+                return x == current_net
+
             loss_key = f'{current_net}_loss'
             best_loss = jnp.array(jnp.inf)
             total_training_steps = jnp.array(0)
@@ -129,9 +134,6 @@ if __name__ == "__main__":
             if logging_bool:
                 # Keep track of the best loss values
                 wandb.define_metric(f'{current_net}_loss', summary='min')
-
-            def is_net(x):
-                return x == current_net
 
             for epoch in range(config['epochs']):
                 if epoch > 0 and epoch % 100 == 0:
@@ -197,8 +199,8 @@ if __name__ == "__main__":
                     batch[key] = None
                 batch = Batch(**batch)
                 loss_info = agent.update_async(batch,
+                                               interval_loss_fn={'crps': 0},
                                                value_loss_fn={'expectile': 0},
-                                               # critic_loss_fn={'td_mse': 0},
                                                critic_loss_fn={'mc_mse': 0},
                                                actor_loss_fn={'iql': 0},
                                                expectile=config['expectile'],
@@ -247,7 +249,7 @@ if __name__ == "__main__":
                     # Log results
                     logged_results = {'training_step': total_training_steps,
                                       'gradient_step': epoch,
-                                      f'{current_net}_loss': loss_info[f'{current_net}_loss']}
+                                      f'{current_net}_loss': loss_info[loss_key]}
                     wandb.log(logged_results)
 
         # Evaluate agent

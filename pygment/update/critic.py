@@ -2,7 +2,8 @@ from jax import Array
 
 from core.agent import Model
 from core.common import Params, InfoDict, Batch, filter_to_action
-from update.loss import mc_mse_loss, td_mse_loss, expectile_loss
+from update.loss import (mc_mse_loss, td_mse_loss, expectile_loss, log_softmax_cross_entropy,
+                         continuous_ranked_probability_score)
 
 import jax.numpy as jnp
 import jax
@@ -111,11 +112,14 @@ def update_interval(interval: Model, batch: Batch, **kwargs) -> Tuple[Model, Inf
     states = batch.states
     len_actions = batch.len_actions
 
+    loss_fn = {'crossentropy': log_softmax_cross_entropy,
+               'crps': continuous_ranked_probability_score}
+
     def interval_loss_fn(interval_params: Params) -> tuple[Array, dict[str, Array]]:
         # Generate Q values from each of the two critic networks
         layer_outputs, logits = interval.apply({'params': interval_params}, states)
 
-        interval_loss = optax.softmax_cross_entropy_with_integer_labels(logits, len_actions).mean()
+        interval_loss = loss_fn[list(kwargs['interval_loss_fn'].keys())[0]](logits, len_actions, **kwargs).mean()
 
         # Return the loss value, plus metadata
         return interval_loss, {
