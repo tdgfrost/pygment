@@ -22,7 +22,7 @@ config = {'seed': 123,
           'critic_batch_size': 256,
           'actor_batch_size': 256,
           # Need to separate out batch sizes for value/critic networks (all data) and actor (only the subsampled data)
-          'expectile': 0.5,
+          'expectile': 0.9,
           'gamma': 0.99,
           'actor_lr': 0.001,
           'value_lr': 0.001,
@@ -119,6 +119,9 @@ if __name__ == "__main__":
         # Standardise the state inputs
         agent.standardise_inputs(data.states)
 
+        # For advantage-prioritised cloning
+        sample_prob = None
+
         for current_net in ['value', 'critic', 'actor']:
             print('\n\n', '=' * 50, '\n', ' ' * 3, '\U0001F483' * 3, ' ' * 1, f'Training {current_net} network',
                   ' ' * 2,
@@ -148,23 +151,30 @@ if __name__ == "__main__":
 
                 advantages = critic_values - state_values
 
+                data = alter_batch(data, advantages=advantages)
+
                 # Try normalising advantages
                 advantages = (advantages - advantages.mean()) / jnp.maximum(advantages.std(), 1e-8)
 
-                data = filter_dataset(data, advantages > 1, target_keys=['states', 'actions'])
+                data = filter_dataset(data, advantages > 0, target_keys=['states', 'actions', 'advantages'])
+                sample_prob = np.array(data.advantages, dtype=np.float64)
+                sample_prob = np.exp(sample_prob) / np.exp(sample_prob).sum()
+                # data = alter_batch(data, advantages=advantages)
 
             for epoch in range(config['epochs']):
                 if epoch > 0 and epoch % 100 == 0:
                     print(f'\n\n{epoch} epochs complete!\n')
                 progress_bar(epoch % 100, 100)
                 batch, idxs = agent.sample(data,
-                                           config[f'{current_net}_batch_size'])
+                                           config[f'{current_net}_batch_size'],
+                                           p=sample_prob)
 
                 # Calculate next state values
                 if is_net('critic'):
                     # Calculate the real TD value from next_state_value + current_state rewards
-                    next_state_values = agent.value(batch.next_states)[1]
-                    next_state_values = filter_to_action(next_state_values, batch.next_len_actions)
+                    next_state_values = agent.average_value(batch.next_states)[1]
+                    # next_state_values = agent.value(batch.next_states)[1]
+                    # next_state_values = filter_to_action(next_state_values, batch.next_len_actions)
 
                     gammas = jnp.ones(shape=len(batch.rewards)) * config['gamma']
                     gammas = jnp.power(gammas, batch.intervals)
@@ -175,25 +185,7 @@ if __name__ == "__main__":
 
                     batch = alter_batch(batch, discounted_rewards=discounted_rewards, actions=actions)
                     del discounted_rewards
-                """
-                # Calculate advantages
-                advantages = None
-                if is_net('actor'):
-                    critic_filtered_idx = np.ravel_multi_index(np.array(jnp.vstack((batch.actions, batch.len_actions))),
-                                                               (agent.action_dim, len(agent.intervals_unique)))
-                    critic_values = filter_to_action(jnp.minimum(*agent.critic(batch.states)[1]),
-                                                     critic_filtered_idx)
 
-                    state_values = agent.value(batch.states)[1]
-                    state_values = filter_to_action(state_values, batch.len_actions)
-
-                    advantages = critic_values - state_values
-
-                    # Try normalising advantages
-                    # advantages = (advantages - advantages.mean()) / jnp.maximum(advantages.std(), 1e-8)
-            
-                batch = alter_batch(batch, advantages=advantages)
-                """
                 # Remove excess from the batch
                 excess_data = {}
                 batch = batch._asdict()
@@ -206,6 +198,7 @@ if __name__ == "__main__":
                                                # value_loss_fn={'mc_mse': 0},
                                                critic_loss_fn={'mc_mse': 0},
                                                actor_loss_fn={'clone': 0},
+                                               # actor_loss_fn={'iql': 0},
                                                expectile=config['expectile'],
                                                **{current_net: True})
 

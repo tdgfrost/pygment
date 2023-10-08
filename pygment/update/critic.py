@@ -30,7 +30,7 @@ def update_v(value: Model, batch: Batch, **kwargs) -> Tuple[Model, InfoDict]:
         # Generate V(s) for the sample states
         layer_outputs, v = value.apply({'params': value_params}, states)
 
-        if batch.len_actions is not None:
+        if batch.len_actions is not None and len(v.shape) > 1:
             v = filter_to_action(v, batch.len_actions)
 
         # Calculate the loss for V using Q with expectile regression

@@ -45,7 +45,8 @@ def expectile_loss(pred, batch, expectile=0.8, **kwargs):
     """
     diff = pred - batch.discounted_rewards
     weight = jnp.where(diff > 0, (1 - expectile), expectile)
-    return weight * jnp.log(diff ** 2 / 2 + 1)
+    # return weight * jnp.log(diff ** 2 / 2 + 1)
+    return weight * diff ** 2
 
 
 def mc_mse_loss(pred, batch, **kwargs):
@@ -78,13 +79,14 @@ def iql_loss(logits, batch, **kwargs):
     adv_filter = nn.relu(jnp.sign(batch.advantages)).astype(jnp.bool_)
     action_logprobs = jnp.where(adv_filter, action_logprobs, 0.)
     """
+    """
     adv_filter = batch.advantages > 0
     action_logprobs *= adv_filter
+    """
     # EXPERIMENTAL - try to move towards positive advantages and away from negative advantages
-    """
-    adv_filter = jnp.exp(5 * batch.advantages)
+    adv_filter = jnp.exp(batch.advantages)
     action_logprobs *= adv_filter
-    """
+
     # Return the advantage-filtered logprobs
     return -action_logprobs
 
