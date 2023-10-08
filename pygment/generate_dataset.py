@@ -34,17 +34,18 @@ if __name__ == "__main__":
     del env
 
     # Load previous checkpoints
-    reward = -1
-    filename = './experiments/PPO/Experiment_2/model_checkpoints'
+    reward = 109
+    filename = './experiments/PPO/2023_10_06_103834/model_checkpoints'
     agent.actor = agent.actor.load(os.path.join(filename, f'actor_{reward}'))
+    target_directory = './offline_datasets/LunarLander/1.0_probability_5_steps'
 
     # Create variable environment template (optional)
     def extra_step_filter(x):
         # If in rectangle
         if config['bottom_bar_coord'] < x[1] < config['top_bar_coord']:
             # with p == 0.05, delay by 20 steps
-            if np.random.uniform() < 0.05:
-                return 20
+            #if np.random.uniform() < 1:
+            return 5
         # Otherwise, normal time steps (no delay)
         return 0
 
@@ -69,8 +70,8 @@ if __name__ == "__main__":
     batch = flatten_batch(batch)
 
     # Create directory if it doesn't exist
-    os.makedirs('./offline_datasets/LunarLander/', exist_ok=True)
+    os.makedirs(target_directory, exist_ok=True)
 
     # Save batch
-    with open(f'./offline_datasets/LunarLander/dataset_reward_{reward}.pkl', 'wb') as f:
+    with open(os.path.join(target_directory, f'dataset_reward_{reward}.pkl'), 'wb') as f:
         pickle.dump(batch, f)

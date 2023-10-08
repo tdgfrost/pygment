@@ -25,8 +25,8 @@ if __name__ == "__main__":
 
     # Load static dataset
     print('Loading and processing dataset...')
-    baseline_reward = -1
-    data = load_data(path=f'./offline_datasets/LunarLander/dataset_reward_{baseline_reward}.pkl',
+    baseline_reward = -2
+    data = load_data(path=f'./offline_datasets/LunarLander/dataset_1/dataset_reward_{baseline_reward}.pkl',
                      scale='standardise',
                      gamma=config['gamma'])
 
@@ -71,6 +71,77 @@ if __name__ == "__main__":
 
     print('\n\n', '=' * 50, '\n', ' ' * 3, '\U0001F514' * 3, ' ' * 1, f'Evaluating network', ' ' * 2,
           '\U0001F514' * 3, '\n', '=' * 50)
+
+    """
+    TEMPORARY CODE
+    """
+    env = make_variable_env('LunarLander-v2', fn=extra_step_filter, render_mode='rgb_array')
+    import os
+    import jax
+    import numpy as np
+    from matplotlib.patches import Rectangle
+    from core.evaluate import animate_blocked_environment
+
+    def run_and_animate(policy,
+                        environment,
+                        random_key=jax.random.PRNGKey(123),
+                        directory='./experiments/IQL/MagiMixerExperiment_1/temp_gifs',
+                        *args, **kwargs):
+
+        # Set the parameters for the Rectangle to be plotted
+        top = 1.2
+        bottom = 0.8
+        img_grad = 300 / 1.5
+        width = (top - bottom) * img_grad
+
+        # Create the directory if it doesn't exist
+        if not os.path.exists(directory):
+            os.makedirs(directory)
+
+        # Define the random key
+        random_key = jax.random.split(random_key, num=1)[0]
+
+        count = 0
+        while True:
+            count += 1
+            print(f'Count: {count}')
+            # Define the empty list of frames
+            img_arrays = []
+            rewards = []
+            seq_rewards = []
+
+            # Iterate over the environment, saving all the frames as rgb_arrays
+            state, _ = environment.reset()
+            done, prem_done = False, False
+            img_arrays.append(environment.render())
+            while not done and not prem_done:
+                action = policy.sample_action(state, random_key)[0]
+                state, reward, done, prem_done, info = environment.step(action)
+                img_arrays.extend(info['render_arrays'])
+                rewards.append(reward)
+                seq_rewards.append(info['sequential_reward'])
+
+            if np.array([len(traj) for traj in seq_rewards]).max() > 1:
+                break
+
+        # Define the Rectangle and animate the environment with it
+        rect = Rectangle((0, (300 - img_grad * top)),
+                         600,
+                         width,
+                         linewidth=1,
+                         edgecolor='r',
+                         facecolor='none')
+
+        animate_blocked_environment(img_arrays,
+                                    os.path.join(directory, 'gif.gif'),
+                                    patch=rect,
+                                    fps=environment.metadata['render_fps'])
+
+        # Close the environment
+        environment.close()
+        return np.array(rewards), seq_rewards
+
+    rewards, seq_rewards = run_and_animate(agent, env)
 
     results = evaluate_envs(agent, make_vec_env(lambda: make_variable_env('LunarLander-v2',
                                                                           fn=extra_step_filter),

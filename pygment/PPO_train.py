@@ -47,8 +47,8 @@ if __name__ == "__main__":
         # If in rectangle
         if config['bottom_bar_coord'] < x[1] < config['top_bar_coord']:
             # with p == 0.05, delay by 20 steps
-            if np.random.uniform() < 0.05:
-                return 20
+            # if np.random.uniform() < 0.05:
+            return 5
         # Otherwise, normal time steps (no delay)
         return 0
 

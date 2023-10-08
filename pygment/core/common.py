@@ -13,7 +13,8 @@ Params = flax.core.FrozenDict[str, Any]
 InfoDict = Dict[str, Any]
 PRNGKey = Any
 fields = ['states', 'actions', 'rewards', 'discounted_rewards', 'episode_rewards',
-          'next_states', 'next_actions', 'dones', 'action_logprobs', 'advantages', 'len_actions']
+          'next_states', 'next_actions', 'dones', 'action_logprobs', 'advantages', 'intervals',
+          'len_actions', 'next_len_actions']
 Batch = namedtuple('Batch', fields, defaults=(None,) * len(fields))
 
 
@@ -122,12 +123,12 @@ def calc_discounted_rewards(dones, rewards, gamma):
     discounted_rewards[mask] = flattened_rewards
 
     # Use JAX/lax to calculate the discounted rewards for each row
-    discounted_rewards = lax.scan(lambda agg, reward: (gamma * agg + reward, gamma * agg + reward),
-                                  np.zeros((samples,)),
-                                  jnp.array(discounted_rewards.transpose()), reverse=True)[1].transpose()
+    def scan_fn(accumulator, current): return gamma * accumulator + current
+    accumulator = np.frompyfunc(scan_fn, 2, 1)
+    discounted_rewards = np.flip(accumulator.accumulate(np.flip(discounted_rewards, -1), axis=-1), -1).astype(np.float32)
 
     # Finally, convert the array back to a 1D (numpy) array
-    discounted_rewards = np.array(discounted_rewards[mask])
+    discounted_rewards = discounted_rewards[mask]
 
     # And index by the actions taken, not the environment steps
     discounted_rewards = discounted_rewards[traj_idxs]
@@ -305,4 +306,19 @@ def filter_to_action(array, actions):
                               offset_dims=tuple([]),
                               collapsed_slice_dims=tuple([0, 1]),
                               start_index_map=tuple([0, 1])), tuple([1, 1]))
+
+
+def filter_dataset(batch: Batch, boolean_identity, target_keys: list):
+    filtered_batch = batch._asdict()
+
+    for key, val in filtered_batch.items():
+        if key in target_keys:
+            if val is None:
+                continue
+            if type(val) == list:
+                filtered_batch[key] = [item for idx, item in zip(boolean_identity, val) if idx]
+            else:
+                filtered_batch[key] = val[boolean_identity]
+
+    return Batch(**filtered_batch)
 

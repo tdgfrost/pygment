@@ -1,4 +1,4 @@
-from update.critic import update_q, update_v, update_interval
+from update.critic import update_q, update_v
 from update.actor import update_policy
 from core.common import Batch
 
@@ -66,16 +66,4 @@ def _update_value_jit(
 
     return new_value, {
         **value_info
-    }
-
-
-@jit
-def _update_interval_jit(
-    interval: Model, batch: Batch, **kwargs
-) -> tuple[Model, dict[Any, Any]]:
-
-    new_interval, interval_info = update_interval(interval, batch, **kwargs)
-
-    return new_interval, {
-        **interval_info
     }

@@ -6,7 +6,7 @@ import flax.linen as nn
 
 from core.common import Batch, InfoDict, Params
 from core.agent import Model
-from update.loss import ppo_loss, iql_loss
+from update.loss import ppo_loss, iql_loss, clone_behaviour
 
 
 def update_policy(actor: Model, batch: Batch, **kwargs) -> Tuple[Model, InfoDict]:
@@ -19,7 +19,8 @@ def update_policy(actor: Model, batch: Batch, **kwargs) -> Tuple[Model, InfoDict
     """
 
     loss_fn = {'ppo': ppo_loss,
-               'iql': iql_loss}
+               'iql': iql_loss,
+               'clone': clone_behaviour}
 
     def actor_loss_fn(actor_params: Params) -> tuple[Array, dict[str, Array]]:
         """

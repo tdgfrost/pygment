@@ -10,17 +10,16 @@ import pickle
 import yaml
 
 # Set jax to CPU
-# jax.config.update('jax_platform_name', 'cpu')
+jax.config.update('jax_platform_name', 'cpu')
 # jax.config.update("jax_debug_nans", True)
-jax.config.update('jax_disable_jit', True)
+# jax.config.update('jax_disable_jit', True)
 
 # Define config file - could change to FLAGS at some point
 config = {'seed': 123,
-          'epochs': int(1e4),
+          'epochs': int(1e5),
           'early_stopping': jnp.array(1000),
           'value_batch_size': 256,
           'critic_batch_size': 256,
-          'interval_batch_size': 256,
           'actor_batch_size': 256,
           # Need to separate out batch sizes for value/critic networks (all data) and actor (only the subsampled data)
           'expectile': 0.5,
@@ -28,8 +27,7 @@ config = {'seed': 123,
           'actor_lr': 0.001,
           'value_lr': 0.001,
           'critic_lr': 0.001,
-          'interval_lr': 0.001,
-          'hidden_dims': (64, 64),
+          'hidden_dims': (256, 256),
           'clipping': 1,
           'top_bar_coord': 1.2,  # 0.9,
           'bottom_bar_coord': 0.8,  # 0.5
@@ -38,7 +36,7 @@ config = {'seed': 123,
 if __name__ == "__main__":
     from core.agent import IQLAgent
     from core.common import (load_data, progress_bar, alter_batch, Batch, filter_to_action, calc_traj_discounted_rewards,
-                             move_to_gpu)
+                             move_to_gpu, filter_dataset)
     from core.evaluate import evaluate_envs, run_and_animate
     from core.envs import make_variable_env
 
@@ -47,7 +45,7 @@ if __name__ == "__main__":
     evaluate_bool = False
 
     # Update actor batch size to match expectile
-    config['actor_batch_size'] = int(config['actor_batch_size'] / (1 - config['expectile']))
+    # config['actor_batch_size'] = int(config['actor_batch_size'] / (1 - config['expectile']))
 
     # ============================================================== #
     # ========================= TRAINING =========================== #
@@ -56,26 +54,30 @@ if __name__ == "__main__":
     # Load static dataset
     print('Loading and processing dataset...')
     baseline_reward = 0
-    data = load_data(path=f'./offline_datasets/LunarLander/1.0_probability/dataset_reward_{baseline_reward}.pkl',
+    loaded_data = load_data(path=f'./offline_datasets/LunarLander/1.0_probability_5_steps/dataset_reward_{baseline_reward}.pkl',
                      scale='standardise',
                      gamma=config['gamma'])
 
-    intervals = jnp.array([len(traj) for traj in data.rewards])
-    interval_range = intervals.max() - intervals.min() + 1  # Range is inclusive so add 1 to this number
+    # Start by defining the intervals between actions (both the current and next action)
+    # intervals = the actual number of steps between actions
+    intervals = np.array([len(traj) for traj in loaded_data.rewards])
+    intervals_unique = np.unique(intervals)
+    mapping = {interval: idx for idx, interval in enumerate(intervals_unique)}
+    len_actions = np.array([mapping[interval] for interval in intervals])
+    next_len_actions = np.roll(len_actions, -1)
 
-    # Calculate len_actions and state_masks (for later, before moving to GPU)
-    len_actions = jnp.array([len(traj) for traj in data.rewards]) - intervals.min()
-    rewards = calc_traj_discounted_rewards(data.rewards, config['gamma'])
-    data = alter_batch(data, rewards=rewards, len_actions=len_actions)
+    intervals = jnp.array(intervals)
+    len_actions = jnp.array(len_actions)
+    next_len_actions = jnp.array(next_len_actions)
+
+    # Calculate rewards
+    rewards = calc_traj_discounted_rewards(loaded_data.rewards, config['gamma'])
+    loaded_data = alter_batch(loaded_data, rewards=rewards, len_actions=len_actions, next_len_actions=next_len_actions,
+                       intervals=intervals)
     del rewards
 
-    state_masks = jnp.zeros(shape=(len(data.len_actions), interval_range),
-                            dtype=jnp.bool_)
-    idxs = jnp.column_stack((jnp.arange(len(data.len_actions)), data.len_actions))
-    state_masks = state_masks.at[idxs[:, 0], idxs[:, 1]].set(True)
-
     # Move to GPU
-    data = move_to_gpu(data, gpu_keys=['states', 'actions', 'discounted_rewards', 'episode_rewards',
+    loaded_data = move_to_gpu(loaded_data, gpu_keys=['states', 'actions', 'discounted_rewards', 'episode_rewards',
                                        'next_states', 'dones', 'action_logprobs', 'len_actions', 'rewards'])
 
     # Make sure this matches with the desired dataset's extra_step metadata
@@ -83,13 +85,13 @@ if __name__ == "__main__":
         # If in rectangle
         if config['bottom_bar_coord'] < x[1] < config['top_bar_coord']:
             # with p == 0.05, delay by 20 steps
-            #if np.random.uniform() < 0.05:
-            return 20
+            # if np.random.uniform() < 0.05:
+            return 5
         # Otherwise, normal time steps (no delay)
         return 0
 
     # Train agent
-    def train():
+    def train(data):
         if logging_bool:
             wandb.init(
                 project="IQL-VariableTimeSteps",
@@ -101,8 +103,7 @@ if __name__ == "__main__":
 
         agent = IQLAgent(observations=dummy_env.observation_space.sample(),
                          action_dim=dummy_env.action_space.n,
-                         interval_dim=interval_range.item(),
-                         interval_min=intervals.min().item(),
+                         intervals_unique=intervals_unique,
                          opt_decay_schedule="cosine",
                          **config)
 
@@ -118,7 +119,7 @@ if __name__ == "__main__":
         # Standardise the state inputs
         agent.standardise_inputs(data.states)
 
-        for current_net in ['interval', 'value', 'critic', 'actor']:
+        for current_net in ['value', 'critic', 'actor']:
             print('\n\n', '=' * 50, '\n', ' ' * 3, '\U0001F483' * 3, ' ' * 1, f'Training {current_net} network',
                   ' ' * 2,
                   '\U0001F483' * 3, '\n', '=' * 50, '\n')
@@ -135,6 +136,23 @@ if __name__ == "__main__":
                 # Keep track of the best loss values
                 wandb.define_metric(f'{current_net}_loss', summary='min')
 
+            if is_net('actor'):
+                print('Filtering dataset...')
+                critic_filtered_idx = np.ravel_multi_index(np.array(jnp.vstack((data.actions, data.len_actions))),
+                                                           (agent.action_dim, len(agent.intervals_unique)))
+                critic_values = filter_to_action(jnp.minimum(*agent.critic(data.states)[1]),
+                                                 critic_filtered_idx)
+
+                state_values = agent.value(data.states)[1]
+                state_values = filter_to_action(state_values, data.len_actions)
+
+                advantages = critic_values - state_values
+
+                # Try normalising advantages
+                advantages = (advantages - advantages.mean()) / jnp.maximum(advantages.std(), 1e-8)
+
+                data = filter_dataset(data, advantages > 1, target_keys=['states', 'actions'])
+
             for epoch in range(config['epochs']):
                 if epoch > 0 and epoch % 100 == 0:
                     print(f'\n\n{epoch} epochs complete!\n')
@@ -143,54 +161,39 @@ if __name__ == "__main__":
                                            config[f'{current_net}_batch_size'])
 
                 # Calculate next state values
-                next_state_values = None
                 if is_net('critic'):
                     # Calculate the real TD value from next_state_value + current_state rewards
                     next_state_values = agent.value(batch.next_states)[1]
-                    next_state_intervals = nn.softmax(agent.interval(batch.next_states)[1], axis=-1)
-                    next_state_values = (next_state_values * next_state_intervals).sum(-1)
+                    next_state_values = filter_to_action(next_state_values, batch.next_len_actions)
 
                     gammas = jnp.ones(shape=len(batch.rewards)) * config['gamma']
-                    gammas = jnp.power(gammas, batch.len_actions + intervals.min())
-                    rewards = batch.rewards + gammas * next_state_values * (1 - batch.dones)
-                    batch = alter_batch(batch, rewards=rewards)
-                    del rewards
+                    gammas = jnp.power(gammas, batch.intervals)
+                    discounted_rewards = batch.rewards + gammas * next_state_values * (1 - batch.dones)
 
-                    # Then calculate the rest of the theoretical current state values,
-                    # and insert the real TD value at the appropriate place
-                    current_state_values = agent.value(batch.states)[1]
-                    current_state_mask = state_masks[idxs]
-                    """
-                    current_state_mask = jnp.array(
-                        [[False if bool_idx != action_len else True for bool_idx in range(interval_range)]
-                         for action_len in batch.len_actions])
-                    """
+                    actions = jnp.ravel_multi_index(jnp.vstack((batch.actions, batch.len_actions)),
+                                                    (agent.action_dim, len(agent.intervals_unique)))
 
-                    current_state_values = current_state_values.at[current_state_mask].set(batch.rewards)
-
-                    # Finally, multiply by the probability distribution and sum for an average
-                    current_state_intervals = nn.softmax(agent.interval(batch.states)[1], axis=-1)
-                    discounted_rewards = (current_state_intervals * current_state_values).sum(-1)
-
-                    batch = alter_batch(batch, discounted_rewards=discounted_rewards)
-
+                    batch = alter_batch(batch, discounted_rewards=discounted_rewards, actions=actions)
+                    del discounted_rewards
+                """
                 # Calculate advantages
                 advantages = None
                 if is_net('actor'):
+                    critic_filtered_idx = np.ravel_multi_index(np.array(jnp.vstack((batch.actions, batch.len_actions))),
+                                                               (agent.action_dim, len(agent.intervals_unique)))
                     critic_values = filter_to_action(jnp.minimum(*agent.critic(batch.states)[1]),
-                                                     batch.actions)
+                                                     critic_filtered_idx)
 
                     state_values = agent.value(batch.states)[1]
-                    state_intervals = nn.softmax(agent.interval(batch.states)[1], axis=-1)
-                    state_values = (state_values * state_intervals).sum(-1)
+                    state_values = filter_to_action(state_values, batch.len_actions)
 
                     advantages = critic_values - state_values
 
                     # Try normalising advantages
-                    advantages = (advantages - advantages.mean()) / jnp.maximum(advantages.std(), 1e-8)
-
+                    # advantages = (advantages - advantages.mean()) / jnp.maximum(advantages.std(), 1e-8)
+            
                 batch = alter_batch(batch, advantages=advantages)
-
+                """
                 # Remove excess from the batch
                 excess_data = {}
                 batch = batch._asdict()
@@ -199,13 +202,11 @@ if __name__ == "__main__":
                     batch[key] = None
                 batch = Batch(**batch)
                 loss_info = agent.update_async(batch,
-                                               interval_loss_fn={'crps': 0},
                                                value_loss_fn={'expectile': 0},
+                                               # value_loss_fn={'mc_mse': 0},
                                                critic_loss_fn={'mc_mse': 0},
-                                               actor_loss_fn={'iql': 0},
+                                               actor_loss_fn={'clone': 0},
                                                expectile=config['expectile'],
-                                               gamma=config['gamma'],
-                                               next_state_values=next_state_values,
                                                **{current_net: True})
 
                 total_training_steps += config[f'{current_net}_batch_size']
@@ -218,8 +219,6 @@ if __name__ == "__main__":
                     agent.actor.save(os.path.join(model_dir, 'model_checkpoints/actor')) if is_net('actor') else None
                     agent.critic.save(os.path.join(model_dir, 'model_checkpoints/critic')) if is_net('critic') else None
                     agent.value.save(os.path.join(model_dir, 'model_checkpoints/value')) if is_net('value') else None
-                    agent.interval.save(os.path.join(model_dir, 'model_checkpoints/interval')) if is_net(
-                        'interval') else None
                     '''
                 else:
                     count += jnp.array(1)
@@ -231,8 +230,6 @@ if __name__ == "__main__":
                             os.path.join(model_dir, 'model_checkpoints/critic')) if is_net('critic') else agent.critic
                         agent.value = agent.value.load(
                             os.path.join(model_dir, 'model_checkpoints/value')) if is_net('value') else agent.value
-                        agent.interval = agent.interval.load(
-                            os.path.join(model_dir, 'model_checkpoints/interval')) if is_net('interval') else agent.interval
                         '''
                         agent.actor.save(os.path.join(model_dir, 'model_checkpoints/actor')) if is_net(
                             'actor') else None
@@ -240,8 +237,6 @@ if __name__ == "__main__":
                             'critic') else None
                         agent.value.save(os.path.join(model_dir, 'model_checkpoints/value')) if is_net(
                             'value') else None
-                        agent.interval.save(os.path.join(model_dir, 'model_checkpoints/interval')) if is_net(
-                            'interval') else None
                         break
 
                 # Log intermittently
@@ -275,8 +270,10 @@ if __name__ == "__main__":
             wandb.log({'median_reward': np.median(episode_rewards)})
             wandb.log({'mean_reward': np.mean(episode_rewards)})
 
+        return agent
+
     # Run the train script
-    train()
+    agent = train(loaded_data)
 
     # ============================================================== #
     # ======================== EVALUATION ========================== #
@@ -287,8 +284,7 @@ if __name__ == "__main__":
 
         agent = IQLAgent(observations=dummy_env.observation_space.sample(),
                          action_dim=dummy_env.action_space.n,
-                         interval_dim=interval_range.item(),
-                         interval_min=intervals.min().item(),
+                         intervals_unique=intervals_unique,
                          opt_decay_schedule="cosine",
                          **config)
 
