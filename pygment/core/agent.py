@@ -164,17 +164,12 @@ class IQLAgent(BaseAgent):
                                   optim=optax.adam(learning_rate=value_lr),
                                   continual_learning=continual_learning)
 
-        self.normal_value = Model.create(ValueNet(hidden_dims, len(self.intervals_unique)),
-                                         inputs=[self.value_key, observations],
-                                         optim=optax.adam(learning_rate=value_lr),
-                                         continual_learning=continual_learning)
-
         self.average_value = Model.create(ValueNet(hidden_dims, 1),
                                           inputs=[self.value_key, observations],
                                           optim=optax.adam(learning_rate=value_lr),
                                           continual_learning=continual_learning)
 
-        self.networks = [self.actor, self.critic, self.value, self.average_value, self.normal_value]
+        self.networks = [self.actor, self.critic, self.value, self.average_value]
 
     def update(self, batch: Batch, **kwargs) -> InfoDict:
         """
@@ -223,16 +218,12 @@ class IQLAgent(BaseAgent):
         new_average_value, value_info = _update_value_jit(
             self.average_value, batch, **kwargs) if value else (self.average_value, {})
 
-        new_normal_value, value_info = _update_value_jit(
-            self.normal_value, batch, **{'expectile': 0.5, 'value_loss_fn': {'expectile': 0}}) if value else (self.normal_value, {})
-
         # Update the agent's networks with the updated copies
         self.rng = new_rng
         self.actor = new_actor
         self.critic = new_critic
         self.value = new_value
         self.average_value = new_average_value
-        self.normal_value = new_normal_value
 
         # Return the metadata
         return {**critic_info,

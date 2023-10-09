@@ -151,14 +151,16 @@ if __name__ == "__main__":
 
                 advantages = critic_values - state_values
 
+                # Try normalising advantages
+                advantages = (advantages - advantages.mean()) / advantages.std()
+
                 data = alter_batch(data, advantages=advantages)
 
-                # Try normalising advantages
-                advantages = (advantages - advantages.mean()) / jnp.maximum(advantages.std(), 1e-8)
+                data = filter_dataset(data, data.advantages > 1, target_keys=['states', 'actions', 'advantages'])
 
-                data = filter_dataset(data, advantages > 0, target_keys=['states', 'actions', 'advantages'])
-                sample_prob = np.array(data.advantages, dtype=np.float64)
-                sample_prob = np.exp(sample_prob) / np.exp(sample_prob).sum()
+                # sample_prob = np.array(data.advantages, dtype=np.float64)
+                # sample_prob = (sample_prob - sample_prob.mean()) / sample_prob.std()
+                # sample_prob = np.exp(sample_prob) / np.exp(sample_prob).sum()
                 # data = alter_batch(data, advantages=advantages)
 
             for epoch in range(config['epochs']):
@@ -194,9 +196,10 @@ if __name__ == "__main__":
                     batch[key] = None
                 batch = Batch(**batch)
                 loss_info = agent.update_async(batch,
-                                               value_loss_fn={'expectile': 0},
-                                               # value_loss_fn={'mc_mse': 0},
-                                               critic_loss_fn={'mc_mse': 0},
+                                               # value_loss_fn={'expectile': 0},
+                                               value_loss_fn={'mc_mse': 0},
+                                               # critic_loss_fn={'mc_mse': 0},
+                                               critic_loss_fn={'expectile': 0},
                                                actor_loss_fn={'clone': 0},
                                                # actor_loss_fn={'iql': 0},
                                                expectile=config['expectile'],
