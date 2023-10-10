@@ -1,6 +1,6 @@
 from core.net import Model, ValueNet, ActorNet, DoubleCriticNet, CriticNet
 from core.common import Batch, InfoDict, alter_batch
-from update.actions import _update_jit, _update_value_jit, _update_critic_jit, _update_actor_jit
+from update.actions import _update_jit, _update_value_jit, _update_critic_jit, _update_actor_jit, _update_interval_jit
 
 import os
 import datetime as dt
@@ -169,7 +169,12 @@ class IQLAgent(BaseAgent):
                                           optim=optax.adam(learning_rate=value_lr),
                                           continual_learning=continual_learning)
 
-        self.networks = [self.actor, self.critic, self.value, self.average_value]
+        self.interval = Model.create(CriticNet(hidden_dims, len(self.intervals_unique)),
+                                     inputs=[self.value_key, observations],
+                                     optim=optax.adam(learning_rate=value_lr),
+                                     continual_learning=continual_learning)
+
+        self.networks = [self.actor, self.critic, self.value, self.average_value, self.interval]
 
     def update(self, batch: Batch, **kwargs) -> InfoDict:
         """
@@ -194,7 +199,7 @@ class IQLAgent(BaseAgent):
         return info
 
     def update_async(self, batch: Batch, actor: bool = False,
-                     critic: bool = False, value: bool = False, **kwargs) -> InfoDict:
+                     critic: bool = False, value: bool = False, interval: bool = False, **kwargs) -> InfoDict:
         """
         Updates the agent's networks asynchronously.
 
@@ -218,17 +223,22 @@ class IQLAgent(BaseAgent):
         new_average_value, value_info = _update_value_jit(
             self.average_value, batch, **kwargs) if value else (self.average_value, {})
 
+        new_interval, interval_info = _update_interval_jit(
+            self.interval, batch, **kwargs) if interval else (self.interval, {})
+
         # Update the agent's networks with the updated copies
         self.rng = new_rng
         self.actor = new_actor
         self.critic = new_critic
         self.value = new_value
         self.average_value = new_average_value
+        self.interval = new_interval
 
         # Return the metadata
         return {**critic_info,
                 **value_info,
-                **actor_info
+                **actor_info,
+                **interval_info,
                 }
 
     def sample_action(self, state, key=jax.random.PRNGKey(123)):

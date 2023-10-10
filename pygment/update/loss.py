@@ -138,3 +138,12 @@ def ppo_loss(logits, batch, clip_ratio=0.2, **kwargs):
     # Return the loss term
     return loss
 
+
+def log_softmax_cross_entropy(logits, labels, **kwargs):
+    logits_max = jnp.max(logits, axis=-1, keepdims=True)
+    logits -= jax.lax.stop_gradient(logits_max)
+
+    label_logits = filter_to_action(logits, labels)
+    log_normalizers = jnp.log(jnp.sum(jnp.exp(logits), axis=-1))
+
+    return log_normalizers - label_logits
