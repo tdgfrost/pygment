@@ -1,6 +1,6 @@
 from core.net import Model, ValueNet, ActorNet, DoubleCriticNet, CriticNet
 from core.common import Batch, InfoDict
-from update.actions import _update_jit, _update_value_jit, _update_critic_jit, _update_actor_jit, _update_interval_jit
+from update.actions import _update_jit, _update_value_jit, _update_critic_jit, _update_actor_jit
 
 import os
 import datetime as dt
@@ -159,17 +159,12 @@ class IQLAgent(BaseAgent):
                                    optim=optax.adam(learning_rate=critic_lr),
                                    continual_learning=continual_learning)
 
-        self.value = Model.create(ValueNet(hidden_dims, len(self.intervals_unique)),
+        self.value = Model.create(ValueNet(hidden_dims, 1),
                                   inputs=[self.value_key, observations],
                                   optim=optax.adam(learning_rate=value_lr),
                                   continual_learning=continual_learning)
 
-        self.interval = Model.create(CriticNet(hidden_dims, len(self.intervals_unique)),
-                                     inputs=[self.value_key, observations],
-                                     optim=optax.adam(learning_rate=value_lr),
-                                     continual_learning=continual_learning)
-
-        self.networks = [self.actor, self.critic, self.value, self.interval]
+        self.networks = [self.actor, self.critic, self.value]
 
     def update(self, batch: Batch, **kwargs) -> InfoDict:
         """
@@ -195,7 +190,7 @@ class IQLAgent(BaseAgent):
 
     def update_async(self, batch: Batch, actor: bool = False,
                      critic: bool = False, value: bool = False,
-                     interval: bool = False, **kwargs) -> InfoDict:
+                     **kwargs) -> InfoDict:
         """
         Updates the agent's networks asynchronously.
 
@@ -203,7 +198,6 @@ class IQLAgent(BaseAgent):
         :param actor: whether to update the actor network.
         :param critic: whether to update the critic network.
         :param value: whether to update the value network.
-        :param interval: whether to update the interval network.
         :return: an InfoDict object containing metadata.
         """
 
@@ -217,21 +211,16 @@ class IQLAgent(BaseAgent):
         new_value, value_info = _update_value_jit(
             self.value, batch, **kwargs) if value else (self.value, {})
 
-        new_interval, interval_info = _update_interval_jit(
-            self.interval, batch, **kwargs) if interval else (self.interval, {})
-
         # Update the agent's networks with the updated copies
         self.rng = new_rng
         self.actor = new_actor
         self.critic = new_critic
         self.value = new_value
-        self.interval = new_interval
 
         # Return the metadata
         return {**critic_info,
                 **value_info,
                 **actor_info,
-                **interval_info,
                 }
 
     def sample_action(self, state, key=jax.random.PRNGKey(123)):

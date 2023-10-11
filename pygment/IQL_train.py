@@ -19,7 +19,6 @@ config = {'seed': 123,
           'value_batch_size': 256,
           'critic_batch_size': 256,
           'actor_batch_size': 256,
-          'interval_batch_size': 256,
           'expectile': 0.5,
           'baseline_reward': -2,
           'interval_probability': 0.05,
@@ -28,7 +27,6 @@ config = {'seed': 123,
           'actor_lr': 0.001,
           'value_lr': 0.001,
           'critic_lr': 0.001,
-          'interval_lr': 0.001,
           'hidden_dims': (256, 256),
           'clipping': 1,
           'top_bar_coord': 1.2,  # 0.9,
@@ -125,7 +123,7 @@ if __name__ == "__main__":
         # For advantage-prioritised cloning
         sample_prob = None
 
-        for current_net in ['interval', 'value', 'critic', 'actor']:
+        for current_net in ['value', 'critic', 'actor']:
             print('\n\n', '=' * 50, '\n', ' ' * 3, '\U0001F483' * 3, ' ' * 1, f'Training {current_net} network',
                   ' ' * 2, '\U0001F483' * 3, '\n', '=' * 50, '\n')
 
@@ -143,16 +141,11 @@ if __name__ == "__main__":
 
             if is_net('actor'):
                 print('Filtering dataset...')
-                # Calculate the interval probabilities for each state
-                interval_values = nn.softmax(agent.interval(data.states)[1], -1)
-
                 # Calculate the critic and state values for each state
-                # (using interval probabilities to marginalise the values)
                 critic_values = jnp.minimum(*agent.critic(data.states)[1])
                 critic_values = filter_to_action(critic_values, data.actions)
 
                 state_values = agent.value(data.states)[1]
-                state_values = (state_values * interval_values).sum(-1)
 
                 # Calculate the advantages
                 advantages = critic_values - state_values
@@ -173,30 +166,15 @@ if __name__ == "__main__":
                                            config[f'{current_net}_batch_size'],
                                            p=sample_prob)
 
-                # Use TD learning for the value network
-                if is_net('value'):
+                # Use TD learning for the value and critic networks (based on the value network)
+                if is_net('value') or is_net('critic'):
                     next_state_values = agent.value(batch.next_states)[1]
-                    next_interval_values = nn.softmax(agent.interval(batch.next_states)[1], -1)
-                    next_state_values = (next_state_values * next_interval_values).sum(-1)
 
                     gammas = jnp.ones(shape=len(batch.rewards)) * config['gamma']
                     gammas = jnp.power(gammas, batch.intervals)
                     discounted_rewards = batch.rewards + gammas * next_state_values * (1 - batch.dones)
 
                     batch = alter_batch(batch, discounted_rewards=discounted_rewards)
-                    del discounted_rewards
-
-                # Use TD learning for the critic network (based off the value network)
-                if is_net('critic'):
-                    next_state_values = agent.value(batch.next_states)[1]
-                    next_interval_values = nn.softmax(agent.interval(batch.next_states)[1], -1)
-                    next_state_values = (next_state_values * next_interval_values).sum(-1)
-
-                    gammas = jnp.ones(shape=len(batch.rewards)) * config['gamma']
-                    gammas = jnp.power(gammas, batch.intervals)
-                    discounted_rewards = batch.rewards + gammas * next_state_values * (1 - batch.dones)
-
-                    batch = alter_batch(batch, discounted_rewards=discounted_rewards)  # actions=actions)
                     del discounted_rewards
 
                 # Remove excess data from the batch
@@ -209,7 +187,6 @@ if __name__ == "__main__":
 
                 # Perform the update step
                 loss_info = agent.update_async(batch,
-                                               interval_loss_fn={'crossentropy': 0},
                                                value_loss_fn={'expectile': 0},
                                                critic_loss_fn={'mc_mse': 0},
                                                actor_loss_fn={'clone': 0},
@@ -239,8 +216,6 @@ if __name__ == "__main__":
             # Save each model at the end of training
             agent.actor.save(os.path.join(model_dir, 'model_checkpoints/actor')) if is_net(
                 'actor') else None
-            agent.interval.save(os.path.join(model_dir, 'model_checkpoints/interval')) if is_net(
-                'interval') else None
             agent.critic.save(os.path.join(model_dir, 'model_checkpoints/critic')) if is_net(
                 'critic') else None
             agent.value.save(os.path.join(model_dir, 'model_checkpoints/value')) if is_net(
