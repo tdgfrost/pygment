@@ -1,8 +1,6 @@
 from typing import Tuple
 
 from jax import Array
-import jax.numpy as jnp
-import flax.linen as nn
 
 from core.common import Batch, InfoDict, Params
 from core.agent import Model

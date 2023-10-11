@@ -1,5 +1,5 @@
 from core.net import Model, ValueNet, ActorNet, DoubleCriticNet, CriticNet
-from core.common import Batch, InfoDict, alter_batch
+from core.common import Batch, InfoDict
 from update.actions import _update_jit, _update_value_jit, _update_critic_jit, _update_actor_jit, _update_interval_jit
 
 import os
@@ -154,7 +154,7 @@ class IQLAgent(BaseAgent):
                                   optim=optimiser,
                                   continual_learning=continual_learning)
 
-        self.critic = Model.create(DoubleCriticNet(hidden_dims, self.action_dim * len(self.intervals_unique)),
+        self.critic = Model.create(DoubleCriticNet(hidden_dims, self.action_dim),
                                    inputs=[self.critic_key, observations],
                                    optim=optax.adam(learning_rate=critic_lr),
                                    continual_learning=continual_learning)
@@ -164,17 +164,12 @@ class IQLAgent(BaseAgent):
                                   optim=optax.adam(learning_rate=value_lr),
                                   continual_learning=continual_learning)
 
-        self.average_value = Model.create(ValueNet(hidden_dims, 1),
-                                          inputs=[self.value_key, observations],
-                                          optim=optax.adam(learning_rate=value_lr),
-                                          continual_learning=continual_learning)
-
         self.interval = Model.create(CriticNet(hidden_dims, len(self.intervals_unique)),
                                      inputs=[self.value_key, observations],
                                      optim=optax.adam(learning_rate=value_lr),
                                      continual_learning=continual_learning)
 
-        self.networks = [self.actor, self.critic, self.value, self.average_value, self.interval]
+        self.networks = [self.actor, self.critic, self.value, self.interval]
 
     def update(self, batch: Batch, **kwargs) -> InfoDict:
         """
@@ -199,7 +194,8 @@ class IQLAgent(BaseAgent):
         return info
 
     def update_async(self, batch: Batch, actor: bool = False,
-                     critic: bool = False, value: bool = False, interval: bool = False, **kwargs) -> InfoDict:
+                     critic: bool = False, value: bool = False,
+                     interval: bool = False, **kwargs) -> InfoDict:
         """
         Updates the agent's networks asynchronously.
 
@@ -207,6 +203,7 @@ class IQLAgent(BaseAgent):
         :param actor: whether to update the actor network.
         :param critic: whether to update the critic network.
         :param value: whether to update the value network.
+        :param interval: whether to update the interval network.
         :return: an InfoDict object containing metadata.
         """
 
@@ -220,9 +217,6 @@ class IQLAgent(BaseAgent):
         new_value, value_info = _update_value_jit(
             self.value, batch, **kwargs) if value else (self.value, {})
 
-        new_average_value, value_info = _update_value_jit(
-            self.average_value, batch, **kwargs) if value else (self.average_value, {})
-
         new_interval, interval_info = _update_interval_jit(
             self.interval, batch, **kwargs) if interval else (self.interval, {})
 
@@ -231,7 +225,6 @@ class IQLAgent(BaseAgent):
         self.actor = new_actor
         self.critic = new_critic
         self.value = new_value
-        self.average_value = new_average_value
         self.interval = new_interval
 
         # Return the metadata

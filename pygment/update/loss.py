@@ -53,14 +53,6 @@ def mc_mse_loss(pred, batch, **kwargs):
     return (pred - batch.discounted_rewards) ** 2
 
 
-def td_mse_loss(pred, batch, rewards, next_state_values, gamma=0.99, **kwargs):
-    gammas = jnp.ones(shape=len(pred)) * gamma
-    gammas = jnp.power(gammas, jnp.array([len(traj) for traj in batch.rewards]))
-
-    target = rewards + gammas * next_state_values * (1 - batch.dones)
-    return (pred - target) ** 2
-
-
 def iql_loss(logits, batch, **kwargs):
     """
     Calculate the advantage-filtered logprobs
@@ -147,3 +139,4 @@ def log_softmax_cross_entropy(logits, labels, **kwargs):
     log_normalizers = jnp.log(jnp.sum(jnp.exp(logits), axis=-1))
 
     return log_normalizers - label_logits
+

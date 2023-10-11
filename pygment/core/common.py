@@ -1,12 +1,10 @@
 import numpy as np
 import jax.numpy as jnp
-from typing import AnyStr, Dict, Any
+from typing import Dict, Any
 import flax
-from jax import lax
 import jax
 from collections import namedtuple
 import pickle
-import os
 
 # Specify types
 Params = flax.core.FrozenDict[str, Any]

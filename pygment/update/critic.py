@@ -2,10 +2,7 @@ from jax import Array
 
 from core.agent import Model
 from core.common import Params, InfoDict, Batch, filter_to_action
-from update.loss import mc_mse_loss, td_mse_loss, expectile_loss, log_softmax_cross_entropy
-
-import jax.numpy as jnp
-import numpy as np
+from update.loss import mc_mse_loss, expectile_loss, log_softmax_cross_entropy
 
 from typing import Tuple
 
@@ -20,7 +17,6 @@ def update_v(value: Model, batch: Batch, **kwargs) -> Tuple[Model, InfoDict]:
     """
 
     loss_fn = {'mc_mse': mc_mse_loss,
-               'td_mse': td_mse_loss,
                'expectile': expectile_loss}
 
     # Unpack the actions, states, and discounted rewards from the batch of samples
@@ -62,7 +58,6 @@ def update_q(critic: Model, batch: Batch, **kwargs) -> Tuple[Model, InfoDict]:
     states = batch.states
 
     loss_fn = {'mc_mse': mc_mse_loss,
-               'td_mse': td_mse_loss,
                'expectile': expectile_loss}
 
     def critic_loss_fn(critic_params: Params) -> tuple[Array, dict[str, Array]]:
