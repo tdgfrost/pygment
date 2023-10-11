@@ -20,8 +20,8 @@ config = {'seed': 123,
           'critic_batch_size': 256,
           'actor_batch_size': 256,
           'expectile': 0.5,
-          'baseline_reward': 0,
-          'interval_probability': 1.0,
+          'baseline_reward': -2,
+          'interval_probability': 0.05,
           'top_actions_quantile': 0.75,
           'gamma': 0.99,
           'actor_lr': 0.001,
@@ -42,7 +42,7 @@ if __name__ == "__main__":
     from core.envs import make_variable_env
 
     # Set whether to train and/or evaluate
-    logging_bool = True
+    logging_bool = False
     evaluate_bool = False
 
     if logging_bool:
