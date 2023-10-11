@@ -173,8 +173,8 @@ if __name__ == "__main__":
                                            config[f'{current_net}_batch_size'],
                                            p=sample_prob)
 
-                # Use TD learning for the value network
-                if is_net('value'):
+                # Use TD learning for the value and critic networks (based on the value network)
+                if is_net('value') or is_net('critic'):
                     next_state_values = agent.value(batch.next_states)[1]
                     next_interval_values = nn.softmax(agent.interval(batch.next_states)[1], -1)
                     next_state_values = (next_state_values * next_interval_values).sum(-1)
@@ -184,19 +184,6 @@ if __name__ == "__main__":
                     discounted_rewards = batch.rewards + gammas * next_state_values * (1 - batch.dones)
 
                     batch = alter_batch(batch, discounted_rewards=discounted_rewards)
-                    del discounted_rewards
-
-                # Use TD learning for the critic network (based off the value network)
-                if is_net('critic'):
-                    next_state_values = agent.value(batch.next_states)[1]
-                    next_interval_values = nn.softmax(agent.interval(batch.next_states)[1], -1)
-                    next_state_values = (next_state_values * next_interval_values).sum(-1)
-
-                    gammas = jnp.ones(shape=len(batch.rewards)) * config['gamma']
-                    gammas = jnp.power(gammas, batch.intervals)
-                    discounted_rewards = batch.rewards + gammas * next_state_values * (1 - batch.dones)
-
-                    batch = alter_batch(batch, discounted_rewards=discounted_rewards)  # actions=actions)
                     del discounted_rewards
 
                 # Remove excess data from the batch
