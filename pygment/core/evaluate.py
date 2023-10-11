@@ -1,8 +1,6 @@
 import os
 import jax
 import numpy as np
-import gymnasium
-from stable_baselines3.common.env_util import make_vec_env
 from matplotlib.patches import Rectangle
 from matplotlib.animation import FuncAnimation
 import matplotlib.pyplot as plt

@@ -2,11 +2,7 @@ from jax import Array
 
 from core.agent import Model
 from core.common import Params, InfoDict, Batch, filter_to_action
-from update.loss import mc_mse_loss, td_mse_loss, expectile_loss
-
-import jax.numpy as jnp
-import jax
-import optax
+from update.loss import mc_mse_loss, expectile_loss, log_softmax_cross_entropy
 
 from typing import Tuple
 
@@ -21,20 +17,17 @@ def update_v(value: Model, batch: Batch, **kwargs) -> Tuple[Model, InfoDict]:
     """
 
     loss_fn = {'mc_mse': mc_mse_loss,
-               'td_mse': td_mse_loss,
                'expectile': expectile_loss}
 
     # Unpack the actions, states, and discounted rewards from the batch of samples
     states = batch.states
-    if 'interval_min' in kwargs:
-        len_actions = jnp.array([len(traj) for traj in batch.rewards]) - kwargs['interval_min']
 
     def value_loss_fn(value_params: Params) -> tuple[Array, dict[str, Array]]:
         # Generate V(s) for the sample states
         layer_outputs, v = value.apply({'params': value_params}, states)
 
-        if 'interval_min' in kwargs:
-            v = filter_to_action(v, len_actions)
+        if batch.len_actions is not None and len(v.shape) > 1:
+            v = filter_to_action(v, batch.len_actions)
 
         # Calculate the loss for V using Q with expectile regression
         value_loss = loss_fn[list(kwargs['value_loss_fn'].keys())[0]](v, batch, **kwargs).mean()
@@ -65,7 +58,6 @@ def update_q(critic: Model, batch: Batch, **kwargs) -> Tuple[Model, InfoDict]:
     states = batch.states
 
     loss_fn = {'mc_mse': mc_mse_loss,
-               'td_mse': td_mse_loss,
                'expectile': expectile_loss}
 
     def critic_loss_fn(critic_params: Params) -> tuple[Array, dict[str, Array]]:
@@ -103,21 +95,25 @@ def update_q(critic: Model, batch: Batch, **kwargs) -> Tuple[Model, InfoDict]:
 
 def update_interval(interval: Model, batch: Batch, **kwargs) -> Tuple[Model, InfoDict]:
     """
-    Function to update the Q network
-    :param interval: the interval network to be updated
+    Function to update the interval network
+    :param interval: the critic network to be updated
     :param batch: a Batch object of samples
     :return: a tuple containing the new model parameters, plus metadata
     """
 
     # Unpack the actions, states, and discounted rewards from the batch of samples
     states = batch.states
-    len_actions = jnp.array([len(traj) for traj in batch.rewards]) - kwargs['interval_min']
+    len_actions = batch.len_actions
+
+    loss_fn = {'crossentropy': log_softmax_cross_entropy}
 
     def interval_loss_fn(interval_params: Params) -> tuple[Array, dict[str, Array]]:
         # Generate Q values from each of the two critic networks
         layer_outputs, logits = interval.apply({'params': interval_params}, states)
 
-        interval_loss = optax.softmax_cross_entropy_with_integer_labels(logits, len_actions).mean()
+        # Calculate the loss for the critic networks using the target Q values with MSE
+        interval_loss = loss_fn[list(kwargs['interval_loss_fn'].keys())[0]](logits,
+                                                                          labels=len_actions, **kwargs).mean()
 
         # Return the loss value, plus metadata
         return interval_loss, {

@@ -1,19 +1,18 @@
 import numpy as np
 import jax.numpy as jnp
-from typing import AnyStr, Dict, Any
+from typing import Dict, Any
 import flax
-from jax import lax
 import jax
 from collections import namedtuple
 import pickle
-import os
 
 # Specify types
 Params = flax.core.FrozenDict[str, Any]
 InfoDict = Dict[str, Any]
 PRNGKey = Any
 fields = ['states', 'actions', 'rewards', 'discounted_rewards', 'episode_rewards',
-          'next_states', 'next_actions', 'dones', 'action_logprobs', 'advantages']
+          'next_states', 'next_actions', 'dones', 'action_logprobs', 'advantages', 'intervals',
+          'len_actions', 'next_len_actions']
 Batch = namedtuple('Batch', fields, defaults=(None,) * len(fields))
 
 
@@ -68,6 +67,21 @@ def load_data(path: str,
     return batch
 
 
+def move_to_gpu(batch: Batch, gpu_keys: list, gpu_key='gpu') -> Batch:
+    gpu_batch = batch._asdict()
+
+    for key, value in gpu_batch.items():
+        if value is None:
+            continue
+        if key in gpu_keys:
+            if type(value) == jnp.ndarray:
+                gpu_batch[key] = jax.device_put(value, jax.devices(gpu_key)[0])
+            else:
+                gpu_batch[key] = jnp.array(value)
+
+    return Batch(**gpu_batch)
+
+
 def calc_discounted_rewards(dones, rewards, gamma):
     """
     Calculate discounted rewards
@@ -107,12 +121,12 @@ def calc_discounted_rewards(dones, rewards, gamma):
     discounted_rewards[mask] = flattened_rewards
 
     # Use JAX/lax to calculate the discounted rewards for each row
-    discounted_rewards = lax.scan(lambda agg, reward: (gamma * agg + reward, gamma * agg + reward),
-                                  np.zeros((samples,)),
-                                  jnp.array(discounted_rewards.transpose()), reverse=True)[1].transpose()
+    def scan_fn(accumulator, current): return gamma * accumulator + current
+    accumulator = np.frompyfunc(scan_fn, 2, 1)
+    discounted_rewards = np.flip(accumulator.accumulate(np.flip(discounted_rewards, -1), axis=-1), -1).astype(np.float32)
 
     # Finally, convert the array back to a 1D (numpy) array
-    discounted_rewards = np.array(discounted_rewards[mask])
+    discounted_rewards = discounted_rewards[mask]
 
     # And index by the actions taken, not the environment steps
     discounted_rewards = discounted_rewards[traj_idxs]
@@ -123,13 +137,32 @@ def calc_discounted_rewards(dones, rewards, gamma):
 def calc_traj_discounted_rewards(rewards, gamma):
     max_len = max([len(traj) for traj in rewards])
     samples = len(rewards)
-    mask = np.array([[True if i < len(traj) else False for i in range(max_len)] for traj in rewards])
+
+    # Define the 'empty' array of boolean masks
+    mask = np.zeros(shape=(len(rewards), max_len),
+                    dtype=np.bool_)
+
+    # Identify the 'end point' of each trajectory
+    idxs = np.column_stack((np.arange(len(rewards)), [len(traj) - 1 for traj in rewards]))
+    mask[idxs[:, 0], idxs[:, 1]] = True
+
+    # Create an accumulator function, which will backtrace the "True" mask label back to the first index for those rows
+    def scan_fn(accumulator, current): return max(accumulator, current)
+    accumulator = np.frompyfunc(scan_fn, 2, 1)
+
+    # Apply only to the rows where the mask isn't in the first position to begin with
+    mask[np.where(np.where(mask)[1] > 0)[0]] = np.flip(accumulator.accumulate(
+        np.flip(mask[np.where(np.where(mask)[1] > 0)[0]], -1), axis=-1), -1)
+
+    # Create a zero-padded array of the rewards using the above mask
     discounted_rewards = np.zeros((samples, max_len))
     discounted_rewards[mask] = np.concatenate(rewards)
 
+    # Create the gammas and apply to the discounted rewards
     gammas = np.ones(shape=max_len) * gamma
     gammas = np.power(gammas, np.arange(max_len))
 
+    # Sum up each trajectory into a single value
     discounted_rewards = np.sum(discounted_rewards * gammas, axis=-1)
 
     return discounted_rewards
@@ -271,4 +304,19 @@ def filter_to_action(array, actions):
                               offset_dims=tuple([]),
                               collapsed_slice_dims=tuple([0, 1]),
                               start_index_map=tuple([0, 1])), tuple([1, 1]))
+
+
+def filter_dataset(batch: Batch, boolean_identity, target_keys: list):
+    filtered_batch = batch._asdict()
+
+    for key, val in filtered_batch.items():
+        if key in target_keys:
+            if val is None:
+                continue
+            if type(val) == list:
+                filtered_batch[key] = [item for idx, item in zip(boolean_identity, val) if idx]
+            else:
+                filtered_batch[key] = val[boolean_identity]
+
+    return Batch(**filtered_batch)
 

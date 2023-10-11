@@ -1,6 +1,5 @@
 from core.common import Params
 from typing import Sequence, Callable, Optional, Tuple, Any
-import os
 
 import jax.numpy as jnp
 import numpy as np
@@ -348,14 +347,14 @@ class Model:
                                                                        self.choose_features,
                                                                        ], info['layer_outputs'], new_params)
         """
-
+        """
         features_to_replace, num_features_to_replace = self.choose_features(outputs=info['layer_outputs'],
                                                                             new_params=new_params)
         
 
         # Update the new parameters with re-initialised low utility nodes, as required
         new_params = self.gen_new_features(features_to_replace, new_params)
-
+        """
         # Returns a COPY with the new parameters and optimiser state, as well as the metadata
         return self.replace(params=new_params,
                             opt_state=new_opt_state), info

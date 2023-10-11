@@ -5,17 +5,9 @@ from stable_baselines3.common.env_util import make_vec_env
 import pickle
 import os
 
-# Define config file - could change to FLAGS at some point
-config = {'epochs': int(1e6),
-          'seed': 123,
-          'n_episodes': 10000,
-          'gamma': 0.99,
-          'hidden_dims': (64, 64),
-          'max_episode_steps': 1000,
-          'top_bar_coord': 1.2,  # 0.9,
-          'bottom_bar_coord': 0.8,  # 0.5
-          }
+jax.config.update('jax_platform_name', 'cpu')
 
+# Define config file - could change to FLAGS at some point
 if __name__ == "__main__":
     from core.agent import PPOAgent
     from core.common import flatten_batch
@@ -25,6 +17,18 @@ if __name__ == "__main__":
     # ======================== PREPARATION ========================= #
     # ============================================================== #
 
+    # Load previous checkpoints
+    reward = -2
+    dirname = './experiments/PPO/2023_10_11_141616'
+    model_checkpoints = os.path.join(dirname, 'model_checkpoints')
+    target_directory = './offline_datasets/LunarLander/0.05_probability_5_steps'
+
+    with open(os.path.join(dirname, 'config.txt'), 'r') as f:
+        config = eval(f.read())
+
+    config['max_episode_steps'] = 1000
+    config['n_episodes'] = 10000
+
     # Create agent
     env = make_env('LunarLander-v2', max_episode_steps=config['max_episode_steps'])
     agent = PPOAgent(observations=env.observation_space.sample(),
@@ -33,10 +37,7 @@ if __name__ == "__main__":
                      **config)
     del env
 
-    # Load previous checkpoints
-    reward = 190
-    filename = './experiments/PPO/Experiment_2/model_checkpoints'
-    agent.actor = agent.actor.load(os.path.join(filename, f'actor_{reward}'))
+    agent.actor = agent.actor.load(os.path.join(model_checkpoints, f'actor_{reward}'))
 
     # Create variable environment template (optional)
     def extra_step_filter(x):
@@ -44,7 +45,7 @@ if __name__ == "__main__":
         if config['bottom_bar_coord'] < x[1] < config['top_bar_coord']:
             # with p == 0.05, delay by 20 steps
             if np.random.uniform() < 0.05:
-                return 20
+                return 5
         # Otherwise, normal time steps (no delay)
         return 0
 
@@ -68,6 +69,9 @@ if __name__ == "__main__":
     # Flatten the batch
     batch = flatten_batch(batch)
 
+    # Create directory if it doesn't exist
+    os.makedirs(target_directory, exist_ok=True)
+
     # Save batch
-    with open(f'./offline_datasets/LunarLander/dataset_reward_{reward}.pkl', 'wb') as f:
+    with open(os.path.join(target_directory, f'dataset_reward_{reward}.pkl'), 'wb') as f:
         pickle.dump(batch, f)

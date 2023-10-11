@@ -1,18 +1,18 @@
 from core.net import Model, ValueNet, ActorNet, DoubleCriticNet, CriticNet
-from core.common import Batch, InfoDict, alter_batch
+from core.common import Batch, InfoDict
 from update.actions import _update_jit, _update_value_jit, _update_critic_jit, _update_actor_jit, _update_interval_jit
 
 import os
 import datetime as dt
+import pickle
 
 import numpy as np
-import jax.numpy as jnp
 import jax
 from jax import jit
 import flax.linen as nn
 import optax
 
-from typing import List, Optional, Sequence, Dict
+from typing import Optional, Sequence
 
 
 class BaseAgent:
@@ -38,42 +38,63 @@ class BaseAgent:
 
     @staticmethod
     def sample(data,
-               batch_size):
+               batch_size,
+               p=None):
         """
         Samples a batch from the data.
 
         :param data: data in the form of a Batch object.
         :param batch_size: desired batch size.
+        :param p: probability of sampling each element.
         :return: a Batch object of size batch_size.
         """
-        idxs = np.random.default_rng().choice(len(data.dones),
+        idxs = np.random.default_rng().choice(len(data.states),
                                               size=batch_size,
-                                              replace=False)
+                                              replace=False,
+                                              p=p)
 
         batch = data._asdict()
 
         for key, val in batch.items():
             if val is None:
                 continue
-            if key == 'rewards':
+            if type(val) == list:
                 batch[key] = [val[i] for i in idxs]
             elif key == 'episode_rewards':
                 batch[key] = val
             else:
                 batch[key] = val[idxs]
 
-        return Batch(**batch)
+        return Batch(**batch), idxs
 
-    def standardise_inputs(self, inputs: np.ndarray):
+    def standardise_inputs(self, inputs: np.ndarray = None, path: str = None):
         """
         Standardises the inputs to the networks.
 
         :param inputs: inputs to the networks.
+        :param path: path to pre-saved data
         :return: standardised inputs.
         """
-        for network in self.networks:
-            network.__dict__['input_mean'] = np.mean(inputs, axis=0)
-            network.__dict__['input_std'] = np.maximum(np.std(inputs, axis=0), 1e-8)
+        if path is not None:
+            with open(path, 'rb') as f:
+                saved_data = pickle.load(f)
+                f.close()
+
+            for network in self.networks:
+                network.__dict__['input_mean'] = saved_data['input_mean']
+                network.__dict__['input_std'] = saved_data['input_std']
+
+        else:
+            input_mean = np.mean(inputs, axis=0)
+            input_std = np.maximum(np.std(inputs, axis=0), 1e-8)
+            with open(os.path.join(self.path, 'standardised_data.pkl'), 'wb') as f:
+                pickle.dump({'input_mean': input_mean,
+                             'input_std': input_std}, f)
+                f.close()
+
+            for network in self.networks:
+                network.__dict__['input_mean'] = input_mean
+                network.__dict__['input_std'] = input_std
 
 
 class IQLAgent(BaseAgent):
@@ -85,12 +106,10 @@ class IQLAgent(BaseAgent):
                  seed: int,
                  observations: np.ndarray,
                  action_dim: int,
-                 interval_dim: int,
-                 interval_min: int,
+                 intervals_unique: np.ndarray,
                  actor_lr: float = 3e-4,
                  value_lr: float = 3e-4,
                  critic_lr: float = 3e-4,
-                 interval_lr: float = 3e-4,
                  hidden_dims: Sequence[int] = (256, 256),
                  gamma: float = 0.99,
                  expectile: float = 0.8,
@@ -106,11 +125,11 @@ class IQLAgent(BaseAgent):
 
         # Set random seed
         rng = jax.random.PRNGKey(seed)
-        self.rng, self.actor_key, self.critic_key, self.interval_key, self.value_key = jax.random.split(rng, 5)
+        self.rng, self.actor_key, self.critic_key, self.value_key = jax.random.split(rng, 4)
 
         # Set parameters
         self.action_dim = action_dim
-        self.interval_dim = interval_dim
+        self.intervals_unique = intervals_unique
 
         # Set hyperparameters
         self.expectile = expectile
@@ -140,17 +159,17 @@ class IQLAgent(BaseAgent):
                                    optim=optax.adam(learning_rate=critic_lr),
                                    continual_learning=continual_learning)
 
-        self.interval = Model.create(CriticNet(hidden_dims, self.interval_dim),
-                                     inputs=[self.interval_key, observations],
-                                     optim=optax.adam(learning_rate=interval_lr),
-                                     continual_learning=continual_learning)
-
-        self.value = Model.create(ValueNet(hidden_dims, self.interval_dim),
+        self.value = Model.create(ValueNet(hidden_dims, len(self.intervals_unique)),
                                   inputs=[self.value_key, observations],
                                   optim=optax.adam(learning_rate=value_lr),
                                   continual_learning=continual_learning)
 
-        self.networks = [self.actor, self.critic, self.value]
+        self.interval = Model.create(CriticNet(hidden_dims, len(self.intervals_unique)),
+                                     inputs=[self.value_key, observations],
+                                     optim=optax.adam(learning_rate=value_lr),
+                                     continual_learning=continual_learning)
+
+        self.networks = [self.actor, self.critic, self.value, self.interval]
 
     def update(self, batch: Batch, **kwargs) -> InfoDict:
         """
@@ -174,8 +193,9 @@ class IQLAgent(BaseAgent):
         # Return the metadata
         return info
 
-    def update_async(self, batch: Batch, interval:bool = False, actor: bool = False,
-                     critic: bool = False, value: bool = False, **kwargs) -> InfoDict:
+    def update_async(self, batch: Batch, actor: bool = False,
+                     critic: bool = False, value: bool = False,
+                     interval: bool = False, **kwargs) -> InfoDict:
         """
         Updates the agent's networks asynchronously.
 
@@ -183,14 +203,11 @@ class IQLAgent(BaseAgent):
         :param actor: whether to update the actor network.
         :param critic: whether to update the critic network.
         :param value: whether to update the value network.
+        :param interval: whether to update the interval network.
         :return: an InfoDict object containing metadata.
         """
 
         # Create an updated copy of the required networks
-        new_interval, interval_info = _update_interval_jit(
-            self.interval, batch, **kwargs) if interval else (self.interval, {}
-        )
-
         new_rng, new_actor, actor_info = _update_actor_jit(
             self.rng, self.actor, batch, **kwargs) if actor else (self.rng, self.actor, {})
 
@@ -200,6 +217,9 @@ class IQLAgent(BaseAgent):
         new_value, value_info = _update_value_jit(
             self.value, batch, **kwargs) if value else (self.value, {})
 
+        new_interval, interval_info = _update_interval_jit(
+            self.interval, batch, **kwargs) if interval else (self.interval, {})
+
         # Update the agent's networks with the updated copies
         self.rng = new_rng
         self.actor = new_actor
@@ -208,12 +228,11 @@ class IQLAgent(BaseAgent):
         self.interval = new_interval
 
         # Return the metadata
-        return {
-            **interval_info,
-            **critic_info,
-            **value_info,
-            **actor_info
-        }
+        return {**critic_info,
+                **value_info,
+                **actor_info,
+                **interval_info,
+                }
 
     def sample_action(self, state, key=jax.random.PRNGKey(123)):
         """

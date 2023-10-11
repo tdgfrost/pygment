@@ -45,19 +45,12 @@ def expectile_loss(pred, batch, expectile=0.8, **kwargs):
     """
     diff = pred - batch.discounted_rewards
     weight = jnp.where(diff > 0, (1 - expectile), expectile)
-    return weight * jnp.log(diff ** 2 / 2 + 1)
+    # return weight * jnp.log(diff ** 2 / 2 + 1)
+    return weight * diff ** 2
 
 
 def mc_mse_loss(pred, batch, **kwargs):
     return (pred - batch.discounted_rewards) ** 2
-
-
-def td_mse_loss(pred, batch, rewards, next_state_values, gamma=0.99, **kwargs):
-    gammas = jnp.ones(shape=len(pred)) * gamma
-    gammas = jnp.power(gammas, jnp.array([len(traj) for traj in batch.rewards]))
-
-    target = rewards + gammas * next_state_values * (1 - batch.dones)
-    return (pred - target) ** 2
 
 
 def iql_loss(logits, batch, **kwargs):
@@ -74,15 +67,35 @@ def iql_loss(logits, batch, **kwargs):
     action_logprobs = convert_logits_to_action_logprobs(logits, batch.actions)
 
     # Filter the logprobs using the advantage filter
+    """
     adv_filter = nn.relu(jnp.sign(batch.advantages)).astype(jnp.bool_)
     action_logprobs = jnp.where(adv_filter, action_logprobs, 0.)
-
-    # EXPERIMENTAL - try to move towards positive advantages and away from negative advantages
     """
-    adv_filter = jnp.exp(5 * batch.advantages)
+    """
+    adv_filter = batch.advantages > 0
     action_logprobs *= adv_filter
     """
+    # EXPERIMENTAL - try to move towards positive advantages and away from negative advantages
+    adv_filter = jnp.exp(batch.advantages)
+    action_logprobs *= adv_filter
+
     # Return the advantage-filtered logprobs
+    return -action_logprobs
+
+
+def clone_behaviour(logits, batch, **kwargs):
+    """
+    Calculate the advantage-filtered logprobs
+
+    :param logits: logits from the actor model
+    :param batch: the batch of samples
+    :return: the advantage-filtered logprobs
+    """
+
+    # Convert the logits to action log_probs
+    action_logprobs = convert_logits_to_action_logprobs(logits, batch.actions)
+
+    # Maximise the logprobs
     return -action_logprobs
 
 
@@ -116,4 +129,14 @@ def ppo_loss(logits, batch, clip_ratio=0.2, **kwargs):
 
     # Return the loss term
     return loss
+
+
+def log_softmax_cross_entropy(logits, labels, **kwargs):
+    logits_max = jnp.max(logits, axis=-1, keepdims=True)
+    logits -= jax.lax.stop_gradient(logits_max)
+
+    label_logits = filter_to_action(logits, labels)
+    log_normalizers = jnp.log(jnp.sum(jnp.exp(logits), axis=-1))
+
+    return log_normalizers - label_logits
 
