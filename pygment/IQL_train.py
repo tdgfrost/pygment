@@ -145,7 +145,7 @@ if __name__ == "__main__":
                 print('Filtering dataset...')
                 # Calculate the interval probabilities for each state
                 interval_values = nn.sigmoid(agent.interval(data.states)[1])
-                interval_values = jnp.hstack([1 - interval_values.reshape(-1, 1),
+                interval_values = jnp.hstack([1.0 - interval_values.reshape(-1, 1),
                                               interval_values.reshape(-1, 1)])
 
                 # Calculate the critic and state values for each state
@@ -179,7 +179,7 @@ if __name__ == "__main__":
                 if is_net('value') or is_net('critic'):
                     next_state_values = agent.value(batch.next_states)[1]
                     next_interval_values = nn.sigmoid(agent.interval(batch.next_states)[1])
-                    next_interval_values = jnp.hstack([1 - next_interval_values.reshape(-1, 1),
+                    next_interval_values = jnp.hstack([1.0 - next_interval_values.reshape(-1, 1),
                                                        next_interval_values.reshape(-1, 1)])
                     next_state_values = (next_state_values * next_interval_values).sum(-1)
 
