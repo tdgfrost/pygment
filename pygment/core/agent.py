@@ -164,7 +164,7 @@ class IQLAgent(BaseAgent):
                                   optim=optax.adam(learning_rate=value_lr),
                                   continual_learning=continual_learning)
 
-        self.interval = Model.create(CriticNet(hidden_dims, len(self.intervals_unique)),
+        self.interval = Model.create(ValueNet(hidden_dims, 1),
                                      inputs=[self.value_key, observations],
                                      optim=optax.adam(learning_rate=value_lr),
                                      continual_learning=continual_learning)

@@ -2,7 +2,7 @@ from jax import Array
 
 from core.agent import Model
 from core.common import Params, InfoDict, Batch, filter_to_action
-from update.loss import mc_mse_loss, expectile_loss, log_softmax_cross_entropy
+from update.loss import mc_mse_loss, expectile_loss, log_softmax_cross_entropy, binary_cross_entropy
 
 from typing import Tuple
 
@@ -105,7 +105,8 @@ def update_interval(interval: Model, batch: Batch, **kwargs) -> Tuple[Model, Inf
     states = batch.states
     len_actions = batch.len_actions
 
-    loss_fn = {'crossentropy': log_softmax_cross_entropy}
+    loss_fn = {'crossentropy': log_softmax_cross_entropy,
+               'binary_crossentropy': binary_cross_entropy}
 
     def interval_loss_fn(interval_params: Params) -> tuple[Array, dict[str, Array]]:
         # Generate Q values from each of the two critic networks
@@ -113,7 +114,7 @@ def update_interval(interval: Model, batch: Batch, **kwargs) -> Tuple[Model, Inf
 
         # Calculate the loss for the critic networks using the target Q values with MSE
         interval_loss = loss_fn[list(kwargs['interval_loss_fn'].keys())[0]](logits,
-                                                                          labels=len_actions, **kwargs).mean()
+                                                                            labels=len_actions, **kwargs).mean()
 
         # Return the loss value, plus metadata
         return interval_loss, {

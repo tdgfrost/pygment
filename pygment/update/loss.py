@@ -140,3 +140,9 @@ def log_softmax_cross_entropy(logits, labels, **kwargs):
 
     return log_normalizers - label_logits
 
+
+def binary_cross_entropy(logits, labels, **kwargs):
+    probs = nn.sigmoid(logits)
+    loss = labels * jnp.log(probs) + (1 - labels) * jnp.log(1 - probs)
+    return -loss
+

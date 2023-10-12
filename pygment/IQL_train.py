@@ -21,8 +21,8 @@ config = {'seed': 123,
           'actor_batch_size': 256,
           'interval_batch_size': 256,
           'expectile': 0.5,
-          'baseline_reward': -2,
-          'interval_probability': 0.05,
+          'baseline_reward': 0,
+          'interval_probability': 1.0,
           'top_actions_quantile': 0.75,
           'gamma': 0.99,
           'actor_lr': 0.001,
@@ -144,7 +144,9 @@ if __name__ == "__main__":
             if is_net('actor'):
                 print('Filtering dataset...')
                 # Calculate the interval probabilities for each state
-                interval_values = nn.softmax(agent.interval(data.states)[1], -1)
+                interval_values = nn.sigmoid(agent.interval(data.states)[1])
+                interval_values = jnp.hstack([1 - interval_values.reshape(-1, 1),
+                                              interval_values.reshape(-1, 1)])
 
                 # Calculate the critic and state values for each state
                 # (using interval probabilities to marginalise the values)
@@ -176,7 +178,9 @@ if __name__ == "__main__":
                 # Use TD learning for the value and critic networks (based on the value network)
                 if is_net('value') or is_net('critic'):
                     next_state_values = agent.value(batch.next_states)[1]
-                    next_interval_values = nn.softmax(agent.interval(batch.next_states)[1], -1)
+                    next_interval_values = nn.sigmoid(agent.interval(batch.next_states)[1])
+                    next_interval_values = jnp.hstack([1 - next_interval_values.reshape(-1, 1),
+                                                       next_interval_values.reshape(-1, 1)])
                     next_state_values = (next_state_values * next_interval_values).sum(-1)
 
                     gammas = jnp.ones(shape=len(batch.rewards)) * config['gamma']
@@ -196,7 +200,7 @@ if __name__ == "__main__":
 
                 # Perform the update step
                 loss_info = agent.update_async(batch,
-                                               interval_loss_fn={'crossentropy': 0},
+                                               interval_loss_fn={'binary_crossentropy': 0},
                                                value_loss_fn={'expectile': 0},
                                                critic_loss_fn={'mc_mse': 0},
                                                actor_loss_fn={'clone': 0},
