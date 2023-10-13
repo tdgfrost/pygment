@@ -163,28 +163,28 @@ if __name__ == "__main__":
                 def cpu(x): return jax.device_put(x, jax.devices('cpu')[0])
 
                 # Calculate the interval probabilities for each state
-                interval_values = nn.sigmoid(gpu_interval(metal(data.states))[1])
+                interval_values = nn.sigmoid(cpu(gpu_interval(metal(data.states))[1]))
                 interval_values = jnp.hstack([1.0 - interval_values.reshape(-1, 1),
                                               interval_values.reshape(-1, 1)])
 
                 # Calculate the critic and state values for each state
                 # (using interval probabilities to marginalise the values)
-                critic_values = jnp.minimum(*gpu_critic(metal(data.states))[1])
-                critic_values = filter_to_action(critic_values, metal(data.actions))
+                critic_values = cpu(jnp.minimum(*gpu_critic(metal(data.states))[1]))
+                critic_values = filter_to_action(critic_values, data.actions)
 
-                state_values = gpu_value(metal(data.states))[1]
+                state_values = cpu(gpu_value(metal(data.states))[1])
                 state_values = (state_values * interval_values).sum(-1)
 
                 # Calculate the advantages
                 advantages = critic_values - state_values
                 advantages /= advantages.std()
 
-                advantages = cpu(advantages)
-
                 data = alter_batch(data, advantages=advantages)
 
                 # Filter for top half of actions
-                filter_point = jnp.quantile(advantages, config['top_actions_quantile'])
+                filter_point = np.quantile(np.array(advantages), config['top_actions_quantile'])
+
+                print(np.array(advantages))
 
                 data = filter_dataset(data, data.advantages > filter_point,
                                       target_keys=['states', 'actions', 'advantages'])
