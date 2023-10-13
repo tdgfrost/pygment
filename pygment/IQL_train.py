@@ -39,14 +39,14 @@ config = {'seed': 123,
 if __name__ == "__main__":
     from core.agent import IQLAgent
     from core.common import (load_data, progress_bar, alter_batch, Batch, filter_to_action,
-                             calc_traj_discounted_rewards,
-                             move_to_gpu, filter_dataset)
+                             calc_traj_discounted_rewards, move_to_gpu, filter_dataset, move_params_to_gpu)
     from core.evaluate import evaluate_envs, run_and_animate
     from core.envs import make_variable_env
 
     # Set whether to train and/or evaluate
     logging_bool = False
     evaluate_bool = False
+    training_device = jax.devices('cpu')[0]
 
     if logging_bool:
         wandb.init(
@@ -88,7 +88,8 @@ if __name__ == "__main__":
     # Move to GPU
     loaded_data = move_to_gpu(loaded_data, gpu_keys=['states', 'actions', 'discounted_rewards', 'episode_rewards',
                                                      'next_states', 'dones', 'action_logprobs', 'len_actions',
-                                                     'rewards'])
+                                                     'rewards'],
+                              device=training_device)
 
     # Make sure this matches with the desired dataset's extra_step metadata
     def extra_step_filter(x):
@@ -100,9 +101,8 @@ if __name__ == "__main__":
         # Otherwise, normal time steps (no delay)
         return 0
 
-    # Train agent
-    def train(data):
-        # Create agent
+
+    def make_agent(path=None):
         dummy_env = make_env('LunarLander-v2')
 
         agent = IQLAgent(observations=dummy_env.observation_space.sample(),
@@ -111,14 +111,24 @@ if __name__ == "__main__":
                          opt_decay_schedule="cosine",
                          **config)
 
-        model_dir = os.path.join('./experiments/IQL', agent.path)
-        agent.path = model_dir
-        os.makedirs(model_dir, exist_ok=True)
-        with open(os.path.join(model_dir, 'config.txt'), 'w') as f:
-            f.write(str(config))
-            f.close()
-
         del dummy_env
+
+        if path is None:
+            agent_directory = os.path.join('./experiments/IQL', agent.path)
+            agent.path = agent_directory
+            os.makedirs(agent_directory, exist_ok=True)
+            with open(os.path.join(agent_directory, 'config.txt'), 'w') as f:
+                f.write(str(config))
+                f.close()
+        else:
+            agent.path = path
+
+        return agent.path, agent
+
+    # Train agent
+    def train(data):
+        # Create agent
+        model_dir, agent = make_agent()
 
         # Standardise the state inputs
         agent.standardise_inputs(data.states)
@@ -144,22 +154,32 @@ if __name__ == "__main__":
 
             if is_net('actor'):
                 print('Filtering dataset...')
+                # We will perform the following using METAL for the faster inference across the whole dataset
+
+                gpu_interval = agent.interval.change_device(jax.devices('METAL')[0])
+                gpu_critic = agent.critic.change_device(jax.devices('METAL')[0])
+                gpu_value = agent.value.change_device(jax.devices('METAL')[0])
+                def metal(x): return jax.device_put(x, jax.devices('METAL')[0])
+                def cpu(x): return jax.device_put(x, jax.devices('cpu')[0])
+
                 # Calculate the interval probabilities for each state
-                interval_values = nn.sigmoid(agent.interval(data.states)[1])
+                interval_values = nn.sigmoid(gpu_interval(metal(data.states))[1])
                 interval_values = jnp.hstack([1.0 - interval_values.reshape(-1, 1),
                                               interval_values.reshape(-1, 1)])
 
                 # Calculate the critic and state values for each state
                 # (using interval probabilities to marginalise the values)
-                critic_values = jnp.minimum(*agent.critic(data.states)[1])
-                critic_values = filter_to_action(critic_values, data.actions)
+                critic_values = jnp.minimum(*gpu_critic(metal(data.states))[1])
+                critic_values = filter_to_action(critic_values, metal(data.actions))
 
-                state_values = agent.value(data.states)[1]
+                state_values = gpu_value(metal(data.states))[1]
                 state_values = (state_values * interval_values).sum(-1)
 
                 # Calculate the advantages
                 advantages = critic_values - state_values
                 advantages /= advantages.std()
+
+                advantages = cpu(advantages)
 
                 data = alter_batch(data, advantages=advantages)
 

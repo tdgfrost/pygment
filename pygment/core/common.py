@@ -67,7 +67,7 @@ def load_data(path: str,
     return batch
 
 
-def move_to_gpu(batch: Batch, gpu_keys: list, gpu_key='gpu') -> Batch:
+def move_to_gpu(batch: Batch, gpu_keys: list, device=jax.devices('cpu')[0]) -> Batch:
     gpu_batch = batch._asdict()
 
     for key, value in gpu_batch.items():
@@ -75,11 +75,23 @@ def move_to_gpu(batch: Batch, gpu_keys: list, gpu_key='gpu') -> Batch:
             continue
         if key in gpu_keys:
             if type(value) == jnp.ndarray:
-                gpu_batch[key] = jax.device_put(value, jax.devices(gpu_key)[0])
+                gpu_batch[key] = jax.device_put(value, device)
             else:
-                gpu_batch[key] = jnp.array(value)
+                gpu_batch[key] = jax.device_put(jnp.array(value), device)
 
     return Batch(**gpu_batch)
+
+
+def move_params_to_gpu(params, device=jax.devices('cpu')[0]):
+    def iter_through_keys(value):
+        for key in value.keys():
+            if type(value[key]) == dict:
+                value[key] = iter_through_keys(value[key])
+            else:
+                value[key] = jax.device_put(value[key], device)
+        return value
+
+    return iter_through_keys(params)
 
 
 def calc_discounted_rewards(dones, rewards, gamma):
