@@ -39,7 +39,7 @@ if __name__ == "__main__":
     from core.envs import make_variable_env
 
     # Set whether to train and/or evaluate
-    logging_bool = False
+    logging_bool = True
     evaluate_bool = False
 
     if logging_bool:
@@ -84,7 +84,6 @@ if __name__ == "__main__":
                                                      'next_states', 'dones', 'action_logprobs', 'len_actions',
                                                      'rewards'])
 
-
     # Make sure this matches with the desired dataset's extra_step metadata
     def extra_step_filter(x):
         # If in rectangle
@@ -94,7 +93,6 @@ if __name__ == "__main__":
                 return 5
         # Otherwise, normal time steps (no delay)
         return 0
-
 
     # Train agent
     def train(data):
@@ -130,6 +128,7 @@ if __name__ == "__main__":
             wandb.define_metric('critic_loss', summary='min')
             wandb.define_metric('value_loss', summary='min')
 
+        random_key = jax.random.PRNGKey(123)
         for epoch in range(config['epochs']):
             if epoch > 0 and epoch % 100 == 0:
                 print(f'\n\n{epoch} epochs complete!\n')
@@ -137,7 +136,7 @@ if __name__ == "__main__":
             batch, idxs = agent.sample(data,
                                        int(config[f'batch_size'] * (1 / (1 - config['top_actions_quantile']))))
 
-            value_batch = downsample_batch(batch, jax.random.PRNGKey(123), config['batch_size'])
+            value_batch, random_key = downsample_batch(batch, random_key, config['batch_size'])
             # Use TD learning for the value and critic networks (based on the value network)
             next_state_values = agent.value(value_batch.next_states)[1]
 
@@ -161,7 +160,7 @@ if __name__ == "__main__":
             # Filter for top actions
             filter_point = jnp.quantile(advantages, config['top_actions_quantile'])
 
-            batch = filter_dataset(batch, value_batch.advantages > filter_point,
+            batch = filter_dataset(batch, batch.advantages > filter_point,
                                          target_keys=['states', 'actions', 'advantages'])
 
             # Remove excess data from the batch
@@ -194,7 +193,8 @@ if __name__ == "__main__":
             if epoch % 5 == 0:
                 episode_rewards = evaluate_envs(agent, make_vec_env(lambda: make_variable_env('LunarLander-v2',
                                                                                               fn=extra_step_filter),
-                                                                    n_envs=100))
+                                                                    n_envs=10),
+                                                verbose=False)
 
                 if np.mean(episode_rewards) < 250:
                     count = 0
