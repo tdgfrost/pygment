@@ -15,9 +15,7 @@ jax.config.update('jax_platform_name', 'cpu')
 config = {'seed': 123,
           'epochs': int(1e4),
           'early_stopping': jnp.array(1000),
-          'value_batch_size': 256,
-          'critic_batch_size': 256,
-          'actor_batch_size': 256,
+          'batch_size': 256,
           'expectile': 0.5,
           'baseline_reward': 0,
           'interval_probability': 1.0,
@@ -35,7 +33,7 @@ config = {'seed': 123,
 if __name__ == "__main__":
     from core.agent import IQLAgent
     from core.common import (load_data, progress_bar, alter_batch, Batch, filter_to_action,
-                             calc_traj_discounted_rewards,
+                             calc_traj_discounted_rewards, downsample_batch,
                              move_to_gpu, filter_dataset)
     from core.evaluate import evaluate_envs, run_and_animate
     from core.envs import make_variable_env
@@ -86,6 +84,7 @@ if __name__ == "__main__":
                                                      'next_states', 'dones', 'action_logprobs', 'len_actions',
                                                      'rewards'])
 
+
     # Make sure this matches with the desired dataset's extra_step metadata
     def extra_step_filter(x):
         # If in rectangle
@@ -95,6 +94,7 @@ if __name__ == "__main__":
                 return 5
         # Otherwise, normal time steps (no delay)
         return 0
+
 
     # Train agent
     def train(data):
@@ -119,92 +119,81 @@ if __name__ == "__main__":
         # Standardise the state inputs
         agent.standardise_inputs(data.states)
 
-        # For advantage-prioritised cloning
-        sample_prob = None
+        print('\n\n', '=' * 50, '\n', ' ' * 3, '\U0001F483' * 3, ' ' * 1, f'Training networks',
+              ' ' * 2, '\U0001F483' * 3, '\n', '=' * 50, '\n')
 
-        for current_net in ['value', 'critic', 'actor']:
-            print('\n\n', '=' * 50, '\n', ' ' * 3, '\U0001F483' * 3, ' ' * 1, f'Training {current_net} network',
-                  ' ' * 2, '\U0001F483' * 3, '\n', '=' * 50, '\n')
+        best_loss = jnp.array(jnp.inf)
+        total_training_steps = jnp.array(0)
+        count = jnp.array(0)
 
-            def is_net(x):
-                return x == current_net
+        if logging_bool:
+            # Keep track of the best loss values
+            wandb.define_metric('actor_loss', summary='min')
+            wandb.define_metric('critic_loss', summary='min')
+            wandb.define_metric('value_loss', summary='min')
 
-            loss_key = f'{current_net}_loss'
-            best_loss = jnp.array(jnp.inf)
-            total_training_steps = jnp.array(0)
-            count = jnp.array(0)
+        for epoch in range(config['epochs']):
+            if epoch > 0 and epoch % 100 == 0:
+                print(f'\n\n{epoch} epochs complete!\n')
+            progress_bar(epoch % 100, 100)
+            batch, idxs = agent.sample(data,
+                                       int(config[f'batch_size'] * (1 / (1 - config['top_actions_quantile']))))
 
-            if logging_bool:
-                # Keep track of the best loss values
-                wandb.define_metric(f'{current_net}_loss', summary='min')
+            value_batch = downsample_batch(batch, jax.random.PRNGKey(123), config['batch_size'])
+            # Use TD learning for the value and critic networks (based on the value network)
+            next_state_values = agent.value(value_batch.next_states)[1]
 
-            if is_net('actor'):
-                print('Filtering dataset...')
-                # Calculate the critic and state values for each state
-                critic_values = jnp.minimum(*agent.critic(data.states)[1])
-                critic_values = filter_to_action(critic_values, data.actions)
+            gammas = jnp.ones(shape=len(value_batch.rewards)) * config['gamma']
+            gammas = jnp.power(gammas, value_batch.intervals)
+            discounted_rewards = value_batch.rewards + gammas * next_state_values * (1 - value_batch.dones)
 
-                state_values = agent.value(data.states)[1]
+            value_batch = alter_batch(value_batch, discounted_rewards=discounted_rewards)
+            del discounted_rewards
 
-                # Calculate the advantages
-                advantages = critic_values - state_values
+            # Use advantage for the actor network
+            critic_values = jnp.minimum(*agent.critic(batch.states)[1])
+            critic_values = filter_to_action(critic_values, batch.actions)
 
-                data = alter_batch(data, advantages=advantages)
+            state_values = agent.value(batch.states)[1]
 
-                # Filter for top half of actions
-                filter_point = jnp.quantile(advantages, config['top_actions_quantile'])
+            advantages = critic_values - state_values
 
-                data = filter_dataset(data, data.advantages > filter_point,
-                                      target_keys=['states', 'actions', 'advantages'])
+            batch = alter_batch(batch, advantages=advantages)
 
-            for epoch in range(config['epochs']):
-                if epoch > 0 and epoch % 100 == 0:
-                    print(f'\n\n{epoch} epochs complete!\n')
-                progress_bar(epoch % 100, 100)
-                batch, idxs = agent.sample(data,
-                                           config[f'{current_net}_batch_size'],
-                                           p=sample_prob)
+            # Filter for top actions
+            filter_point = jnp.quantile(advantages, config['top_actions_quantile'])
 
-                # Use TD learning for the value and critic networks (based on the value network)
-                if is_net('value') or is_net('critic'):
-                    next_state_values = agent.value(batch.next_states)[1]
+            batch = filter_dataset(batch, value_batch.advantages > filter_point,
+                                         target_keys=['states', 'actions', 'advantages'])
 
-                    gammas = jnp.ones(shape=len(batch.rewards)) * config['gamma']
-                    gammas = jnp.power(gammas, batch.intervals)
-                    discounted_rewards = batch.rewards + gammas * next_state_values * (1 - batch.dones)
+            # Remove excess data from the batch
+            batch = batch._asdict()
+            value_batch = value_batch._asdict()
+            for key in ['episode_rewards', 'next_states', 'next_actions', 'action_logprobs']:
+                batch[key] = None
+                value_batch[key] = None
+            batch = Batch(**batch)
+            value_batch = Batch(**value_batch)
 
-                    batch = alter_batch(batch, discounted_rewards=discounted_rewards)
-                    del discounted_rewards
+            # Perform the update step
+            value_loss_info = agent.update_async(value_batch,
+                                                 value_loss_fn={'expectile': 0},
+                                                 critic_loss_fn={'mc_mse': 0},
+                                                 expectile=config['expectile'],
+                                                 critic=True,
+                                                 value=True,
+                                                 )
 
-                # Remove excess data from the batch
-                excess_data = {}
-                batch = batch._asdict()
-                for key in ['episode_rewards', 'next_states', 'next_actions', 'action_logprobs']:
-                    excess_data[key] = batch[key]
-                    batch[key] = None
-                batch = Batch(**batch)
+            loss_info = agent.update_async(batch,
+                                           actor_loss_fn={'clone': 0},
+                                           actor=True
+                                           )
 
-                # Perform the update step
-                loss_info = agent.update_async(batch,
-                                               value_loss_fn={'expectile': 0},
-                                               critic_loss_fn={'mc_mse': 0},
-                                               actor_loss_fn={'clone': 0},
-                                               expectile=config['expectile'],
-                                               **{current_net: True})
+            loss_info.update(value_loss_info)
 
-                total_training_steps += config[f'{current_net}_batch_size']
+            # Log intermittently
+            if epoch % 5 == 0:
 
-                # Record best loss
-                if loss_info[loss_key] < best_loss:
-                    best_loss = loss_info[loss_key]
-                    count = jnp.array(0)
-
-                else:
-                    count += jnp.array(1)
-                    if count > config['early_stopping'] and not is_net('value'):
-                        break
-
-                # Log intermittently
                 if logging_bool:
                     # Log results
                     logged_results = {'training_step': total_training_steps,
@@ -212,13 +201,13 @@ if __name__ == "__main__":
                                       f'{current_net}_loss': loss_info[loss_key]}
                     wandb.log(logged_results)
 
-            # Save each model at the end of training
-            agent.actor.save(os.path.join(model_dir, 'model_checkpoints/actor')) if is_net(
-                'actor') else None
-            agent.critic.save(os.path.join(model_dir, 'model_checkpoints/critic')) if is_net(
-                'critic') else None
-            agent.value.save(os.path.join(model_dir, 'model_checkpoints/value')) if is_net(
-                'value') else None
+        # Save each model at the end of training
+        agent.actor.save(os.path.join(model_dir, 'model_checkpoints/actor')) if is_net(
+            'actor') else None
+        agent.critic.save(os.path.join(model_dir, 'model_checkpoints/critic')) if is_net(
+            'critic') else None
+        agent.value.save(os.path.join(model_dir, 'model_checkpoints/value')) if is_net(
+            'value') else None
 
         # Evaluate agent
         n_envs = 1000
