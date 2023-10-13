@@ -122,9 +122,7 @@ if __name__ == "__main__":
         print('\n\n', '=' * 50, '\n', ' ' * 3, '\U0001F483' * 3, ' ' * 1, f'Training networks',
               ' ' * 2, '\U0001F483' * 3, '\n', '=' * 50, '\n')
 
-        best_loss = jnp.array(jnp.inf)
-        total_training_steps = jnp.array(0)
-        count = jnp.array(0)
+        count = 0
 
         if logging_bool:
             # Keep track of the best loss values
@@ -192,22 +190,34 @@ if __name__ == "__main__":
             loss_info.update(value_loss_info)
 
             # Log intermittently
+            episode_rewards = None
             if epoch % 5 == 0:
+                episode_rewards = evaluate_envs(agent, make_vec_env(lambda: make_variable_env('LunarLander-v2',
+                                                                                              fn=extra_step_filter),
+                                                                    n_envs=100))
 
-                if logging_bool:
-                    # Log results
-                    logged_results = {'training_step': total_training_steps,
-                                      'gradient_step': epoch,
-                                      f'{current_net}_loss': loss_info[loss_key]}
-                    wandb.log(logged_results)
+                if np.mean(episode_rewards) < 250:
+                    count = 0
+                else:
+                    count += 1
+
+                if count > 10:
+                    break
+
+            if logging_bool:
+                # Log results
+                logged_results = {'gradient_step': epoch,
+                                  'actor_loss': loss_info['actor_loss'],
+                                  'critic_loss': loss_info['critic_loss'],
+                                  'value_loss': loss_info['value_loss']}
+                if epoch % 5 == 0:
+                    logged_results.update({'mean_reward': np.mean(episode_rewards)})
+                wandb.log(logged_results)
 
         # Save each model at the end of training
-        agent.actor.save(os.path.join(model_dir, 'model_checkpoints/actor')) if is_net(
-            'actor') else None
-        agent.critic.save(os.path.join(model_dir, 'model_checkpoints/critic')) if is_net(
-            'critic') else None
-        agent.value.save(os.path.join(model_dir, 'model_checkpoints/value')) if is_net(
-            'value') else None
+        agent.actor.save(os.path.join(model_dir, 'model_checkpoints/actor'))
+        agent.critic.save(os.path.join(model_dir, 'model_checkpoints/critic'))
+        agent.value.save(os.path.join(model_dir, 'model_checkpoints/value'))
 
         # Evaluate agent
         n_envs = 1000
