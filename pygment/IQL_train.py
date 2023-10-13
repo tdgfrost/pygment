@@ -20,10 +20,11 @@ config = {'seed': 123,
           'critic_batch_size': 256,
           'actor_batch_size': 256,
           'interval_batch_size': 256,
-          'expectile': 0.5,
+          'expectile': 0.75,
           'baseline_reward': 0,
-          'interval_probability': 1.0,
-          'top_actions_quantile': 0.75,
+          'interval_probability': 0.25,
+          'top_actions_quantile': 0.5,
+          'expectile_weighting': 0.5,
           'gamma': 0.99,
           'actor_lr': 0.001,
           'value_lr': 0.001,
@@ -158,6 +159,7 @@ if __name__ == "__main__":
 
                 # Calculate the advantages
                 advantages = critic_values - state_values
+                advantages /= advantages.std()
 
                 data = alter_batch(data, advantages=advantages)
 
@@ -203,8 +205,9 @@ if __name__ == "__main__":
                                                interval_loss_fn={'binary_crossentropy': 0},
                                                value_loss_fn={'expectile': 0},
                                                critic_loss_fn={'mc_mse': 0},
-                                               actor_loss_fn={'clone': 0},
+                                               actor_loss_fn={'iql': 0},
                                                expectile=config['expectile'],
+                                               temperature=config['expectile_weighting'],
                                                **{current_net: True})
 
                 total_training_steps += config[f'{current_net}_batch_size']

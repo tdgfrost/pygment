@@ -76,7 +76,7 @@ def iql_loss(logits, batch, **kwargs):
     action_logprobs *= adv_filter
     """
     # EXPERIMENTAL - try to move towards positive advantages and away from negative advantages
-    adv_filter = jnp.exp(batch.advantages)
+    adv_filter = jnp.exp(kwargs['temperature'] * batch.advantages)
     action_logprobs *= adv_filter
 
     # Return the advantage-filtered logprobs
