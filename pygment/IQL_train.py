@@ -13,13 +13,13 @@ jax.config.update('jax_platform_name', 'cpu')
 
 # Define config file - could change to FLAGS at some point
 config = {'seed': 123,
-          'epochs': int(1e4),
+          'epochs': int(2e6),
           'early_stopping': jnp.array(1000),
           'batch_size': 256,
           'expectile': 0.5,
           'baseline_reward': 0,
           'interval_probability': 1.0,
-          'top_actions_quantile': 0.75,
+          'top_actions_quantile': 0.5,
           'gamma': 0.99,
           'actor_lr': 0.001,
           'value_lr': 0.001,
@@ -129,12 +129,16 @@ if __name__ == "__main__":
             wandb.define_metric('value_loss', summary='min')
 
         random_key = jax.random.PRNGKey(123)
+        # Adjust the sample probabilities
+        sample_probs = np.array(data.intervals / np.sum(data.intervals))
+
         for epoch in range(config['epochs']):
             if epoch > 0 and epoch % 100 == 0:
                 print(f'\n\n{epoch} epochs complete!\n')
             progress_bar(epoch % 100, 100)
             batch, idxs = agent.sample(data,
-                                       int(config[f'batch_size'] * (1 / (1 - config['top_actions_quantile']))))
+                                       int(config[f'batch_size'] * (1 / (1 - config['top_actions_quantile']))),
+                                       p=sample_probs)
 
             value_batch, random_key = downsample_batch(batch, random_key, config['batch_size'])
             # Use TD learning for the value and critic networks (based on the value network)
@@ -193,7 +197,7 @@ if __name__ == "__main__":
             if epoch % 5 == 0:
                 episode_rewards = evaluate_envs(agent, make_vec_env(lambda: make_variable_env('LunarLander-v2',
                                                                                               fn=extra_step_filter),
-                                                                    n_envs=10),
+                                                                    n_envs=1),
                                                 verbose=False)
 
                 if np.mean(episode_rewards) < 250:
