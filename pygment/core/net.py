@@ -1,4 +1,4 @@
-from core.common import Params, move_params_to_gpu
+from core.common import Params
 from typing import Sequence, Callable, Optional, Tuple, Any
 
 import jax.numpy as jnp
@@ -228,6 +228,7 @@ class Model:
     params: Params
     optim: Optional[optax.GradientTransformation] = struct.field(
         pytree_node=False)
+    continual_learning: bool = False
     opt_state: Optional[optax.OptState] = None
     initializer = nn.initializers.he_normal()
     checkpointer = orbax.checkpoint.Checkpointer(orbax.checkpoint.PyTreeCheckpointHandler())
@@ -246,6 +247,7 @@ class Model:
                model_def: nn.Module,
                inputs: Sequence[jnp.ndarray],
                optim: Optional[optax.GradientTransformation] = None,
+               continual_learning: bool = False,
                ) -> 'Model':
         """
         Class method to create a new instance of the Model class (with some necessary pre-processing).
@@ -253,6 +255,7 @@ class Model:
         :param model_def: the neural network architecture
         :param inputs: dummy input data to initialise the network
         :param optim: the optimiser
+        :param continual_learning: whether to use continual learning
         :return: an instance of the Model class
         """
 
@@ -286,6 +289,7 @@ class Model:
         return cls(network=model_def,
                    params=params,
                    optim=optim,
+                   continual_learning=continual_learning,
                    opt_state=opt_state,
                    ages=ages,
                    util=util,
@@ -293,56 +297,25 @@ class Model:
                    bias_corrected_util=bias_corrected_util)
 
     @jit
-    def __call__(self, observations: jnp.ndarray, **kwargs) -> jnp.ndarray:
+    def __call__(self, *args):
         """
         Forward pass through the neural network.
 
-        :param observations: input data to pass through the neural network
+        :param args: input data to pass through the neural network
         :return: output of the neural network
         """
-        return self.network.apply({'params': self.params},
-                                  observations,
-                                  **kwargs)
+
+        return self.network.apply({'params': self.params}, *args,
+                                  input_mean=self.input_mean,
+                                  input_std=self.input_std)
 
     @jit
     def apply(self, *args, **kwargs):
         return self.network.apply(*args,
+                                  input_mean=self.input_mean,
+                                  input_std=self.input_std,
                                   **kwargs)
 
-    def change_device(self, device):
-        def iter_through_dict(value):
-
-            for key, val in value.items():
-                if hasattr(val, 'device'):
-                    value[key] = jax.device_put(val, device=device)
-                elif isinstance(val, dict):
-                    value[key] = iter_through_dict(val)
-                elif isinstance(val, list):
-                    value[key] = list(iter_through_tuple(val))
-                elif isinstance(val, tuple):
-                    value[key] = iter_through_tuple(val)
-            return value
-
-        def iter_through_tuple(value):
-            value = list(value)
-            for i, val in enumerate(value):
-                if hasattr(val, 'device'):
-                    value[i] = jax.device_put(val, device=device)
-                elif isinstance(val, dict):
-                    value[i] = iter_through_dict(val)
-                elif isinstance(val, list):
-                    value[i] = list(iter_through_tuple(val))
-                elif isinstance(val, tuple):
-                    value[i] = iter_through_tuple(val)
-            return tuple(value)
-
-        replace_dict = iter_through_dict(self.__dict__)
-        return self.replace(**replace_dict)
-        """
-        return self.replace(params=move_params_to_gpu(self.params, device=device),
-                            input_mean=jax.device_put(self.input_mean, device=device),
-                            input_std=jax.device_put(self.input_std, device=device))
-        """
     def apply_gradient(self, loss_fn) -> Tuple['Model', Any]:
         """
         Calculate the gradient of the loss function with respect to the parameters of the neural network.

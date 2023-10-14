@@ -116,7 +116,7 @@ class IQLAgent(BaseAgent):
                  epochs: Optional[int] = None,
                  opt_decay_schedule: str = "cosine",
                  clipping: float = 0.01,
-                 device='cpu',
+                 continual_learning: bool = False,
                  *args,
                  **kwargs):
 
@@ -151,19 +151,23 @@ class IQLAgent(BaseAgent):
         # Set models
         self.actor = Model.create(ActorNet(hidden_dims, self.action_dim),
                                   inputs=[self.actor_key, observations],
-                                  optim=optimiser)
+                                  optim=optimiser,
+                                  continual_learning=continual_learning)
 
         self.critic = Model.create(DoubleCriticNet(hidden_dims, self.action_dim),
                                    inputs=[self.critic_key, observations],
-                                   optim=optax.adam(learning_rate=critic_lr))
+                                   optim=optax.adam(learning_rate=critic_lr),
+                                   continual_learning=continual_learning)
 
         self.value = Model.create(ValueNet(hidden_dims, len(self.intervals_unique)),
                                   inputs=[self.value_key, observations],
-                                  optim=optax.adam(learning_rate=value_lr))
+                                  optim=optax.adam(learning_rate=value_lr),
+                                  continual_learning=continual_learning)
 
         self.interval = Model.create(ValueNet(hidden_dims, 1),
                                      inputs=[self.value_key, observations],
-                                     optim=optax.adam(learning_rate=value_lr))
+                                     optim=optax.adam(learning_rate=value_lr),
+                                     continual_learning=continual_learning)
 
         self.networks = [self.actor, self.critic, self.value, self.interval]
 

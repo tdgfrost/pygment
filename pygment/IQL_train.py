@@ -14,12 +14,9 @@ jax.config.update('jax_platform_name', 'cpu')
 
 # Define config file - could change to FLAGS at some point
 config = {'seed': 123,
-          'epochs': int(1e4),
+          'epochs': int(2e6),
           'early_stopping': jnp.array(1000),
-          'value_batch_size': 256,
-          'critic_batch_size': 256,
-          'actor_batch_size': 256,
-          'interval_batch_size': 256,
+          'batch_size': 256,
           'expectile': 0.75,
           'baseline_reward': 0,
           'interval_probability': 0.25,
@@ -38,14 +35,13 @@ config = {'seed': 123,
 if __name__ == "__main__":
     from core.agent import IQLAgent
     from core.common import (load_data, progress_bar, alter_batch, Batch, filter_to_action,
-                             calc_traj_discounted_rewards, move_to_gpu, filter_dataset)
+                             calc_traj_discounted_rewards, move_to_gpu, filter_dataset, downsample_batch)
     from core.evaluate import evaluate_envs, run_and_animate
     from core.envs import make_variable_env
 
     # Set whether to train and/or evaluate
-    logging_bool = False
+    logging_bool = True
     evaluate_bool = False
-    training_device = jax.devices('cpu')[0]
 
     if logging_bool:
         wandb.init(
@@ -87,8 +83,7 @@ if __name__ == "__main__":
     # Move to GPU
     loaded_data = move_to_gpu(loaded_data, gpu_keys=['states', 'actions', 'discounted_rewards', 'episode_rewards',
                                                      'next_states', 'dones', 'action_logprobs', 'len_actions',
-                                                     'rewards'],
-                              device=training_device)
+                                                     'rewards'])
 
     # Make sure this matches with the desired dataset's extra_step metadata
     def extra_step_filter(x):
@@ -100,8 +95,9 @@ if __name__ == "__main__":
         # Otherwise, normal time steps (no delay)
         return 0
 
-
-    def make_agent(path=None):
+    # Train agent
+    def train(data):
+        # Create agent
         dummy_env = make_env('LunarLander-v2')
 
         agent = IQLAgent(observations=dummy_env.observation_space.sample(),
@@ -110,153 +106,142 @@ if __name__ == "__main__":
                          opt_decay_schedule="cosine",
                          **config)
 
+        model_dir = os.path.join('./experiments/IQL', agent.path)
+        agent.path = model_dir
+        os.makedirs(model_dir, exist_ok=True)
+        with open(os.path.join(model_dir, 'config.txt'), 'w') as f:
+            f.write(str(config))
+            f.close()
+
         del dummy_env
-
-        if path is None:
-            agent_directory = os.path.join('./experiments/IQL', agent.path)
-            agent.path = agent_directory
-            os.makedirs(agent_directory, exist_ok=True)
-            with open(os.path.join(agent_directory, 'config.txt'), 'w') as f:
-                f.write(str(config))
-                f.close()
-        else:
-            agent.path = path
-
-        return agent.path, agent
-
-    # Train agent
-    def train(data):
-        # Create agent
-        model_dir, agent = make_agent()
 
         # Standardise the state inputs
         agent.standardise_inputs(data.states)
 
         # For advantage-prioritised cloning
-        sample_prob = None
+        sample_prob = None # np.array(data.intervals / data.intervals.sum())
 
-        for current_net in ['interval', 'value', 'critic', 'actor']:
-            print('\n\n', '=' * 50, '\n', ' ' * 3, '\U0001F483' * 3, ' ' * 1, f'Training {current_net} network',
-                  ' ' * 2, '\U0001F483' * 3, '\n', '=' * 50, '\n')
+        print('\n\n', '=' * 50, '\n', ' ' * 3, '\U0001F483' * 3, ' ' * 1, f'Training network',
+              ' ' * 2, '\U0001F483' * 3, '\n', '=' * 50, '\n')
 
-            def is_net(x):
-                return x == current_net
+        best_loss = jnp.array(jnp.inf)
+        total_training_steps = jnp.array(0)
+        count = jnp.array(0)
 
-            loss_key = f'{current_net}_loss'
-            best_loss = jnp.array(jnp.inf)
-            total_training_steps = jnp.array(0)
-            count = jnp.array(0)
+        if logging_bool:
+            # Keep track of the best loss values
+            wandb.define_metric('actor_loss', summary='min')
+            wandb.define_metric('interval_loss', summary='min')
+            wandb.define_metric('critic_loss', summary='min')
+            wandb.define_metric('value_loss', summary='min')
 
+        random_key = jax.random.PRNGKey(123)
+        for epoch in range(config['epochs']):
+            if epoch > 0 and epoch % 100 == 0:
+                print(f'\n\n{epoch} epochs complete!\n')
+            progress_bar(epoch % 100, 100)
+            batch, idxs = agent.sample(data,
+                                       int(config['batch_size'] / (1 - config['top_actions_quantile'])),
+                                       p=sample_prob)
+
+            value_batch, random_key = downsample_batch(batch, random_key, config['batch_size'])
+
+            # Use TD learning for the value and critic networks (based on the value network)
+            next_state_values = agent.value(value_batch.next_states)[1]
+            next_interval_values = nn.sigmoid(agent.interval(value_batch.next_states)[1])
+            next_interval_values = jnp.hstack([1.0 - next_interval_values.reshape(-1, 1),
+                                               next_interval_values.reshape(-1, 1)])
+            next_state_values = (next_state_values * next_interval_values).sum(-1)
+
+            gammas = jnp.ones(shape=len(value_batch.rewards)) * config['gamma']
+            gammas = jnp.power(gammas, value_batch.intervals)
+            discounted_rewards = value_batch.rewards + gammas * next_state_values * (1 - value_batch.dones)
+
+            value_batch = alter_batch(value_batch, discounted_rewards=discounted_rewards)
+            del discounted_rewards
+
+            # For Actor:
+            # Calculate the interval probabilities for each state
+            interval_values = nn.sigmoid(agent.interval(batch.states)[1])
+            interval_values = jnp.hstack([1.0 - interval_values.reshape(-1, 1),
+                                          interval_values.reshape(-1, 1)])
+
+            # Calculate the critic and state values for each state
+            # (using interval probabilities to marginalise the values)
+
+            critic_values = jnp.minimum(*agent.critic(batch.states)[1])
+            critic_values = filter_to_action(critic_values, batch.actions)
+
+            state_values = agent.value(batch.states)[1]
+            state_values = (state_values * interval_values).sum(-1)
+
+            # Calculate the advantages
+            advantages = critic_values - state_values
+            advantages /= advantages.std()
+
+            batch = alter_batch(batch, advantages=advantages)
+
+            # Filter for top half of actions
+            filter_point = np.quantile(np.array(advantages), config['top_actions_quantile'])
+
+            print(np.array(advantages))
+
+            batch = filter_dataset(batch, batch.advantages > filter_point,
+                                   target_keys=['states', 'actions', 'advantages'])
+
+            # Remove excess data from the batch
+            batch = batch._asdict()
+            value_batch = value_batch._asdict()
+            for key in ['episode_rewards', 'next_states', 'next_actions', 'action_logprobs']:
+                batch[key] = None
+                value_batch[key] = None
+            batch = Batch(**batch)
+            value_batch = Batch(**value_batch)
+
+            # Perform the update step
+            value_loss_info = agent.update_async(batch,
+                                                 interval_loss_fn={'binary_crossentropy': 0},
+                                                 value_loss_fn={'expectile': 0},
+                                                 critic_loss_fn={'mc_mse': 0},
+                                                 expectile=config['expectile'],
+                                                 temperature=config['expectile_weighting'],
+                                                 value=True,
+                                                 critic=True,
+                                                 interval=True)
+
+            loss_info = agent.update_async(batch,
+                                           actor_loss_fn={'clone': 0},
+                                           actor=True)
+
+            loss_info.update(value_loss_info)
+
+            episode_rewards = None
+            if epoch % 5 == 0:
+                episode_rewards = evaluate_envs(agent, make_vec_env(lambda: make_variable_env('LunarLander-v2',
+                                                                                              fn=extra_step_filter),
+                                                                    n_envs=1))
+
+            # Log intermittently
             if logging_bool:
-                # Keep track of the best loss values
-                wandb.define_metric(f'{current_net}_loss', summary='min')
+                # Log results
+                logged_results = {'training_step': total_training_steps,
+                                  'gradient_step': epoch,
+                                  'actor_loss': loss_info['actor_loss'],
+                                  'interval_loss': loss_info['interval_loss'],
+                                  'critic_loss': loss_info['critic_loss'],
+                                  'value_loss': loss_info['value_loss'],
+                                  }
+                if epoch % 5 == 0:
+                    logged_results.update({'mean_reward': np.mean(episode_rewards)})
 
-            if is_net('actor'):
-                print('Filtering dataset...')
-                # We will perform the following using METAL for the faster inference across the whole dataset
+                wandb.log(logged_results)
 
-                gpu_interval = agent.interval.change_device(jax.devices('METAL')[0])
-                gpu_critic = agent.critic.change_device(jax.devices('METAL')[0])
-                gpu_value = agent.value.change_device(jax.devices('METAL')[0])
-                def metal(x): return jax.device_put(x, jax.devices('METAL')[0])
-                def cpu(x): return jax.device_put(x, jax.devices('cpu')[0])
-
-                # Calculate the interval probabilities for each state
-                interval_values = nn.sigmoid(cpu(gpu_interval(metal(data.states))[1]))
-                interval_values = jnp.hstack([1.0 - interval_values.reshape(-1, 1),
-                                              interval_values.reshape(-1, 1)])
-
-                # Calculate the critic and state values for each state
-                # (using interval probabilities to marginalise the values)
-                critic_values = cpu(jnp.minimum(*gpu_critic(metal(data.states))[1]))
-                critic_values = filter_to_action(critic_values, data.actions)
-
-                state_values = cpu(gpu_value(metal(data.states))[1])
-                state_values = (state_values * interval_values).sum(-1)
-
-                # Calculate the advantages
-                advantages = critic_values - state_values
-
-                data = alter_batch(data, advantages=advantages)
-
-                # Filter for top half of actions
-                filter_point = np.quantile(np.array(advantages), config['top_actions_quantile'])
-
-                print(np.array(advantages))
-
-                data = filter_dataset(data, data.advantages > filter_point,
-                                      target_keys=['states', 'actions', 'advantages'])
-
-            for epoch in range(config['epochs']):
-                if epoch > 0 and epoch % 100 == 0:
-                    print(f'\n\n{epoch} epochs complete!\n')
-                progress_bar(epoch % 100, 100)
-                batch, idxs = agent.sample(data,
-                                           config[f'{current_net}_batch_size'],
-                                           p=sample_prob)
-
-                # Use TD learning for the value and critic networks (based on the value network)
-                if is_net('value') or is_net('critic'):
-                    next_state_values = agent.value(batch.next_states)[1]
-                    next_interval_values = nn.sigmoid(agent.interval(batch.next_states)[1])
-                    next_interval_values = jnp.hstack([1.0 - next_interval_values.reshape(-1, 1),
-                                                       next_interval_values.reshape(-1, 1)])
-                    next_state_values = (next_state_values * next_interval_values).sum(-1)
-
-                    gammas = jnp.ones(shape=len(batch.rewards)) * config['gamma']
-                    gammas = jnp.power(gammas, batch.intervals)
-                    discounted_rewards = batch.rewards + gammas * next_state_values * (1 - batch.dones)
-
-                    batch = alter_batch(batch, discounted_rewards=discounted_rewards)
-                    del discounted_rewards
-
-                # Remove excess data from the batch
-                excess_data = {}
-                batch = batch._asdict()
-                for key in ['episode_rewards', 'next_states', 'next_actions', 'action_logprobs']:
-                    excess_data[key] = batch[key]
-                    batch[key] = None
-                batch = Batch(**batch)
-
-                # Perform the update step
-                loss_info = agent.update_async(batch,
-                                               interval_loss_fn={'binary_crossentropy': 0},
-                                               value_loss_fn={'expectile': 0},
-                                               critic_loss_fn={'mc_mse': 0},
-                                               actor_loss_fn={'clone': 0},
-                                               expectile=config['expectile'],
-                                               temperature=config['expectile_weighting'],
-                                               **{current_net: True})
-
-                total_training_steps += config[f'{current_net}_batch_size']
-
-                # Record best loss
-                if loss_info[loss_key] < best_loss:
-                    best_loss = loss_info[loss_key]
-                    count = jnp.array(0)
-
-                else:
-                    count += jnp.array(1)
-                    if count > config['early_stopping'] and not is_net('value'):
-                        break
-
-                # Log intermittently
-                if logging_bool:
-                    # Log results
-                    logged_results = {'training_step': total_training_steps,
-                                      'gradient_step': epoch,
-                                      f'{current_net}_loss': loss_info[loss_key]}
-                    wandb.log(logged_results)
-
-            # Save each model at the end of training
-            agent.actor.save(os.path.join(model_dir, 'model_checkpoints/actor')) if is_net(
-                'actor') else None
-            agent.interval.save(os.path.join(model_dir, 'model_checkpoints/interval')) if is_net(
-                'interval') else None
-            agent.critic.save(os.path.join(model_dir, 'model_checkpoints/critic')) if is_net(
-                'critic') else None
-            agent.value.save(os.path.join(model_dir, 'model_checkpoints/value')) if is_net(
-                'value') else None
+            if epoch == 100:
+                # Save each model
+                agent.actor.save(os.path.join(model_dir, 'model_checkpoints/actor'))
+                agent.interval.save(os.path.join(model_dir, 'model_checkpoints/interval'))
+                agent.critic.save(os.path.join(model_dir, 'model_checkpoints/critic'))
+                agent.value.save(os.path.join(model_dir, 'model_checkpoints/value'))
 
         # Evaluate agent
         n_envs = 1000
@@ -273,13 +258,6 @@ if __name__ == "__main__":
             f.write(f'Median reward: {np.median(episode_rewards)}\n')
             f.write(f'Mean reward: {np.mean(episode_rewards)}\n')
             f.close()
-
-        if logging_bool:
-            wandb.define_metric('median_reward', summary='max')
-            wandb.define_metric('mean_reward', summary='max')
-
-            wandb.log({'median_reward': np.median(episode_rewards)})
-            wandb.log({'mean_reward': np.mean(episode_rewards)})
 
         return agent
 
