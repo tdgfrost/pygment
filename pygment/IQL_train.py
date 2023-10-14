@@ -124,7 +124,6 @@ if __name__ == "__main__":
         print('\n\n', '=' * 50, '\n', ' ' * 3, '\U0001F483' * 3, ' ' * 1, f'Training network',
               ' ' * 2, '\U0001F483' * 3, '\n', '=' * 50, '\n')
 
-        best_loss = jnp.array(jnp.inf)
         total_training_steps = jnp.array(0)
         count = jnp.array(0)
 
@@ -184,8 +183,6 @@ if __name__ == "__main__":
             # Filter for top half of actions
             filter_point = np.quantile(np.array(advantages), config['top_actions_quantile'])
 
-            print(np.array(advantages))
-
             batch = filter_dataset(batch, batch.advantages > filter_point,
                                    target_keys=['states', 'actions', 'advantages'])
 
@@ -199,12 +196,11 @@ if __name__ == "__main__":
             value_batch = Batch(**value_batch)
 
             # Perform the update step
-            value_loss_info = agent.update_async(batch,
+            value_loss_info = agent.update_async(value_batch,
                                                  interval_loss_fn={'binary_crossentropy': 0},
                                                  value_loss_fn={'expectile': 0},
                                                  critic_loss_fn={'mc_mse': 0},
                                                  expectile=config['expectile'],
-                                                 temperature=config['expectile_weighting'],
                                                  value=True,
                                                  critic=True,
                                                  interval=True)
@@ -219,7 +215,15 @@ if __name__ == "__main__":
             if epoch % 5 == 0:
                 episode_rewards = evaluate_envs(agent, make_vec_env(lambda: make_variable_env('LunarLander-v2',
                                                                                               fn=extra_step_filter),
-                                                                    n_envs=1))
+                                                                    n_envs=1),
+                                                verbose=False)
+
+                if np.mean(episode_rewards) < 200:
+                    count = 0
+                else:
+                    count += 1
+                    if count > 10:
+                        break
 
             # Log intermittently
             if logging_bool:

@@ -8,7 +8,7 @@ from core.common import progress_bar
 from typing import List
 
 
-def evaluate_envs(policy, environments):
+def evaluate_envs(policy, environments, verbose=True):
     """
     Evaluate the agent across vectorised episodes.
 
@@ -26,7 +26,8 @@ def evaluate_envs(policy, environments):
     step = 0
     while not dones.all():
         step += 1
-        progress_bar(step, 1000)
+        if verbose:
+            progress_bar(step, 1000)
         # Step through environments
         actions = policy.sample_action(states, key)[0]
         states, rewards, new_dones, prem_dones = environments.step(actions)

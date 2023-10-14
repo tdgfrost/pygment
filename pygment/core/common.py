@@ -265,7 +265,7 @@ def downsample_batch(batch: Batch, random_key, steps=None):
     for key, val in downsampled_batch.items():
         if val is None:
             continue
-        if key == 'rewards':
+        if isinstance(val, list):
             downsampled_batch[key] = [val[idx] for idx in flat_idx]
         elif key == 'episode_rewards':
             downsampled_batch[key] = val
