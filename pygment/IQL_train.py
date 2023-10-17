@@ -17,10 +17,10 @@ config = {'seed': 123,
           'epochs': int(2e6),
           'early_stopping': jnp.array(1000),
           'batch_size': 256,
-          'expectile': 0.75,
+          'expectile': 0.5,
           'baseline_reward': 0,
           'interval_probability': 0.25,
-          'top_actions_quantile': 0.5,
+          'top_actions_quantile': 0.75,
           'gamma': 0.99,
           'actor_lr': 0.001,
           'value_lr': 0.001,
@@ -40,7 +40,7 @@ if __name__ == "__main__":
     from core.envs import make_variable_env
 
     # Set whether to train and/or evaluate
-    logging_bool = True
+    logging_bool = False
     evaluate_bool = False
 
     if logging_bool:

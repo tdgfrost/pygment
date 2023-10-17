@@ -58,7 +58,7 @@ class BaseAgent:
         for key, val in batch.items():
             if val is None:
                 continue
-            if type(val) == list:
+            elif isinstance(val, list):
                 batch[key] = [val[i] for i in idxs]
             elif key == 'episode_rewards':
                 batch[key] = val
