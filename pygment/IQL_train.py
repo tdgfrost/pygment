@@ -41,7 +41,7 @@ if __name__ == "__main__":
     from core.envs import make_variable_env
 
     # Set whether to train and/or evaluate
-    logging_bool = False
+    logging_bool = True
     evaluate_bool = False
 
     if logging_bool:
@@ -120,7 +120,7 @@ if __name__ == "__main__":
         agent.standardise_inputs(data.states)
 
         # For advantage-prioritised cloning
-        sample_prob = None # np.array(data.intervals / data.intervals.sum())
+        sample_prob = np.array(data.intervals / data.intervals.sum())
 
         print('\n\n', '=' * 50, '\n', ' ' * 3, '\U0001F483' * 3, ' ' * 1, f'Training network',
               ' ' * 2, '\U0001F483' * 3, '\n', '=' * 50, '\n')
@@ -143,6 +143,13 @@ if __name__ == "__main__":
             batch, idxs = agent.sample(data,
                                        int(config['batch_size'] / (1 - config['top_actions_quantile'])),
                                        p=sample_prob)
+
+            # Add Gaussian noise - remember last two positions are boolean
+            noise = np.random.normal(0, 0.01, size=batch.states.shape)
+            noise[:, -2:] = 0
+            batch = alter_batch(batch,
+                                states=batch.states + noise,
+                                next_states=batch.next_states + noise)
 
             value_batch, random_key = downsample_batch(batch, random_key, config['batch_size'])
 
