@@ -17,10 +17,11 @@ config = {'seed': 123,
           'epochs': int(2e6),
           'early_stopping': jnp.array(1000),
           'batch_size': 256,
-          'expectile': 0.5,
+          'expectile': 0.7,
           'baseline_reward': 0,
           'interval_probability': 0.25,
-          'top_actions_quantile': 0.75,
+          'top_actions_quantile': 0.5,
+          'filter_point': 0,
           'gamma': 0.99,
           'actor_lr': 0.001,
           'value_lr': 0.001,
@@ -181,7 +182,10 @@ if __name__ == "__main__":
             batch = alter_batch(batch, advantages=advantages)
 
             # Filter for top half of actions
-            filter_point = np.quantile(np.array(advantages), config['top_actions_quantile'])
+            if 'filter_point' not in config.keys():
+                filter_point = np.quantile(np.array(advantages), config['top_actions_quantile'])
+            else:
+                filter_point = config['filter_point']
 
             batch = filter_dataset(batch, batch.advantages > filter_point,
                                    target_keys=['states', 'actions', 'advantages'])
