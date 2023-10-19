@@ -26,7 +26,6 @@ config = {'seed': 123,
           'actor_lr': 0.001,
           'value_lr': 0.001,
           'critic_lr': 0.001,
-          'interval_lr': 0.001,
           'hidden_dims': (256, 256),
           'clipping': 1,
           'top_bar_coord': 1.2,  # 0.9,
@@ -131,7 +130,7 @@ if __name__ == "__main__":
         if logging_bool:
             # Keep track of the best loss values
             wandb.define_metric('actor_loss', summary='min')
-            wandb.define_metric('interval_loss', summary='min')
+            wandb.define_metric('average_value_loss', summary='min')
             wandb.define_metric('critic_loss', summary='min')
             wandb.define_metric('value_loss', summary='min')
 
@@ -141,7 +140,7 @@ if __name__ == "__main__":
                 print(f'\n\n{epoch} epochs complete!\n')
             progress_bar(epoch % 100, 100)
             batch, idxs = agent.sample(data,
-                                       int(config['batch_size'] / (1 - config['top_actions_quantile'])),
+                                       int(10 * config['batch_size']),
                                        p=sample_prob)
 
             # Add Gaussian noise - remember last two positions are boolean
@@ -156,13 +155,6 @@ if __name__ == "__main__":
 
             # Use TD learning for the value and critic networks (based on the value network)
             next_state_values = agent.value(value_batch.next_states)[1]
-            """
-            next_interval_values = nn.sigmoid(agent.interval(value_batch.next_states)[1])
-            next_interval_values = jnp.hstack([1.0 - next_interval_values.reshape(-1, 1),
-                                               next_interval_values.reshape(-1, 1)])
-            
-            next_state_values = (next_state_values * next_interval_values).sum(-1)
-            """
             next_state_values = filter_to_action(next_state_values, value_batch.next_len_actions)
 
             gammas = jnp.ones(shape=len(value_batch.rewards)) * config['gamma']
@@ -171,36 +163,6 @@ if __name__ == "__main__":
 
             value_batch = alter_batch(value_batch, discounted_rewards=discounted_rewards)
             del discounted_rewards
-
-            # For Actor:
-            # Calculate the interval probabilities for each state
-            interval_values = nn.sigmoid(agent.interval(batch.states)[1])
-            interval_values = jnp.hstack([1.0 - interval_values.reshape(-1, 1),
-                                          interval_values.reshape(-1, 1)])
-
-            # Calculate the critic and state values for each state
-            # (using interval probabilities to marginalise the values)
-
-            critic_values = jnp.minimum(*agent.critic(batch.states)[1])
-            critic_values = filter_to_action(critic_values, batch.actions)
-
-            state_values = agent.value(batch.states)[1]
-            state_values = (state_values * interval_values).sum(-1)
-
-            # Calculate the advantages
-            advantages = critic_values - state_values
-            advantages /= advantages.std()
-
-            batch = alter_batch(batch, advantages=advantages)
-
-            # Filter for top half of actions
-            if 'filter_point' not in config.keys():
-                filter_point = np.quantile(np.array(advantages), config['top_actions_quantile'])
-            else:
-                filter_point = config['filter_point']
-
-            batch = filter_dataset(batch, batch.advantages > filter_point,
-                                   target_keys=['states', 'actions', 'advantages'])
 
             # Remove excess data from the batch
             batch = batch._asdict()
@@ -213,19 +175,54 @@ if __name__ == "__main__":
 
             # Perform the update step
             value_loss_info = agent.update_async(value_batch,
-                                                 interval_loss_fn={'binary_crossentropy': 0},
                                                  value_loss_fn={'expectile': 0},
                                                  critic_loss_fn={'mc_mse': 0},
                                                  expectile=config['expectile'],
                                                  value=True,
-                                                 critic=True,
-                                                 interval=True)
+                                                 critic=True)
 
-            loss_info = agent.update_async(batch,
-                                           actor_loss_fn={'clone': 0},
-                                           actor=True)
+            value_batch = alter_batch(value_batch,
+                                      discounted_rewards=next_state_values)
+
+            average_value_loss_info = agent.update_async(value_batch,
+                                                         value_loss_fn={'mc_mse': 0},
+                                                         average_value=True)
+
+            average_value_loss_info['average_value_loss'] = average_value_loss_info['value_loss']
+            del average_value_loss_info['value_loss']
+
+            # For Actor:
+            # Calculate the advantages
+            state_values = agent.average_value(batch.states)[1]
+
+            critic_values = jnp.minimum(*agent.critic(batch.states)[1])
+            critic_values = filter_to_action(critic_values, batch.actions)
+
+            advantages = critic_values - state_values
+
+            batch = alter_batch(batch, advantages=advantages)
+
+            # Filter for top half of actions
+            if 'filter_point' not in config.keys():
+                filter_point = np.quantile(np.array(advantages), config['top_actions_quantile'])
+            else:
+                filter_point = config['filter_point']
+
+            filter_mask = np.zeros(shape=len(batch.advantages)).astype(np.bool_)
+            filter_mask[np.where(batch.advantages > filter_point)[0][:config['batch_size']]] = True
+
+            batch = filter_dataset(batch, filter_mask,
+                                   target_keys=['states', 'actions', 'advantages'])
+
+            if (batch.advantages > filter_point).sum() > 0:
+                loss_info = agent.update_async(batch,
+                                               actor_loss_fn={'clone': 0},
+                                               actor=True)
+            else:
+                loss_info = {'actor_loss': None}
 
             loss_info.update(value_loss_info)
+            loss_info.update(average_value_loss_info)
 
             episode_rewards = None
             if epoch % 5 == 0:
@@ -247,7 +244,7 @@ if __name__ == "__main__":
                 logged_results = {'training_step': total_training_steps,
                                   'gradient_step': epoch,
                                   'actor_loss': loss_info['actor_loss'],
-                                  'interval_loss': loss_info['interval_loss'],
+                                  'average_value_loss': loss_info['average_value_loss'],
                                   'critic_loss': loss_info['critic_loss'],
                                   'value_loss': loss_info['value_loss'],
                                   }
@@ -259,7 +256,7 @@ if __name__ == "__main__":
             if epoch == 100:
                 # Save each model
                 agent.actor.save(os.path.join(model_dir, 'model_checkpoints/actor'))
-                agent.interval.save(os.path.join(model_dir, 'model_checkpoints/interval'))
+                agent.average_value.save(os.path.join(model_dir, 'model_checkpoints/average_value'))
                 agent.critic.save(os.path.join(model_dir, 'model_checkpoints/critic'))
                 agent.value.save(os.path.join(model_dir, 'model_checkpoints/value'))
 
