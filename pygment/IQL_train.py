@@ -120,7 +120,7 @@ if __name__ == "__main__":
         agent.standardise_inputs(data.states)
 
         # For advantage-prioritised cloning
-        sample_prob = np.array(data.intervals / data.intervals.sum())
+        sample_prob = None # np.array(data.intervals / data.intervals.sum())
 
         print('\n\n', '=' * 50, '\n', ' ' * 3, '\U0001F483' * 3, ' ' * 1, f'Training network',
               ' ' * 2, '\U0001F483' * 3, '\n', '=' * 50, '\n')
@@ -145,20 +145,25 @@ if __name__ == "__main__":
                                        p=sample_prob)
 
             # Add Gaussian noise - remember last two positions are boolean
+            """
             noise = np.random.normal(0, 0.01, size=batch.states.shape)
             noise[:, -2:] = 0
             batch = alter_batch(batch,
                                 states=batch.states + noise,
                                 next_states=batch.next_states + noise)
-
+            """
             value_batch, random_key = downsample_batch(batch, random_key, config['batch_size'])
 
             # Use TD learning for the value and critic networks (based on the value network)
             next_state_values = agent.value(value_batch.next_states)[1]
+            """
             next_interval_values = nn.sigmoid(agent.interval(value_batch.next_states)[1])
             next_interval_values = jnp.hstack([1.0 - next_interval_values.reshape(-1, 1),
                                                next_interval_values.reshape(-1, 1)])
+            
             next_state_values = (next_state_values * next_interval_values).sum(-1)
+            """
+            next_state_values = filter_to_action(next_state_values, value_batch.next_len_actions)
 
             gammas = jnp.ones(shape=len(value_batch.rewards)) * config['gamma']
             gammas = jnp.power(gammas, value_batch.intervals)
