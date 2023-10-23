@@ -17,7 +17,7 @@ config = {'seed': 123,
           'epochs': int(2e6),
           'early_stopping': jnp.array(1000),
           'batch_size': 256,
-          'expectile': 0.7,
+          'expectile': 0.5,
           'baseline_reward': 0,
           'interval_probability': 0.25,
           'top_actions_quantile': 0.5,
@@ -119,7 +119,7 @@ if __name__ == "__main__":
         agent.standardise_inputs(data.states)
 
         # For advantage-prioritised cloning
-        sample_prob = None # np.array(data.intervals / data.intervals.sum())
+        sample_prob = None  # np.array(data.intervals / data.intervals.sum())
 
         print('\n\n', '=' * 50, '\n', ' ' * 3, '\U0001F483' * 3, ' ' * 1, f'Training network',
               ' ' * 2, '\U0001F483' * 3, '\n', '=' * 50, '\n')

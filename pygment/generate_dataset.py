@@ -18,16 +18,17 @@ if __name__ == "__main__":
     # ============================================================== #
 
     # Load previous checkpoints
-    reward = -2
-    dirname = './experiments/PPO/2023_10_11_141616'
+    reward = 0
+    probability = 0.25
+    dirname = f'./experiments/{probability}_probability_5_steps/PPO/2023_10_11_132558'
     model_checkpoints = os.path.join(dirname, 'model_checkpoints')
-    target_directory = './offline_datasets/LunarLander/0.05_probability_5_steps'
+    target_directory = f'./offline_datasets/LunarLander/{probability}_probability_5_steps'
 
     with open(os.path.join(dirname, 'config.txt'), 'r') as f:
         config = eval(f.read())
 
     config['max_episode_steps'] = 1000
-    config['n_episodes'] = 10000
+    config['n_episodes'] = 100000
 
     # Create agent
     env = make_env('LunarLander-v2', max_episode_steps=config['max_episode_steps'])
@@ -44,7 +45,7 @@ if __name__ == "__main__":
         # If in rectangle
         if config['bottom_bar_coord'] < x[1] < config['top_bar_coord']:
             # with p == 0.05, delay by 20 steps
-            if np.random.uniform() < 0.05:
+            if np.random.uniform() < probability:
                 return 5
         # Otherwise, normal time steps (no delay)
         return 0
@@ -73,5 +74,5 @@ if __name__ == "__main__":
     os.makedirs(target_directory, exist_ok=True)
 
     # Save batch
-    with open(os.path.join(target_directory, f'dataset_reward_{reward}.pkl'), 'wb') as f:
+    with open(os.path.join(target_directory, f"dataset_reward_{reward}_{config['n_episodes']}_episodes.pkl"), 'wb') as f:
         pickle.dump(batch, f)
