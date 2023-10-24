@@ -19,6 +19,7 @@ config = {'seed': 123,
           'batch_size': 256,
           'expectile': 0.5,
           'baseline_reward': 0,
+          'n_episodes': 10000,
           'interval_probability': 0.25,
           'top_actions_quantile': 0.5,
           'filter_point': 0,
@@ -58,7 +59,8 @@ if __name__ == "__main__":
     baseline_reward = config['baseline_reward']
     interval_probability = config['interval_probability']
     loaded_data = load_data(
-        path=f'./offline_datasets/LunarLander/{interval_probability}_probability_5_steps/dataset_reward_{baseline_reward}.pkl',
+        path=f"./offline_datasets/LunarLander/{interval_probability}_probability_5_steps/"
+             f"dataset_reward_{baseline_reward}_{config['n_episodes']}_episodes.pkl",
         scale='standardise',
         gamma=config['gamma'])
 
@@ -153,16 +155,21 @@ if __name__ == "__main__":
             """
             value_batch, random_key = downsample_batch(batch, random_key, config['batch_size'])
 
-            # Use TD learning for the value and critic networks (based on the value network)
-            next_state_values = agent.value(value_batch.next_states)[1]
-            next_state_values = filter_to_action(next_state_values, value_batch.next_len_actions)
-
+            # Use TD learning for the value, average_value and critic networks
             gammas = jnp.ones(shape=len(value_batch.rewards)) * config['gamma']
             gammas = jnp.power(gammas, value_batch.intervals)
-            discounted_rewards = value_batch.rewards + gammas * next_state_values * (1 - value_batch.dones)
 
-            value_batch = alter_batch(value_batch, discounted_rewards=discounted_rewards)
-            del discounted_rewards
+            # Value (from average value):
+            next_state_values_avg = agent.average_value(value_batch.next_states)[1]
+
+            # Average value (from value)
+            next_state_values_int = agent.value(value_batch.next_states)[1]
+            next_state_values_int = filter_to_action(next_state_values_int, value_batch.next_len_actions)
+
+            discounted_rewards_for_interval = value_batch.rewards + gammas * next_state_values_avg * (1 - value_batch.dones)
+            discounted_rewards_for_average = value_batch.rewards + gammas * next_state_values_int * (1 - value_batch.dones)
+
+            value_batch = alter_batch(value_batch, discounted_rewards=discounted_rewards_for_interval)
 
             # Remove excess data from the batch
             batch = batch._asdict()
@@ -173,20 +180,21 @@ if __name__ == "__main__":
             batch = Batch(**batch)
             value_batch = Batch(**value_batch)
 
-            # Perform the update step
+            # Perform the update step for value network
             value_loss_info = agent.update_async(value_batch,
                                                  value_loss_fn={'expectile': 0},
-                                                 critic_loss_fn={'mc_mse': 0},
                                                  expectile=config['expectile'],
-                                                 value=True,
-                                                 critic=True)
+                                                 value=True)
 
+            # Then update for average and critic networks
             value_batch = alter_batch(value_batch,
-                                      discounted_rewards=next_state_values)
+                                      discounted_rewards=discounted_rewards_for_average)
 
             average_value_loss_info = agent.update_async(value_batch,
                                                          value_loss_fn={'mc_mse': 0},
-                                                         average_value=True)
+                                                         critic_loss_fn={'mc_mse': 0},
+                                                         average_value=True,
+                                                         critic=True)
 
             average_value_loss_info['average_value_loss'] = average_value_loss_info['value_loss']
             del average_value_loss_info['value_loss']
