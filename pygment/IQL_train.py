@@ -154,6 +154,21 @@ if __name__ == "__main__":
             value_batch = alter_batch(value_batch, discounted_rewards=discounted_rewards)
             del discounted_rewards
 
+            # Remove excess data from the batch
+            value_batch = value_batch._asdict()
+            for key in ['episode_rewards', 'next_states', 'next_actions', 'action_logprobs']:
+                value_batch[key] = None
+            value_batch = Batch(**value_batch)
+
+            # Perform the update step
+            value_loss_info = agent.update_async(value_batch,
+                                                 value_loss_fn={'mc_mse': 0},
+                                                 critic_loss_fn={'mc_mse': 0},
+                                                 # expectile=config['expectile'],
+                                                 critic=True,
+                                                 value=True,
+                                                 )
+
             # Use advantage for the actor network
             critic_values = jnp.minimum(*agent.critic(batch.states)[1])
             critic_values = filter_to_action(critic_values, batch.actions)
@@ -175,21 +190,9 @@ if __name__ == "__main__":
 
             # Remove excess data from the batch
             batch = batch._asdict()
-            value_batch = value_batch._asdict()
             for key in ['episode_rewards', 'next_states', 'next_actions', 'action_logprobs']:
                 batch[key] = None
-                value_batch[key] = None
             batch = Batch(**batch)
-            value_batch = Batch(**value_batch)
-
-            # Perform the update step
-            value_loss_info = agent.update_async(value_batch,
-                                                 value_loss_fn={'mc_mse': 0},
-                                                 critic_loss_fn={'mc_mse': 0},
-                                                 # expectile=config['expectile'],
-                                                 critic=True,
-                                                 value=True,
-                                                 )
 
             loss_info = agent.update_async(batch,
                                            actor_loss_fn={'clone': 0},
