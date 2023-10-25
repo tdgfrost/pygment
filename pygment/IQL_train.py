@@ -15,11 +15,12 @@ jax.config.update('jax_platform_name', 'cpu')
 config = {'seed': 123,
           'epochs': int(2e6),
           'early_stopping': jnp.array(1000),
-          'batch_size': 256,
+          'batch_size': 10000,
           'expectile': 0.5,
           'baseline_reward': 0,
           'interval_probability': 1.0,
           'top_actions_quantile': 0.5,
+          'filter_point': 0,
           'gamma': 0.99,
           'actor_lr': 0.001,
           'value_lr': 0.001,
@@ -130,17 +131,18 @@ if __name__ == "__main__":
 
         random_key = jax.random.PRNGKey(123)
         # Adjust the sample probabilities
-        sample_probs = np.array(data.intervals / np.sum(data.intervals))
+        sample_probs = None # np.array(data.intervals / np.sum(data.intervals))
 
         for epoch in range(config['epochs']):
             if epoch > 0 and epoch % 100 == 0:
                 print(f'\n\n{epoch} epochs complete!\n')
             progress_bar(epoch % 100, 100)
             batch, idxs = agent.sample(data,
-                                       int(config[f'batch_size'] * (1 / (1 - config['top_actions_quantile']))),
+                                       config[f'batch_size'],
                                        p=sample_probs)
 
-            value_batch, random_key = downsample_batch(batch, random_key, config['batch_size'])
+            # value_batch, random_key = downsample_batch(batch, random_key, config['batch_size'])
+            value_batch = batch
             # Use TD learning for the value and critic networks (based on the value network)
             next_state_values = agent.value(value_batch.next_states)[1]
 
@@ -162,7 +164,10 @@ if __name__ == "__main__":
             batch = alter_batch(batch, advantages=advantages)
 
             # Filter for top actions
-            filter_point = jnp.quantile(advantages, config['top_actions_quantile'])
+            if 'filter_point' in config.keys():
+                filter_point = config['filter_point']
+            else:
+                filter_point = jnp.quantile(advantages, config['top_actions_quantile'])
 
             batch = filter_dataset(batch, batch.advantages > filter_point,
                                          target_keys=['states', 'actions', 'advantages'])
@@ -178,9 +183,9 @@ if __name__ == "__main__":
 
             # Perform the update step
             value_loss_info = agent.update_async(value_batch,
-                                                 value_loss_fn={'expectile': 0},
+                                                 value_loss_fn={'mc_mse': 0},
                                                  critic_loss_fn={'mc_mse': 0},
-                                                 expectile=config['expectile'],
+                                                 # expectile=config['expectile'],
                                                  critic=True,
                                                  value=True,
                                                  )
