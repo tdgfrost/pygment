@@ -16,9 +16,10 @@ config = {'seed': 123,
           'epochs': int(2e6),
           'early_stopping': jnp.array(1000),
           'batch_size': 10000,
+          'n_episodes': 10000,
           'expectile': 0.5,
           'baseline_reward': 0,
-          'interval_probability': 1.0,
+          'interval_probability': 0.25,
           'top_actions_quantile': 0.5,
           'filter_point': 0,
           'gamma': 0.99,
@@ -58,7 +59,7 @@ if __name__ == "__main__":
     baseline_reward = config['baseline_reward']
     interval_probability = config['interval_probability']
     loaded_data = load_data(
-        path=f'./offline_datasets/LunarLander/{interval_probability}_probability_5_steps/dataset_reward_{baseline_reward}.pkl',
+        path=f"./offline_datasets/LunarLander/{interval_probability}_probability_5_steps/dataset_reward_{baseline_reward}_{config['n_episodes']}_episodes.pkl",
         scale='standardise',
         gamma=config['gamma'])
 
