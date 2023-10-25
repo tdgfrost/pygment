@@ -221,10 +221,7 @@ if __name__ == "__main__":
             else:
                 filter_point = config['filter_point']
 
-            filter_mask = np.zeros(shape=len(batch.advantages)).astype(np.bool_)
-            filter_mask[np.where(batch.advantages > filter_point)[0][:config['batch_size']]] = True
-
-            batch = filter_dataset(batch, filter_mask,
+            batch = filter_dataset(batch, advantages > filter_point,
                                    target_keys=['states', 'actions', 'advantages'])
 
             if (batch.advantages > filter_point).sum() > 0:
