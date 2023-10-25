@@ -16,8 +16,8 @@ jax.config.update('jax_platform_name', 'cpu')
 config = {'seed': 123,
           'epochs': int(2e6),
           'early_stopping': jnp.array(1000),
-          'batch_size': 256,
-          'expectile': 0.5,
+          'batch_size': 10000,
+          'expectile': 0.7,
           'baseline_reward': 0,
           'n_episodes': 10000,
           'interval_probability': 0.25,
@@ -142,7 +142,8 @@ if __name__ == "__main__":
                 print(f'\n\n{epoch} epochs complete!\n')
             progress_bar(epoch % 100, 100)
             batch, idxs = agent.sample(data,
-                                       int(10 * config['batch_size']),
+                                       # int(10 * config['batch_size']),
+                                       config['batch_size'],
                                        p=sample_prob)
 
             # Add Gaussian noise - remember last two positions are boolean
@@ -153,23 +154,27 @@ if __name__ == "__main__":
                                 states=batch.states + noise,
                                 next_states=batch.next_states + noise)
             """
-            value_batch, random_key = downsample_batch(batch, random_key, config['batch_size'])
-
+            # value_batch, random_key = downsample_batch(batch, random_key, config['batch_size'])
+            value_batch = batch
             # Use TD learning for the value, average_value and critic networks
             gammas = jnp.ones(shape=len(value_batch.rewards)) * config['gamma']
             gammas = jnp.power(gammas, value_batch.intervals)
 
-            # Value (from average value):
+            # For Interval Value (from average value):
             next_state_values_avg = agent.average_value(value_batch.next_states)[1]
 
-            # Average value (from value)
-            next_state_values_int = agent.value(value_batch.next_states)[1]
-            next_state_values_int = filter_to_action(next_state_values_int, value_batch.next_len_actions)
+            # For Average Value (from interval value):
+            discounted_rewards_for_average = agent.value(value_batch.states)[1]
+            discounted_rewards_for_average = filter_to_action(discounted_rewards_for_average, value_batch.len_actions)
 
-            discounted_rewards_for_interval = value_batch.rewards + gammas * next_state_values_avg * (1 - value_batch.dones)
-            discounted_rewards_for_average = value_batch.rewards + gammas * next_state_values_int * (1 - value_batch.dones)
+            # For Critic value (from average value)
+            # next_state_values_int = agent.value(value_batch.next_states)[1]
+            # next_state_values_int = filter_to_action(next_state_values_int, value_batch.next_len_actions)
 
-            value_batch = alter_batch(value_batch, discounted_rewards=discounted_rewards_for_interval)
+            discounted_rewards_for_interval_and_critic = value_batch.rewards + gammas * next_state_values_avg * (1 - value_batch.dones)
+            # discounted_rewards_for_average = value_batch.rewards + gammas * next_state_values_int * (1 - value_batch.dones)
+
+            value_batch = alter_batch(value_batch, discounted_rewards=discounted_rewards_for_interval_and_critic)
 
             # Remove excess data from the batch
             batch = batch._asdict()
@@ -180,21 +185,21 @@ if __name__ == "__main__":
             batch = Batch(**batch)
             value_batch = Batch(**value_batch)
 
-            # Perform the update step for value network
+            # Perform the update step for interval value and critic networks
             value_loss_info = agent.update_async(value_batch,
                                                  value_loss_fn={'expectile': 0},
+                                                 critic_loss_fn={'mc_mse': 0},
                                                  expectile=config['expectile'],
-                                                 value=True)
+                                                 value=True,
+                                                 critic=True)
 
-            # Then update for average and critic networks
+            # Then update for average network
             value_batch = alter_batch(value_batch,
                                       discounted_rewards=discounted_rewards_for_average)
 
             average_value_loss_info = agent.update_async(value_batch,
                                                          value_loss_fn={'mc_mse': 0},
-                                                         critic_loss_fn={'mc_mse': 0},
-                                                         average_value=True,
-                                                         critic=True)
+                                                         average_value=True)
 
             average_value_loss_info['average_value_loss'] = average_value_loss_info['value_loss']
             del average_value_loss_info['value_loss']
