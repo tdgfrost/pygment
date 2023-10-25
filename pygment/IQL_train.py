@@ -142,7 +142,6 @@ if __name__ == "__main__":
                 print(f'\n\n{epoch} epochs complete!\n')
             progress_bar(epoch % 100, 100)
             batch, idxs = agent.sample(data,
-                                       # int(10 * config['batch_size']),
                                        config['batch_size'],
                                        p=sample_prob)
 
