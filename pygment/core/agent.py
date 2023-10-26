@@ -169,6 +169,11 @@ class IQLAgent(BaseAgent):
                                           optim=optax.adam(learning_rate=value_lr),
                                           continual_learning=continual_learning)
 
+        self.target_value = Model.create(ValueNet(hidden_dims, 1),
+                                          inputs=[self.value_key, observations],
+                                          optim=optax.adam(learning_rate=value_lr),
+                                          continual_learning=continual_learning)
+
         self.networks = [self.actor, self.critic, self.value, self.average_value]
 
     def update(self, batch: Batch, **kwargs) -> InfoDict:
