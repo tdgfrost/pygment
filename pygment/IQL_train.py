@@ -240,13 +240,6 @@ if __name__ == "__main__":
                                                                     n_envs=1),
                                                 verbose=False)
 
-                if np.mean(episode_rewards) < 200:
-                    count = 0
-                else:
-                    count += 1
-                    if count > 10:
-                        break
-
             # Log intermittently
             if logging_bool:
                 # Log results
