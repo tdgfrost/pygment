@@ -133,7 +133,6 @@ if __name__ == "__main__":
         if logging_bool:
             # Keep track of the best loss values
             wandb.define_metric('actor_loss', summary='min')
-            wandb.define_metric('average_value_loss', summary='min')
             wandb.define_metric('critic_loss', summary='min')
             wandb.define_metric('value_loss', summary='min')
 
@@ -226,7 +225,6 @@ if __name__ == "__main__":
                 logged_results = {'training_step': total_training_steps,
                                   'gradient_step': epoch,
                                   'actor_loss': loss_info['actor_loss'],
-                                  'average_value_loss': loss_info['average_value_loss'],
                                   'critic_loss': loss_info['critic_loss'],
                                   'value_loss': loss_info['value_loss'],
                                   }
