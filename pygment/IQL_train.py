@@ -17,7 +17,7 @@ config = {'seed': 123,
           'epochs': int(2e6),
           'early_stopping': jnp.array(1000),
           'batch_size': 10000,
-          'expectile': 0.7,
+          'expectile': 0.5,
           'baseline_reward': 0,
           'n_episodes': 10000,
           'interval_probability': 0.25,
@@ -27,6 +27,7 @@ config = {'seed': 123,
           'actor_lr': 0.001,
           'value_lr': 0.001,
           'critic_lr': 0.001,
+          'alpha_soft_update': 0.01,
           'hidden_dims': (256, 256),
           'clipping': 1,
           'top_bar_coord': 1.2,  # 0.9,
@@ -155,25 +156,14 @@ if __name__ == "__main__":
             """
             # value_batch, random_key = downsample_batch(batch, random_key, config['batch_size'])
             value_batch = batch
-            # Use TD learning for the value, average_value and critic networks
+            # Use TD learning for the value and critic networks
             gammas = jnp.ones(shape=len(value_batch.rewards)) * config['gamma']
             gammas = jnp.power(gammas, value_batch.intervals)
 
-            # For Interval Value (from average value):
-            next_state_values_avg = agent.average_value(value_batch.next_states)[1]
+            next_state_values = agent.target_value(value_batch.next_states)[1]
+            discounted_rewards = value_batch.rewards + gammas * next_state_values * (1 - value_batch.dones)
 
-            # For Average Value (from interval value):
-            discounted_rewards_for_average = agent.value(value_batch.states)[1]
-            discounted_rewards_for_average = filter_to_action(discounted_rewards_for_average, value_batch.len_actions)
-
-            # For Critic value (from average value)
-            # next_state_values_int = agent.value(value_batch.next_states)[1]
-            # next_state_values_int = filter_to_action(next_state_values_int, value_batch.next_len_actions)
-
-            discounted_rewards_for_interval_and_critic = value_batch.rewards + gammas * next_state_values_avg * (1 - value_batch.dones)
-            # discounted_rewards_for_average = value_batch.rewards + gammas * next_state_values_int * (1 - value_batch.dones)
-
-            value_batch = alter_batch(value_batch, discounted_rewards=discounted_rewards_for_interval_and_critic)
+            value_batch = alter_batch(value_batch, discounted_rewards=discounted_rewards)
 
             # Remove excess data from the batch
             batch = batch._asdict()
@@ -186,26 +176,17 @@ if __name__ == "__main__":
 
             # Perform the update step for interval value and critic networks
             value_loss_info = agent.update_async(value_batch,
-                                                 value_loss_fn={'expectile': 0},
+                                                 value_loss_fn={'mc_mse': 0},
                                                  critic_loss_fn={'mc_mse': 0},
-                                                 expectile=config['expectile'],
                                                  value=True,
                                                  critic=True)
 
-            # Then update for average network
-            value_batch = alter_batch(value_batch,
-                                      discounted_rewards=discounted_rewards_for_average)
-
-            average_value_loss_info = agent.update_async(value_batch,
-                                                         value_loss_fn={'mc_mse': 0},
-                                                         average_value=True)
-
-            average_value_loss_info['average_value_loss'] = average_value_loss_info['value_loss']
-            del average_value_loss_info['value_loss']
+            # Do a partial sync with the target network
+            agent.sync_target(config['alpha_soft_update'])
 
             # For Actor:
             # Calculate the advantages
-            state_values = agent.average_value(batch.states)[1]
+            state_values = agent.target_value(batch.states)[1]
 
             critic_values = jnp.minimum(*agent.critic(batch.states)[1])
             critic_values = filter_to_action(critic_values, batch.actions)
@@ -231,7 +212,6 @@ if __name__ == "__main__":
                 loss_info = {'actor_loss': None}
 
             loss_info.update(value_loss_info)
-            loss_info.update(average_value_loss_info)
 
             episode_rewards = None
             if epoch % 5 == 0:
@@ -258,7 +238,7 @@ if __name__ == "__main__":
             if epoch == 100:
                 # Save each model
                 agent.actor.save(os.path.join(model_dir, 'model_checkpoints/actor'))
-                agent.average_value.save(os.path.join(model_dir, 'model_checkpoints/average_value'))
+                agent.target_value.save(os.path.join(model_dir, 'model_checkpoints/target_value'))
                 agent.critic.save(os.path.join(model_dir, 'model_checkpoints/critic'))
                 agent.value.save(os.path.join(model_dir, 'model_checkpoints/value'))
 

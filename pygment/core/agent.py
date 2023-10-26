@@ -159,17 +159,19 @@ class IQLAgent(BaseAgent):
                                    optim=optax.adam(learning_rate=critic_lr),
                                    continual_learning=continual_learning)
 
-        self.value = Model.create(ValueNet(hidden_dims, len(self.intervals_unique)),
+        self.value = Model.create(ValueNet(hidden_dims, 1),
                                   inputs=[self.value_key, observations],
                                   optim=optax.adam(learning_rate=value_lr),
                                   continual_learning=continual_learning)
 
-        self.average_value = Model.create(ValueNet(hidden_dims, 1),
+        self.target_value = Model.create(ValueNet(hidden_dims, 1),
                                           inputs=[self.value_key, observations],
                                           optim=optax.adam(learning_rate=value_lr),
                                           continual_learning=continual_learning)
 
-        self.networks = [self.actor, self.critic, self.value, self.average_value]
+        self.sync_target(alpha=1.0)
+
+        self.networks = [self.actor, self.critic, self.value, self.target_value]
 
     def update(self, batch: Batch, **kwargs) -> InfoDict:
         """
@@ -194,8 +196,7 @@ class IQLAgent(BaseAgent):
         return info
 
     def update_async(self, batch: Batch, actor: bool = False,
-                     critic: bool = False, value: bool = False,
-                     average_value: bool = False, **kwargs) -> InfoDict:
+                     critic: bool = False, value: bool = False, **kwargs) -> InfoDict:
         """
         Updates the agent's networks asynchronously.
 
@@ -203,7 +204,6 @@ class IQLAgent(BaseAgent):
         :param actor: whether to update the actor network.
         :param critic: whether to update the critic network.
         :param value: whether to update the value network.
-        :param average_value: whether to update the average_value network.
         :return: an InfoDict object containing metadata.
         """
 
@@ -217,22 +217,34 @@ class IQLAgent(BaseAgent):
         new_value, value_info = _update_value_jit(
             self.value, batch, **kwargs) if value else (self.value, {})
 
-        new_average_value, average_value_info = _update_value_jit(
-            self.average_value, batch, **kwargs) if average_value else (self.average_value, {})
-
         # Update the agent's networks with the updated copies
         self.rng = new_rng
         self.actor = new_actor
         self.critic = new_critic
         self.value = new_value
-        self.average_value = new_average_value
 
         # Return the metadata
         return {**critic_info,
                 **value_info,
                 **actor_info,
-                **average_value_info,
                 }
+
+    def sync_target(self, alpha=0.01):
+        """
+        Soft update of the target value network.
+        """
+        def soft_update_dict(source, target):
+            new_params = {}
+            for key, value in source.items():
+                if isinstance(value, dict) and key in target:
+                    new_params[key] = soft_update_dict(value, target[key])
+                else:
+                    new_params[key] = value * alpha + target[key] * (1 - alpha)
+
+            return new_params
+
+        new_target_params = soft_update_dict(self.value.params, self.target_value.params)
+        self.target_value = self.target_value.replace(params=new_target_params)
 
     def sample_action(self, state, key=jax.random.PRNGKey(123)):
         """
