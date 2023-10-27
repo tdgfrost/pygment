@@ -17,7 +17,7 @@ config = {'seed': 123,
           'epochs': int(2e6),
           'early_stopping': jnp.array(1000),
           'batch_size': 10000,
-          'expectile': 0.7,
+          'expectile': 0.8,
           'baseline_reward': 0,
           'n_episodes': 10000,
           'interval_probability': 0.25,
@@ -27,6 +27,7 @@ config = {'seed': 123,
           'actor_lr': 0.001,
           'value_lr': 0.001,
           'critic_lr': 0.001,
+          'alpha_soft_update': 0.1,
           'hidden_dims': (256, 256),
           'clipping': 1,
           'top_bar_coord': 1.2,  # 0.9,
@@ -155,12 +156,13 @@ if __name__ == "__main__":
             """
             # value_batch, random_key = downsample_batch(batch, random_key, config['batch_size'])
             value_batch = batch
+
             # Use TD learning for the value, average_value and critic networks
             gammas = jnp.ones(shape=len(value_batch.rewards)) * config['gamma']
             gammas = jnp.power(gammas, value_batch.intervals)
 
             # For Interval Value (from average value):
-            next_state_values_avg = agent.average_value(value_batch.next_states)[1]
+            next_state_values_avg = agent.target_value(value_batch.next_states)[1]
 
             # For Average Value (from interval value):
             discounted_rewards_for_average = agent.value(value_batch.states)[1]
@@ -203,9 +205,11 @@ if __name__ == "__main__":
             average_value_loss_info['average_value_loss'] = average_value_loss_info['value_loss']
             del average_value_loss_info['value_loss']
 
+            agent.sync_target(config['alpha_soft_update'])
+
             # For Actor:
             # Calculate the advantages
-            state_values = agent.average_value(batch.states)[1]
+            state_values = agent.target_value(batch.states)[1]
 
             critic_values = jnp.minimum(*agent.critic(batch.states)[1])
             critic_values = filter_to_action(critic_values, batch.actions)

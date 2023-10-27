@@ -174,7 +174,9 @@ class IQLAgent(BaseAgent):
                                           optim=optax.adam(learning_rate=value_lr),
                                           continual_learning=continual_learning)
 
-        self.networks = [self.actor, self.critic, self.value, self.average_value]
+        self.sync_target(1.0)
+
+        self.networks = [self.actor, self.critic, self.value, self.average_value, self.target_value]
 
     def update(self, batch: Batch, **kwargs) -> InfoDict:
         """
@@ -238,6 +240,23 @@ class IQLAgent(BaseAgent):
                 **actor_info,
                 **average_value_info,
                 }
+
+    def sync_target(self, alpha=0.01):
+        """
+        Soft update of the target value network.
+        """
+        def soft_update_dict(source, target):
+            new_params = {}
+            for key, value in source.items():
+                if isinstance(value, dict) and key in target:
+                    new_params[key] = soft_update_dict(value, target[key])
+                else:
+                    new_params[key] = value * alpha + target[key] * (1 - alpha)
+
+            return new_params
+
+        new_target_params = soft_update_dict(self.average_value.params, self.target_value.params)
+        self.target_value = self.target_value.replace(params=new_target_params)
 
     def sample_action(self, state, key=jax.random.PRNGKey(123)):
         """
