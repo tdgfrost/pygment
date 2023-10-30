@@ -17,7 +17,7 @@ config = {'seed': 123,
           'epochs': int(2e6),
           'early_stopping': jnp.array(1000),
           'batch_size': 10000,
-          'expectile': 0.7,
+          'expectile': 0.8,
           'baseline_reward': 0,
           'n_episodes': 10000,
           'interval_probability': 0.25,
@@ -234,7 +234,7 @@ if __name__ == "__main__":
             loss_info.update(average_value_loss_info)
 
             episode_rewards = None
-            if epoch % 5 == 0:
+            if epoch % 100 == 0:
                 episode_rewards = evaluate_envs(agent, make_vec_env(lambda: make_variable_env('LunarLander-v2',
                                                                                               fn=extra_step_filter),
                                                                     n_envs=1),
@@ -250,7 +250,7 @@ if __name__ == "__main__":
                                   'critic_loss': loss_info['critic_loss'],
                                   'value_loss': loss_info['value_loss'],
                                   }
-                if epoch % 5 == 0:
+                if epoch % 100 == 0:
                     logged_results.update({'mean_reward': np.mean(episode_rewards)})
 
                 wandb.log(logged_results)
