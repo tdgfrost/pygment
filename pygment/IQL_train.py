@@ -27,7 +27,7 @@ config = {'seed': 123,
           'actor_lr': 0.001,
           'value_lr': 0.001,
           'critic_lr': 0.001,
-          'alpha_soft_update': 0.1,
+          'alpha_soft_update': 0.3,
           'hidden_dims': (256, 256),
           'clipping': 1,
           'top_bar_coord': 1.2,  # 0.9,
@@ -87,6 +87,12 @@ if __name__ == "__main__":
     loaded_data = move_to_gpu(loaded_data, gpu_keys=['states', 'actions', 'discounted_rewards', 'episode_rewards',
                                                      'next_states', 'dones', 'action_logprobs', 'len_actions',
                                                      'rewards'])
+
+    if 'filter_point' in config:
+        config['filter_point'] = jnp.array(config['filter_point'])
+    if 'alpha_soft_update' in config:
+        config['alpha_soft_update'] = jnp.array(config['alpha_soft_update'])
+    config['gamma'] = jnp.array(config['gamma'])
 
     # Make sure this matches with the desired dataset's extra_step metadata
     def extra_step_filter(x):
@@ -175,16 +181,9 @@ if __name__ == "__main__":
             discounted_rewards_for_interval_and_critic = value_batch.rewards + gammas * next_state_values_avg * (1 - value_batch.dones)
             # discounted_rewards_for_average = value_batch.rewards + gammas * next_state_values_int * (1 - value_batch.dones)
 
-            value_batch = alter_batch(value_batch, discounted_rewards=discounted_rewards_for_interval_and_critic)
-
-            # Remove excess data from the batch
-            batch = batch._asdict()
-            value_batch = value_batch._asdict()
-            for key in ['episode_rewards', 'next_states', 'next_actions', 'action_logprobs']:
-                batch[key] = None
-                value_batch[key] = None
-            batch = Batch(**batch)
-            value_batch = Batch(**value_batch)
+            value_batch = alter_batch(value_batch, discounted_rewards=discounted_rewards_for_interval_and_critic,
+                                      episode_rewards=None, next_states=None, next_actions=None,
+                                      action_logprobs=None)
 
             # Perform the update step for interval value and critic networks
             value_loss_info = agent.update_async(value_batch,
@@ -216,18 +215,19 @@ if __name__ == "__main__":
 
             advantages = critic_values - state_values
 
-            batch = alter_batch(batch, advantages=advantages)
+            batch = alter_batch(batch, advantages=advantages, episode_rewards=None, next_states=None, next_actions=None,
+                                      action_logprobs=None)
 
             # Filter for top half of actions
             if 'filter_point' not in config.keys():
-                filter_point = np.quantile(np.array(advantages), config['top_actions_quantile'])
+                filter_point = jnp.quantile(jnp.array(advantages), config['top_actions_quantile'])
             else:
                 filter_point = config['filter_point']
 
             batch = filter_dataset(batch, advantages > filter_point,
                                    target_keys=['states', 'actions', 'advantages'])
 
-            if (batch.advantages > filter_point).sum() > 0:
+            if (batch.advantages > filter_point).sum() > jnp.array(0):
                 loss_info = agent.update_async(batch,
                                                actor_loss_fn={'clone': 0},
                                                actor=True)
@@ -238,7 +238,7 @@ if __name__ == "__main__":
             loss_info.update(average_value_loss_info)
 
             episode_rewards = None
-            if epoch % 5 == 0:
+            if epoch % 100 == 0:
                 episode_rewards = evaluate_envs(agent, make_vec_env(lambda: make_variable_env('LunarLander-v2',
                                                                                               fn=extra_step_filter),
                                                                     n_envs=1),
@@ -254,7 +254,7 @@ if __name__ == "__main__":
                                   'critic_loss': loss_info['critic_loss'],
                                   'value_loss': loss_info['value_loss'],
                                   }
-                if epoch % 5 == 0:
+                if epoch % 100 == 0:
                     logged_results.update({'mean_reward': np.mean(episode_rewards)})
 
                 wandb.log(logged_results)
