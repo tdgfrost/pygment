@@ -1,6 +1,6 @@
 from core.net import Model, ValueNet, ActorNet, DoubleCriticNet, CriticNet
 from core.common import Batch, InfoDict
-from update.actions import _update_jit, _update_value_jit, _update_critic_jit, _update_actor_jit, _update_interval_jit
+from update.actions import _update_jit, _update_value_jit, _update_critic_jit, _update_actor_jit, _update_advantage_jit
 
 import os
 import datetime as dt
@@ -58,7 +58,7 @@ class BaseAgent:
         for key, val in batch.items():
             if val is None:
                 continue
-            if type(val) == list:
+            elif isinstance(val, list):
                 batch[key] = [val[i] for i in idxs]
             elif key == 'episode_rewards':
                 batch[key] = val
@@ -164,12 +164,19 @@ class IQLAgent(BaseAgent):
                                   optim=optax.adam(learning_rate=value_lr),
                                   continual_learning=continual_learning)
 
-        self.interval = Model.create(CriticNet(hidden_dims, len(self.intervals_unique)),
-                                     inputs=[self.value_key, observations],
-                                     optim=optax.adam(learning_rate=value_lr),
-                                     continual_learning=continual_learning)
+        self.average_value = Model.create(ValueNet(hidden_dims, 1),
+                                          inputs=[self.value_key, observations],
+                                          optim=optax.adam(learning_rate=value_lr),
+                                          continual_learning=continual_learning)
 
-        self.networks = [self.actor, self.critic, self.value, self.interval]
+        self.target_value = Model.create(ValueNet(hidden_dims, 1),
+                                          inputs=[self.value_key, observations],
+                                          optim=optax.adam(learning_rate=value_lr),
+                                          continual_learning=continual_learning)
+
+        self.sync_target(1.0)
+
+        self.networks = [self.actor, self.critic, self.value, self.average_value, self.target_value]
 
     def update(self, batch: Batch, **kwargs) -> InfoDict:
         """
@@ -195,7 +202,7 @@ class IQLAgent(BaseAgent):
 
     def update_async(self, batch: Batch, actor: bool = False,
                      critic: bool = False, value: bool = False,
-                     interval: bool = False, **kwargs) -> InfoDict:
+                     average_value: bool = False, **kwargs) -> InfoDict:
         """
         Updates the agent's networks asynchronously.
 
@@ -203,7 +210,7 @@ class IQLAgent(BaseAgent):
         :param actor: whether to update the actor network.
         :param critic: whether to update the critic network.
         :param value: whether to update the value network.
-        :param interval: whether to update the interval network.
+        :param average_value: whether to update the average_value network.
         :return: an InfoDict object containing metadata.
         """
 
@@ -217,22 +224,39 @@ class IQLAgent(BaseAgent):
         new_value, value_info = _update_value_jit(
             self.value, batch, **kwargs) if value else (self.value, {})
 
-        new_interval, interval_info = _update_interval_jit(
-            self.interval, batch, **kwargs) if interval else (self.interval, {})
+        new_average_value, average_value_info = _update_value_jit(
+            self.average_value, batch, **kwargs) if average_value else (self.average_value, {})
 
         # Update the agent's networks with the updated copies
         self.rng = new_rng
         self.actor = new_actor
         self.critic = new_critic
         self.value = new_value
-        self.interval = new_interval
+        self.average_value = new_average_value
 
         # Return the metadata
         return {**critic_info,
                 **value_info,
                 **actor_info,
-                **interval_info,
+                **average_value_info,
                 }
+
+    def sync_target(self, alpha=0.01):
+        """
+        Soft update of the target value network.
+        """
+        def soft_update_dict(source, target):
+            new_params = {}
+            for key, value in source.items():
+                if isinstance(value, dict) and key in target:
+                    new_params[key] = soft_update_dict(value, target[key])
+                else:
+                    new_params[key] = value * alpha + target[key] * (1 - alpha)
+
+            return new_params
+
+        new_target_params = soft_update_dict(self.average_value.params, self.target_value.params)
+        self.target_value = self.target_value.replace(params=new_target_params)
 
     def sample_action(self, state, key=jax.random.PRNGKey(123)):
         """

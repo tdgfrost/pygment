@@ -76,7 +76,7 @@ def iql_loss(logits, batch, **kwargs):
     action_logprobs *= adv_filter
     """
     # EXPERIMENTAL - try to move towards positive advantages and away from negative advantages
-    adv_filter = jnp.exp(batch.advantages)
+    adv_filter = jnp.exp(kwargs['temperature'] * batch.advantages)
     action_logprobs *= adv_filter
 
     # Return the advantage-filtered logprobs
@@ -139,4 +139,13 @@ def log_softmax_cross_entropy(logits, labels, **kwargs):
     log_normalizers = jnp.log(jnp.sum(jnp.exp(logits), axis=-1))
 
     return log_normalizers - label_logits
+
+
+def binary_cross_entropy(logits, labels, **kwargs):
+    probs = nn.sigmoid(logits)
+    probs = jnp.clip(probs, 1e-6, 1 - 1e-6)
+    log_0 = jnp.log(probs)
+    log_1 = jnp.log(1 - probs)
+    loss = labels * log_0 + (1 - labels) * log_1
+    return -loss
 

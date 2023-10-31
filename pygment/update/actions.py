@@ -1,4 +1,4 @@
-from update.critic import update_q, update_v, update_interval
+from update.critic import update_q, update_v, update_advantage
 from update.actor import update_policy
 from core.common import Batch
 
@@ -70,12 +70,12 @@ def _update_value_jit(
 
 
 @jit
-def _update_interval_jit(
-    interval: Model, batch: Batch, **kwargs
+def _update_advantage_jit(
+    advantage: Model, batch: Batch, **kwargs
 ) -> tuple[Model, dict[Any, Any]]:
 
-    new_interval, interval_info = update_interval(interval, batch, **kwargs)
+    new_advantage, advantage_info = update_advantage(advantage, batch, **kwargs)
 
-    return new_interval, {
-        **interval_info
+    return new_advantage, {
+        **advantage_info
     }
