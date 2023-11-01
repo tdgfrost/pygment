@@ -276,7 +276,7 @@ def downsample_batch(batch: Batch, random_key, steps=None):
     return Batch(**downsampled_batch), random_key
 
 
-def alter_batch(batch, **kwargs):
+def alter_batch(batch: Batch, **kwargs: object) -> Batch:
     """
     Alter the batch by adding or removing features
     :param batch: Batch object

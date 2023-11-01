@@ -206,7 +206,8 @@ class ActorNet(nn.Module):
         observations = (observations - input_mean) / input_std
 
         # Forward pass with the MLP
-        layer_outputs, logits = MLP((*self.hidden_dims, self.action_dims))(observations)
+        layer_outputs, logits = MLP((*self.hidden_dims, self.action_dims),
+                                    activations=self.activations)(observations)
 
         # Return the output
         return {'MLP_0': layer_outputs}, logits

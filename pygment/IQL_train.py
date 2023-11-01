@@ -10,7 +10,7 @@ import flax.linen as nn
 # Set jax to CPU
 # jax.config.update('jax_platform_name', 'cpu')
 # jax.config.update("jax_debug_nans", True)
-jax.config.update('jax_disable_jit', True)
+# jax.config.update('jax_disable_jit', True)
 
 # Define config file - could change to FLAGS at some point
 config = {'seed': 123,
@@ -98,6 +98,7 @@ if __name__ == "__main__":
     # config['gamma'] = jnp.array(config['gamma'])
     config['alpha_soft_update'] = jnp.array(config['alpha_soft_update'])
 
+
     # Make sure this matches with the desired dataset's extra_step metadata
     def extra_step_filter(x):
         # If tilted left
@@ -107,6 +108,7 @@ if __name__ == "__main__":
                 return config['step_delay']
         # Otherwise, normal time steps (no delay)
         return 0
+
 
     # Train agent
     def train(data):
@@ -157,20 +159,18 @@ if __name__ == "__main__":
                                 states=batch.states + noise,
                                 next_states=batch.next_states + noise)
             """
-            # value_batch, random_key = downsample_batch(batch, random_key, config['batch_size'])
-            value_batch = batch
             # Use TD learning for the value and critic networks
-            gammas = np.ones(shape=len(value_batch.rewards)) * config['gamma']
-            gammas = np.power(gammas, np.array(value_batch.intervals))
+            gammas = np.ones(shape=len(batch.rewards)) * config['gamma']
+            gammas = np.power(gammas, np.array(batch.intervals))
 
-            next_state_values = np.array(agent.target_value(value_batch.next_states)[1])
-            discounted_rewards = np.array(value_batch.rewards) + gammas * next_state_values * (1 - np.array(value_batch.dones))
+            next_state_values = np.array(agent.target_value(batch.next_states)[1])
+            discounted_rewards = np.array(batch.rewards) + gammas * next_state_values * (1 - np.array(batch.dones))
 
-            value_batch = alter_batch(value_batch, discounted_rewards=jnp.array(discounted_rewards), next_states=None,
-                                      dones=None, intervals=None, rewards=None)
+            batch = alter_batch(batch, discounted_rewards=jnp.array(discounted_rewards), next_states=None,
+                                dones=None, intervals=None, rewards=None)
 
             # Perform the update step for interval value and critic networks
-            value_loss_info = agent.update_async(value_batch,
+            value_loss_info = agent.update_async(batch,
                                                  value_loss_fn={'expectile': 0},
                                                  critic_loss_fn={'mc_mse': 0},
                                                  expectile=config['expectile'],
@@ -189,9 +189,8 @@ if __name__ == "__main__":
 
             advantages = critic_values - state_values
 
-            batch = alter_batch(batch, discounted_rewards=None,
-                                next_states=None, dones=None, intervals=None, rewards=None,
-                                len_actions=None, next_len_actions=None)
+            batch = alter_batch(batch, discounted_rewards=None, next_states=None, dones=None, intervals=None,
+                                rewards=None, len_actions=None, next_len_actions=None)
 
             # Filter for top half of actions
             if 'filter_point' not in config.keys():
