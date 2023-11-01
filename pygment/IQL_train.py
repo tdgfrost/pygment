@@ -48,7 +48,7 @@ if __name__ == "__main__":
 
     if logging_bool:
         wandb.init(
-            project="Cartpole-IQL",
+            project="CartPole-25pct-R-124",
             config=config,
         )
 
