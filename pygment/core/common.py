@@ -316,7 +316,7 @@ def filter_dataset(batch: Batch, boolean_identity, target_keys: list):
             if type(val) == list:
                 filtered_batch[key] = [item for idx, item in zip(boolean_identity, val) if idx]
             else:
-                filtered_batch[key] = val[boolean_identity]
+                filtered_batch[key] = jnp.array(np.array(val)[np.array(boolean_identity)])
 
     return Batch(**filtered_batch)
 

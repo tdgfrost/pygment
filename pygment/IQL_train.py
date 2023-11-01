@@ -95,10 +95,8 @@ if __name__ == "__main__":
                                                      'next_states', 'dones', 'action_logprobs', 'len_actions',
                                                      'rewards'])
 
-    config['gamma'] = jnp.array(config['gamma'])
+    # config['gamma'] = jnp.array(config['gamma'])
     config['alpha_soft_update'] = jnp.array(config['alpha_soft_update'])
-    if 'filter_point' in config.keys():
-        config['filter_point'] = jnp.array(config['filter_point'])
 
     # Make sure this matches with the desired dataset's extra_step metadata
     def extra_step_filter(x):
@@ -137,8 +135,6 @@ if __name__ == "__main__":
               ' ' * 2, '\U0001F483' * 3, '\n', '=' * 50, '\n')
 
         total_training_steps = jnp.array(0)
-        bool_one = jnp.array(1)
-        bool_zero = jnp.array(0)
 
         if logging_bool:
             # Keep track of the best loss values
@@ -164,13 +160,13 @@ if __name__ == "__main__":
             # value_batch, random_key = downsample_batch(batch, random_key, config['batch_size'])
             value_batch = batch
             # Use TD learning for the value and critic networks
-            gammas = jnp.ones(shape=len(value_batch.rewards)) * config['gamma']
-            gammas = jnp.power(gammas, value_batch.intervals)
+            gammas = np.ones(shape=len(value_batch.rewards)) * config['gamma']
+            gammas = np.power(gammas, np.array(value_batch.intervals))
 
-            next_state_values = agent.target_value(value_batch.next_states)[1]
-            discounted_rewards = value_batch.rewards + gammas * next_state_values * (bool_one - value_batch.dones)
+            next_state_values = np.array(agent.target_value(value_batch.next_states)[1])
+            discounted_rewards = np.array(value_batch.rewards) + gammas * next_state_values * (1 - np.array(value_batch.dones))
 
-            value_batch = alter_batch(value_batch, discounted_rewards=discounted_rewards, next_states=None,
+            value_batch = alter_batch(value_batch, discounted_rewards=jnp.array(discounted_rewards), next_states=None,
                                       dones=None, intervals=None, rewards=None)
 
             # Perform the update step for interval value and critic networks
@@ -206,7 +202,7 @@ if __name__ == "__main__":
             batch = filter_dataset(batch, advantages > filter_point,
                                    target_keys=['states', 'actions', 'advantages'])
 
-            if (batch.advantages > filter_point).sum() > bool_zero:
+            if (np.array(batch.advantages) > filter_point).sum() > 0:
                 loss_info = agent.update_async(batch,
                                                actor_loss_fn={'clone': 0},
                                                actor=True)
