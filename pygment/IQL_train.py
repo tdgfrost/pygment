@@ -15,10 +15,13 @@ jax.config.update('jax_platform_name', 'cpu')
 # Define config file - could change to FLAGS at some point
 config = {'seed': 123,
           'epochs': int(2e6),
+          'env_id': 'CartPole-v1',
           'early_stopping': jnp.array(1000),
           'batch_size': 10000,
-          'expectile': 0.5,
-          'baseline_reward': 0,
+          'step_delay': 2,
+          'sync_steps': 5,
+          'expectile': 0.7,
+          'baseline_reward': 124,
           'n_episodes': 10000,
           'interval_probability': 0.25,
           'top_actions_quantile': 0.5,
@@ -47,7 +50,7 @@ if __name__ == "__main__":
 
     if logging_bool:
         wandb.init(
-            project="IQL-VariableTimeSteps-Formal",
+            project="Cartpole-IQL",
             config=config,
         )
 
@@ -60,8 +63,8 @@ if __name__ == "__main__":
     baseline_reward = config['baseline_reward']
     interval_probability = config['interval_probability']
     loaded_data = load_data(
-        path=f"./offline_datasets/LunarLander/{interval_probability}_probability_5_steps/"
-             f"dataset_reward_{baseline_reward}_{config['n_episodes']}_episodes.pkl",
+        path=f"./offline_datasets/CartPole/{interval_probability}_probability/"
+             f"dataset_reward_{baseline_reward}_{config['step_delay']}_steps_{config['n_episodes']}_episodes.pkl",
         scale='standardise',
         gamma=config['gamma'])
 
@@ -90,18 +93,18 @@ if __name__ == "__main__":
 
     # Make sure this matches with the desired dataset's extra_step metadata
     def extra_step_filter(x):
-        # If in rectangle
-        if config['bottom_bar_coord'] < x[1] < config['top_bar_coord']:
+        # If tilted left
+        if x[2] < 0:
             # Slow zone
             if np.random.uniform() < interval_probability:
-                return 5
+                return config['step_delay']
         # Otherwise, normal time steps (no delay)
         return 0
 
     # Train agent
     def train(data):
         # Create agent
-        dummy_env = make_env('LunarLander-v2')
+        dummy_env = make_env(config['env_id'])
 
         agent = IQLAgent(observations=dummy_env.observation_space.sample(),
                          action_dim=dummy_env.action_space.n,
@@ -214,8 +217,8 @@ if __name__ == "__main__":
             loss_info.update(value_loss_info)
 
             episode_rewards = None
-            if epoch % 5 == 0:
-                episode_rewards = evaluate_envs(agent, make_vec_env(lambda: make_variable_env('LunarLander-v2',
+            if epoch % config['sync_steps'] == 0:
+                episode_rewards = evaluate_envs(agent, make_vec_env(lambda: make_variable_env(config['env_id'],
                                                                                               fn=extra_step_filter),
                                                                     n_envs=1),
                                                 verbose=False)
@@ -229,7 +232,7 @@ if __name__ == "__main__":
                                   'critic_loss': loss_info['critic_loss'],
                                   'value_loss': loss_info['value_loss'],
                                   }
-                if epoch % 5 == 0:
+                if epoch % config['sync_steps'] == 0:
                     logged_results.update({'mean_reward': np.mean(episode_rewards)})
 
                 wandb.log(logged_results)
@@ -245,7 +248,7 @@ if __name__ == "__main__":
         n_envs = 1000
         print('\n\n', '=' * 50, '\n', ' ' * 3, '\U0001F514' * 3, ' ' * 1, f'Evaluating network', ' ' * 2,
               '\U0001F514' * 3, '\n', '=' * 50)
-        episode_rewards = evaluate_envs(agent, make_vec_env(lambda: make_variable_env('LunarLander-v2',
+        episode_rewards = evaluate_envs(agent, make_vec_env(lambda: make_variable_env(config['env_id'],
                                                                                       fn=extra_step_filter),
                                                             n_envs=n_envs))
         print(f'\nMedian reward: {np.median(episode_rewards)}')
@@ -268,7 +271,7 @@ if __name__ == "__main__":
     # ============================================================== #
 
     if evaluate_bool:
-        dummy_env = make_env('LunarLander-v2')
+        dummy_env = make_env(config['env_id'])
 
         agent = IQLAgent(observations=dummy_env.observation_space.sample(),
                          action_dim=dummy_env.action_space.n,
@@ -286,7 +289,7 @@ if __name__ == "__main__":
 
         print('\n\n', '=' * 50, '\n', ' ' * 3, '\U0001F514' * 3, ' ' * 1, f'Evaluating network', ' ' * 2,
               '\U0001F514' * 3, '\n', '=' * 50)
-        results = evaluate_envs(agent, make_vec_env(lambda: make_variable_env('LunarLander-v2',
+        results = evaluate_envs(agent, make_vec_env(lambda: make_variable_env(config['env_id'],
                                                                               fn=extra_step_filter),
                                                     n_envs=envs_to_evaluate))
         print(f'\nMedian reward: {np.median(results)}')
@@ -295,5 +298,5 @@ if __name__ == "__main__":
         # Animate the agent's performance
         print('\n\n', '=' * 50, '\n', ' ' * 3, '\U0001F4FA' * 3, ' ' * 1, f'Generating gifs', ' ' * 2,
               '\U0001F4FA' * 3, '\n', '=' * 50)
-        env = make_variable_env('LunarLander-v2', fn=extra_step_filter, render_mode='rgb_array')
+        env = make_variable_env(config['env_id'], fn=extra_step_filter, render_mode='rgb_array')
         run_and_animate(agent, env, runs=20, directory=os.path.join(model_dir, 'gifs'), **config)
