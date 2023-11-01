@@ -5,7 +5,9 @@ from core.common import filter_to_action
 
 
 def convert_logits_to_action_logprobs(logits, actions, **kwargs):
-    logprobs = nn.log_softmax(logits, axis=-1)
+    logprobs = jnp.exp(logits)
+    logprobs = logprobs / jnp.sum(logprobs, -1).reshape(-1, 1)
+    logprobs = jnp.log(logprobs)
 
     """
     This is until jnp.take_along_axis works for metal backend
@@ -23,6 +25,7 @@ def convert_logits_to_action_logprobs(logits, actions, **kwargs):
                                          collapsed_slice_dims=tuple([0, 1]),
                                          start_index_map=tuple([0, 1])), tuple([1, 1]))
     """
+    # This should be jnp.take_along_axis(logprobs, actions.reshape(-1, 1), -1)
     action_logprobs = filter_to_action(logprobs, actions)
 
     action_logprobs = jnp.where(jnp.isinf(action_logprobs),

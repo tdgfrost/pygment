@@ -10,7 +10,7 @@ import flax.linen as nn
 # Set jax to CPU
 # jax.config.update('jax_platform_name', 'cpu')
 # jax.config.update("jax_debug_nans", True)
-# jax.config.update('jax_disable_jit', True)
+jax.config.update('jax_disable_jit', True)
 
 # Define config file - could change to FLAGS at some point
 config = {'seed': 123,
@@ -43,7 +43,7 @@ if __name__ == "__main__":
     from core.envs import make_variable_env
 
     # Set whether to train and/or evaluate
-    logging_bool = True
+    logging_bool = False
     evaluate_bool = False
 
     if logging_bool:
@@ -189,7 +189,7 @@ if __name__ == "__main__":
 
             advantages = critic_values - state_values
 
-            batch = alter_batch(batch, advantages=advantages, discounted_rewards=None,
+            batch = alter_batch(batch, discounted_rewards=None,
                                 next_states=None, dones=None, intervals=None, rewards=None,
                                 len_actions=None, next_len_actions=None)
 
@@ -202,7 +202,7 @@ if __name__ == "__main__":
             batch = filter_dataset(batch, advantages > filter_point,
                                    target_keys=['states', 'actions', 'advantages'])
 
-            if (np.array(batch.advantages) > filter_point).sum() > 0:
+            if (np.array(advantages) > filter_point).sum() > 0:
                 loss_info = agent.update_async(batch,
                                                actor_loss_fn={'clone': 0},
                                                actor=True)
