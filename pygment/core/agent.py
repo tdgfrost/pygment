@@ -8,6 +8,7 @@ import pickle
 
 import numpy as np
 import jax
+import jax.numpy as jnp
 from jax import jit
 import flax.linen as nn
 import optax
@@ -49,9 +50,11 @@ class BaseAgent:
         :return: a Batch object of size batch_size.
         """
         idxs = np.random.default_rng().choice(len(data.states),
-                                              size=batch_size,
-                                              replace=False,
-                                              p=p)
+                                               size=batch_size,
+                                               replace=False,
+                                               p=p)
+
+        idxs = jnp.array(idxs)
 
         batch = data._asdict()
 
@@ -85,8 +88,8 @@ class BaseAgent:
                 network.__dict__['input_std'] = saved_data['input_std']
 
         else:
-            input_mean = np.mean(inputs, axis=0)
-            input_std = np.maximum(np.std(inputs, axis=0), 1e-8)
+            input_mean = jnp.mean(inputs, axis=0)
+            input_std = jnp.maximum(np.std(inputs, axis=0), 1e-8)
             with open(os.path.join(self.path, 'standardised_data.pkl'), 'wb') as f:
                 pickle.dump({'input_mean': input_mean,
                              'input_std': input_std}, f)
@@ -165,9 +168,9 @@ class IQLAgent(BaseAgent):
                                   continual_learning=continual_learning)
 
         self.target_value = Model.create(ValueNet(hidden_dims, 1),
-                                          inputs=[self.value_key, observations],
-                                          optim=optax.adam(learning_rate=value_lr),
-                                          continual_learning=continual_learning)
+                                         inputs=[self.value_key, observations],
+                                         optim=optax.adam(learning_rate=value_lr),
+                                         continual_learning=continual_learning)
 
         self.sync_target(alpha=1.0)
 
@@ -233,13 +236,16 @@ class IQLAgent(BaseAgent):
         """
         Soft update of the target value network.
         """
+        bool_one = jnp.array(1)
+        alpha = jnp.array(alpha)
+
         def soft_update_dict(source, target):
             new_params = {}
             for key, value in source.items():
                 if isinstance(value, dict) and key in target:
                     new_params[key] = soft_update_dict(value, target[key])
                 else:
-                    new_params[key] = value * alpha + target[key] * (1 - alpha)
+                    new_params[key] = value * alpha + target[key] * (bool_one - alpha)
 
             return new_params
 

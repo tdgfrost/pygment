@@ -8,7 +8,7 @@ import wandb
 import flax.linen as nn
 
 # Set jax to CPU
-jax.config.update('jax_platform_name', 'cpu')
+# jax.config.update('jax_platform_name', 'cpu')
 # jax.config.update("jax_debug_nans", True)
 # jax.config.update('jax_disable_jit', True)
 
@@ -20,7 +20,7 @@ config = {'seed': 123,
           'batch_size': 10000,
           'step_delay': 2,
           'sync_steps': 5,
-          'expectile': 0.7,
+          'expectile': 0.5,
           'baseline_reward': 124,
           'n_episodes': 10000,
           'interval_probability': 0.25,
@@ -30,17 +30,15 @@ config = {'seed': 123,
           'actor_lr': 0.001,
           'value_lr': 0.001,
           'critic_lr': 0.001,
-          'alpha_soft_update': 0.1,
+          'alpha_soft_update': 1,
           'hidden_dims': (256, 256),
-          'clipping': 1,
-          'top_bar_coord': 1.2,  # 0.9,
-          'bottom_bar_coord': 0.8,  # 0.5
+          'clipping': 1
           }
 
 if __name__ == "__main__":
     from core.agent import IQLAgent
     from core.common import (load_data, progress_bar, alter_batch, Batch, filter_to_action,
-                             calc_traj_discounted_rewards, move_to_gpu, filter_dataset, downsample_batch)
+                             calc_traj_discounted_rewards, move_to_gpu, filter_dataset)
     from core.evaluate import evaluate_envs, run_and_animate
     from core.envs import make_variable_env
 
@@ -81,7 +79,7 @@ if __name__ == "__main__":
     next_len_actions = jnp.array(next_len_actions)
 
     # Calculate rewards
-    rewards = calc_traj_discounted_rewards(loaded_data.rewards, config['gamma'])
+    rewards = jnp.array(calc_traj_discounted_rewards(loaded_data.rewards, config['gamma']))
     loaded_data = alter_batch(loaded_data, rewards=rewards, len_actions=len_actions, next_len_actions=next_len_actions,
                               intervals=intervals)
     del rewards
@@ -90,6 +88,11 @@ if __name__ == "__main__":
     loaded_data = move_to_gpu(loaded_data, gpu_keys=['states', 'actions', 'discounted_rewards', 'episode_rewards',
                                                      'next_states', 'dones', 'action_logprobs', 'len_actions',
                                                      'rewards'])
+
+    config['gamma'] = jnp.array(config['gamma'])
+    config['alpha_soft_update'] = jnp.array(config['alpha_soft_update'])
+    if 'filter_point' in config.keys():
+        config['filter_point'] = jnp.array(config['filter_point'])
 
     # Make sure this matches with the desired dataset's extra_step metadata
     def extra_step_filter(x):
@@ -124,14 +127,12 @@ if __name__ == "__main__":
         # Standardise the state inputs
         agent.standardise_inputs(data.states)
 
-        # For advantage-prioritised cloning
-        sample_prob = None  # np.array(data.intervals / data.intervals.sum())
-
         print('\n\n', '=' * 50, '\n', ' ' * 3, '\U0001F483' * 3, ' ' * 1, f'Training network',
               ' ' * 2, '\U0001F483' * 3, '\n', '=' * 50, '\n')
 
         total_training_steps = jnp.array(0)
-        count = jnp.array(0)
+        bool_one = jnp.array(1)
+        bool_zero = jnp.array(0)
 
         if logging_bool:
             # Keep track of the best loss values
@@ -139,14 +140,12 @@ if __name__ == "__main__":
             wandb.define_metric('critic_loss', summary='min')
             wandb.define_metric('value_loss', summary='min')
 
-        random_key = jax.random.PRNGKey(123)
         for epoch in range(config['epochs']):
             if epoch > 0 and epoch % 100 == 0:
                 print(f'\n\n{epoch} epochs complete!\n')
             progress_bar(epoch % 100, 100)
             batch, idxs = agent.sample(data,
-                                       config['batch_size'],
-                                       p=sample_prob)
+                                       config['batch_size'])
 
             # Add Gaussian noise - remember last two positions are boolean
             """
@@ -163,7 +162,7 @@ if __name__ == "__main__":
             gammas = jnp.power(gammas, value_batch.intervals)
 
             next_state_values = agent.target_value(value_batch.next_states)[1]
-            discounted_rewards = value_batch.rewards + gammas * next_state_values * (1 - value_batch.dones)
+            discounted_rewards = value_batch.rewards + gammas * next_state_values * (bool_one - value_batch.dones)
 
             value_batch = alter_batch(value_batch, discounted_rewards=discounted_rewards)
 
@@ -207,7 +206,7 @@ if __name__ == "__main__":
             batch = filter_dataset(batch, advantages > filter_point,
                                    target_keys=['states', 'actions', 'advantages'])
 
-            if (batch.advantages > filter_point).sum() > 0:
+            if (batch.advantages > filter_point).sum() > bool_zero:
                 loss_info = agent.update_async(batch,
                                                actor_loss_fn={'clone': 0},
                                                actor=True)
