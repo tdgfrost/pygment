@@ -1,6 +1,6 @@
 from core.net import Model, ValueNet, ActorNet, DoubleCriticNet, CriticNet
 from core.common import Batch, InfoDict
-from update.actions import _update_jit, _update_value_jit, _update_critic_jit, _update_actor_jit, _update_advantage_jit
+from update.actions import _update_jit, _update_value_jit, _update_critic_jit, _update_actor_jit
 
 import os
 import datetime as dt
@@ -128,7 +128,7 @@ class IQLAgent(BaseAgent):
 
         # Set random seed
         rng = jax.random.PRNGKey(seed)
-        self.rng, self.actor_key, self.critic_key, self.value_key = jax.random.split(rng, 4)
+        self.actor_key, self.critic_key, self.value_key = jax.random.split(rng, 3)
 
         # Set parameters
         self.action_dim = action_dim
@@ -337,15 +337,13 @@ class PPOAgent(BaseAgent):
         """
 
         # Create an updated copy of all the networks
-        new_rng, new_actor, _, new_value, info = _update_jit(
-            rng=self.rng,
+        new_actor, _, new_value, info = _update_jit(
             actor=self.actor,
             value=self.value,
             batch=batch,
             **kwargs)
 
         # Update the agent's networks with the updated copies
-        self.rng = new_rng
         self.actor = new_actor
         self.value = new_value
 
