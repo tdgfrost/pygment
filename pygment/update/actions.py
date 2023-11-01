@@ -66,14 +66,3 @@ def _update_value_jit(
         **value_info
     }
 
-
-@jit
-def _update_advantage_jit(
-    advantage: Model, batch: Batch, **kwargs
-) -> tuple[Model, dict[Any, Any]]:
-
-    new_advantage, advantage_info = update_advantage(advantage, batch, **kwargs)
-
-    return new_advantage, {
-        **advantage_info
-    }

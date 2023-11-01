@@ -20,6 +20,8 @@ def update_policy(actor: Model, batch: Batch, **kwargs) -> Tuple[Model, InfoDict
                'iql': iql_loss,
                'clone': clone_behaviour}
 
+    states = batch.states
+
     def actor_loss_fn(actor_params: Params) -> tuple[Array, dict[str, Array]]:
         """
         Calculate the loss for the actor model
@@ -30,7 +32,7 @@ def update_policy(actor: Model, batch: Batch, **kwargs) -> Tuple[Model, InfoDict
 
         # Generate the logits for the actions
         layer_outputs, logits = actor.apply({'params': actor_params},
-                                            batch.states)
+                                            states)
 
         # Convert this to advantage-filtered logprobs - instead of overall mean, we take the 'mean' of the valid actions
         """
