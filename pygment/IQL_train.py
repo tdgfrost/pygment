@@ -198,11 +198,11 @@ if __name__ == "__main__":
             else:
                 filter_point = config['filter_point']
 
-            filter_array = np.where(advantages > filter_point)[0][:1000]
+            filter_array = np.where(advantages > filter_point)[0][:512]
             batch = filter_dataset(batch, filter_array,
                                    target_keys=['states', 'actions', 'advantages'])
 
-            if (np.array(advantages) > filter_point).sum() > 0:
+            if (np.array(advantages) > filter_point).sum() >= 512:
                 loss_info = agent.update_async(batch,
                                                actor_loss_fn={'clone': 0},
                                                actor=True)
