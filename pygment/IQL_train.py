@@ -198,7 +198,8 @@ if __name__ == "__main__":
             else:
                 filter_point = config['filter_point']
 
-            batch = filter_dataset(batch, advantages > filter_point,
+            filter_array = np.where(advantages > filter_point)[0][:1000]
+            batch = filter_dataset(batch, filter_array,
                                    target_keys=['states', 'actions', 'advantages'])
 
             if (np.array(advantages) > filter_point).sum() > 0:
