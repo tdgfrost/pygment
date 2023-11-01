@@ -66,6 +66,12 @@ if __name__ == "__main__":
         scale='standardise',
         gamma=config['gamma'])
 
+    # Remove excess data
+    loaded_data = loaded_data._asdict()
+    for key in ['episode_rewards', 'next_actions', 'action_logprobs']:
+        loaded_data[key] = None
+    loaded_data = Batch(**loaded_data)
+
     # Start by defining the intervals between actions (both the current and next action)
     # intervals = the actual number of steps between actions
     intervals = np.array([len(traj) for traj in loaded_data.rewards])
@@ -164,16 +170,8 @@ if __name__ == "__main__":
             next_state_values = agent.target_value(value_batch.next_states)[1]
             discounted_rewards = value_batch.rewards + gammas * next_state_values * (bool_one - value_batch.dones)
 
-            value_batch = alter_batch(value_batch, discounted_rewards=discounted_rewards)
-
-            # Remove excess data from the batch
-            batch = batch._asdict()
-            value_batch = value_batch._asdict()
-            for key in ['episode_rewards', 'next_states', 'next_actions', 'action_logprobs']:
-                batch[key] = None
-                value_batch[key] = None
-            batch = Batch(**batch)
-            value_batch = Batch(**value_batch)
+            value_batch = alter_batch(value_batch, discounted_rewards=discounted_rewards, next_states=None,
+                                      dones=None, intervals=None, rewards=None)
 
             # Perform the update step for interval value and critic networks
             value_loss_info = agent.update_async(value_batch,
@@ -195,7 +193,9 @@ if __name__ == "__main__":
 
             advantages = critic_values - state_values
 
-            batch = alter_batch(batch, advantages=advantages)
+            batch = alter_batch(batch, advantages=advantages, discounted_rewards=None,
+                                next_states=None, dones=None, intervals=None, rewards=None,
+                                len_actions=None, next_len_actions=None)
 
             # Filter for top half of actions
             if 'filter_point' not in config.keys():
@@ -236,7 +236,7 @@ if __name__ == "__main__":
 
                 wandb.log(logged_results)
 
-            if epoch == 100:
+            if epoch % 100 == 0:
                 # Save each model
                 agent.actor.save(os.path.join(model_dir, 'model_checkpoints/actor'))
                 agent.target_value.save(os.path.join(model_dir, 'model_checkpoints/target_value'))
