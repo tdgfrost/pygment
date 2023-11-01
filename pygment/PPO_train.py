@@ -5,6 +5,7 @@ import numpy as np
 import wandb
 from tqdm import tqdm
 from stable_baselines3.common.env_util import make_vec_env
+from math import ceil
 
 # Set jax to CPU
 jax.config.update('jax_platform_name', 'cpu')
@@ -13,7 +14,11 @@ jax.config.update('jax_platform_name', 'cpu')
 
 # Define config file - could change to FLAGS at some point
 config = {'seed': 123,
+          'env_id': 'CartPole-v1',
+          'step_delay': 2,
+          'sync_steps': 1,
           'epochs': int(1e6),
+          'end_training_steps': int(1e5),
           'continual_learning': True,
           'steps': None,
           'batch_size': 32,
@@ -38,16 +43,16 @@ if __name__ == "__main__":
     # ============================================================== #
 
     # Set whether to train and/or evaluate
-    logging_bool = True
+    logging_bool = False
     evaluate_bool = False
 
     # Create variable environment template
     def extra_step_filter(x):
-        # If in rectangle
-        if config['bottom_bar_coord'] < x[1] < config['top_bar_coord']:
-            # with p == 0.5, delay by 20 steps
-            if np.random.uniform() < 0.05:
-                return 5
+        # If tilted to the left
+        if x[2] < 0:
+            # with p == 0.25, delay by a further 5 steps (i.e., 6 total)
+            if np.random.uniform() < 0.25:
+                return config['step_delay']
         # Otherwise, normal time steps (no delay)
         return 0
 
@@ -63,7 +68,7 @@ if __name__ == "__main__":
 
     def train():
         # Create agent
-        dummy_env = make_env('LunarLander-v2')
+        dummy_env = make_env(config['env_id'])
         agent = PPOAgent(observations=dummy_env.observation_space.sample(),
                          action_dim=dummy_env.action_space.n,
                          opt_decay_schedule="cosine",
@@ -77,7 +82,7 @@ if __name__ == "__main__":
             f.write(str(config))
             f.close()
 
-        envs = make_vec_env(lambda: make_variable_env('LunarLander-v2', fn=extra_step_filter),
+        envs = make_vec_env(lambda: make_variable_env(config['env_id'], fn=extra_step_filter),
                             n_envs=config['n_envs'])
 
         # ============================================================== #
@@ -147,7 +152,7 @@ if __name__ == "__main__":
                     critic_loss += loss_info['value_loss'].item()
 
             # Update the total training steps
-            total_training_steps += len(batch.actions) // config['batch_size'] * config['batch_size'] * update_iters
+            total_training_steps += len(batch.actions) // config['batch_size'] * config['batch_size']
 
             # Reset the jax key
             random_key = jax.random.split(random_key, 1)[0]
@@ -166,21 +171,28 @@ if __name__ == "__main__":
             batch = alter_batch(batch, **removed_data)
 
             # Select a random subset of the batch
-            batch, random_key = downsample_batch(flatten_batch(batch), random_key, steps=config['steps'])
+            remaining_steps = ceil((config['end_training_steps'] - total_training_steps) /
+                                   config['batch_size'])*config['batch_size']
+
+            if remaining_steps < sum([len(i) for i in batch.actions]):
+                config['steps'] = remaining_steps
+
+            batch, random_key = downsample_batch(flatten_batch(batch), random_key,
+                                                     steps=config['steps'])
 
             # Calculate the average reward, log and print it
             average_reward = np.median(excess_data['episode_rewards'])
             print(f'\nEpisode rewards: {average_reward}\n')
 
             # Checkpoint the model
-            if epoch % 5 == 0:
+            if epoch % config['sync_steps'] == 0:
                 print('Evaluating...')
                 results = evaluate_envs(agent,
-                                        environments=make_vec_env(lambda: make_variable_env('LunarLander-v2',
+                                        environments=make_vec_env(lambda: make_variable_env(config['env_id'],
                                                                                             fn=extra_step_filter),
                                                                   n_envs=1000))
-                evaluate_reward = np.median(results)
-                print('\n\n', '=' * 50, f'\nMedian reward: {np.median(results)}, Mean reward: {np.mean(results)}, Best reward: {best_reward}\n',
+                evaluate_reward = np.mean(results)
+                print('\n\n', '=' * 50, f'\nMedian reward: {np.median(results)}, Mean reward: {np.mean(results)}, Best reward: {best_reward}, Training steps: {total_training_steps}\n',
                       '=' * 50,
                       '\n')
                 if int(evaluate_reward) > best_reward:
@@ -190,6 +202,7 @@ if __name__ == "__main__":
                         os.path.join(model_dir, f'model_checkpoints/actor_{best_reward}'))  # if actor else None
                     agent.value.save(
                         os.path.join(model_dir, f'model_checkpoints/value_{best_reward}'))  # if value else None
+
             """
             if int(average_reward) > best_reward:
                 
@@ -213,15 +226,16 @@ if __name__ == "__main__":
                            'gradient_step': epoch,
                            'training_step': total_training_steps}
 
-                if epoch % 5 == 0:
+                if epoch % config['sync_steps'] == 0:
                     logged_results['episode_reward'] = evaluate_reward
 
                 # Log results
                 wandb.log(logged_results)
 
-            if best_reward > 300:
-                agent.actor.save(os.path.join(model_dir, 'model_checkpoints/actor_best'))  # if actor else None
+            if total_training_steps >= config['end_training_steps']:
+                agent.actor.save(os.path.join(model_dir, 'model_checkpoints/actor_best'))
                 agent.value.save(os.path.join(model_dir, 'model_checkpoints/value_best'))
+                print('='*50, '\nTraining complete!\n', '='*50)
                 break
 
         return agent
@@ -235,7 +249,7 @@ if __name__ == "__main__":
 
     if evaluate_bool:
         # Create agent
-        dummy_env = make_env('LunarLander-v2')
+        dummy_env = make_env(config['env_id'])
         agent = PPOAgent(observations=dummy_env.observation_space.sample(),
                          action_dim=dummy_env.action_space.n,
                          opt_decay_schedule="cosine",
@@ -248,7 +262,7 @@ if __name__ == "__main__":
         agent.value = agent.value.load(os.path.join(model_dir, 'value_best'))
 
         # Create the vectorised set of environments
-        envs = make_vec_env(lambda: make_variable_env('LunarLander-v2', fn=extra_step_filter),
+        envs = make_vec_env(lambda: make_variable_env(config['env_id'], fn=extra_step_filter),
                             n_envs=5000)
 
         # Calculate the median reward
@@ -261,5 +275,5 @@ if __name__ == "__main__":
         # Animate the agent's performance
         print('\n\n', '=' * 50, '\n', ' ' * 3, '\U0001F4FA' * 3, ' ' * 1, f'Generating gifs', ' ' * 2,
               '\U0001F4FA' * 3, '\n', '=' * 50)
-        env = make_variable_env('LunarLander-v2', fn=extra_step_filter, render_mode='rgb_array')
+        env = make_variable_env(config['env_id'], fn=extra_step_filter, render_mode='rgb_array')
         run_and_animate(agent, env, runs=20, directory=os.path.join(agent.path, 'gifs'), **config)
