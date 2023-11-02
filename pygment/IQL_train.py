@@ -5,10 +5,9 @@ import os
 import jax.numpy as jnp
 from stable_baselines3.common.env_util import make_vec_env
 import wandb
-import flax.linen as nn
 
 # Set jax to CPU
-jax.config.update('jax_platform_name', 'cpu')
+# jax.config.update('jax_platform_name', 'cpu')
 # jax.config.update("jax_debug_nans", True)
 # jax.config.update('jax_disable_jit', True)
 
@@ -91,11 +90,7 @@ if __name__ == "__main__":
                                                      'next_states', 'dones', 'action_logprobs', 'len_actions',
                                                      'rewards'])
 
-    if 'filter_point' in config:
-        config['filter_point'] = jnp.array(config['filter_point'])
-    if 'alpha_soft_update' in config:
-        config['alpha_soft_update'] = jnp.array(config['alpha_soft_update'])
-    config['gamma'] = jnp.array(config['gamma'])
+    config['alpha_soft_update'] = jnp.array(config['alpha_soft_update'])
 
     # Make sure this matches with the desired dataset's extra_step metadata
     def extra_step_filter(x):
@@ -137,7 +132,6 @@ if __name__ == "__main__":
               ' ' * 2, '\U0001F483' * 3, '\n', '=' * 50, '\n')
 
         total_training_steps = jnp.array(0)
-        count = jnp.array(0)
 
         if logging_bool:
             # Keep track of the best loss values
@@ -163,33 +157,27 @@ if __name__ == "__main__":
                                 states=batch.states + noise,
                                 next_states=batch.next_states + noise)
             """
-            # value_batch, random_key = downsample_batch(batch, random_key, config['batch_size'])
-            value_batch = batch
 
             # Use TD learning for the value, average_value and critic networks
-            gammas = jnp.ones(shape=len(value_batch.rewards)) * config['gamma']
-            gammas = jnp.power(gammas, value_batch.intervals)
+            gammas = np.ones(shape=len(batch.rewards)) * config['gamma']
+            gammas = np.power(gammas, np.array(batch.intervals))
 
-            # For Interval Value (from average value):
-            next_state_values_avg = agent.target_value(value_batch.next_states)[1]
+            # For Interval Value and Critic (from average value):
+            next_state_values_avg = np.array(agent.target_value(batch.next_states)[1])
+
+            discounted_rewards_for_interval_and_critic = (np.array(batch.rewards)
+                                                          + gammas * next_state_values_avg
+                                                          * (1 - np.array(batch.dones)))
 
             # For Average Value (from interval value):
-            discounted_rewards_for_average = agent.value(value_batch.states)[1]
-            discounted_rewards_for_average = filter_to_action(discounted_rewards_for_average, value_batch.len_actions)
+            discounted_rewards_for_average = agent.value(batch.states)[1]
+            discounted_rewards_for_average = filter_to_action(discounted_rewards_for_average, batch.len_actions)
 
-            # For Critic value (from average value)
-            # next_state_values_int = agent.value(value_batch.next_states)[1]
-            # next_state_values_int = filter_to_action(next_state_values_int, value_batch.next_len_actions)
-
-            discounted_rewards_for_interval_and_critic = value_batch.rewards + gammas * next_state_values_avg * (1 - value_batch.dones)
-            # discounted_rewards_for_average = value_batch.rewards + gammas * next_state_values_int * (1 - value_batch.dones)
-
-            value_batch = alter_batch(value_batch, discounted_rewards=discounted_rewards_for_interval_and_critic,
-                                      episode_rewards=None, next_states=None, next_actions=None,
-                                      action_logprobs=None)
+            batch = alter_batch(batch, discounted_rewards=jnp.array(discounted_rewards_for_interval_and_critic),
+                                episode_rewards=None, next_states=None, next_actions=None, action_logprobs=None)
 
             # Perform the update step for interval value and critic networks
-            value_loss_info = agent.update_async(value_batch,
+            value_loss_info = agent.update_async(batch,
                                                  value_loss_fn={'expectile': 0},
                                                  critic_loss_fn={'mc_mse': 0},
                                                  expectile=config['expectile'],
@@ -197,10 +185,10 @@ if __name__ == "__main__":
                                                  critic=True)
 
             # Then update for average network
-            value_batch = alter_batch(value_batch,
-                                      discounted_rewards=discounted_rewards_for_average)
+            batch = alter_batch(batch,
+                                discounted_rewards=discounted_rewards_for_average)
 
-            average_value_loss_info = agent.update_async(value_batch,
+            average_value_loss_info = agent.update_async(batch,
                                                          value_loss_fn={'mc_mse': 0},
                                                          average_value=True)
 
@@ -218,21 +206,21 @@ if __name__ == "__main__":
 
             advantages = critic_values - state_values
 
-            batch = alter_batch(batch, advantages=advantages, episode_rewards=None, next_states=None, next_actions=None,
-                                      action_logprobs=None)
+            batch = alter_batch(batch, episode_rewards=None, next_states=None, next_actions=None,
+                                action_logprobs=None)
 
             # Filter for top half of actions
             if 'filter_point' not in config.keys():
-                filter_point = jnp.quantile(jnp.array(advantages), config['top_actions_quantile'])
+                filter_point = np.quantile(np.array(advantages), config['top_actions_quantile'])
             else:
                 filter_point = config['filter_point']
 
-            filter_array = np.where(advantages > filter_point)[0][:512]
+            filter_array = np.where(np.array(advantages) > filter_point)[0][:512]
 
-            batch = filter_dataset(filter_array,
+            batch = filter_dataset(batch, filter_array,
                                    target_keys=['states', 'actions', 'advantages'])
 
-            if (batch.advantages > filter_point).sum() >= 512:
+            if (np.array(batch.advantages) > filter_point).sum() >= 512:
                 loss_info = agent.update_async(batch,
                                                actor_loss_fn={'clone': 0},
                                                actor=True)
