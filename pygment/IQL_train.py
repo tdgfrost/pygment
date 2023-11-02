@@ -8,13 +8,13 @@ import wandb
 import flax.linen as nn
 
 # Set jax to CPU
-# jax.config.update('jax_platform_name', 'cpu')
+jax.config.update('jax_platform_name', 'cpu')
 # jax.config.update("jax_debug_nans", True)
 # jax.config.update('jax_disable_jit', True)
 
 # Define config file - could change to FLAGS at some point
 config = {'seed': 123,
-          'epochs': int(2e6),
+          'epochs': 100000,
           'env_id': 'CartPole-v1',
           'early_stopping': jnp.array(1000),
           'batch_size': 10000,
