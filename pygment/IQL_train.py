@@ -16,11 +16,11 @@ jax.config.update('jax_platform_name', 'cpu')
 config = {'seed': 123,
           'env_id': 'CartPole-v1',
           'step_delay': 2,
-          'sync_steps': 5,
-          'epochs': int(2e6),
+          'sync_steps': 20,
+          'epochs': 100000,
           'early_stopping': jnp.array(1000),
           'batch_size': 10000,
-          'expectile': 0.7,
+          'expectile': 0.5,
           'baseline_reward': 124,
           'n_episodes': 10000,
           'interval_probability': 0.25,
@@ -30,7 +30,7 @@ config = {'seed': 123,
           'actor_lr': 0.001,
           'value_lr': 0.001,
           'critic_lr': 0.001,
-          'alpha_soft_update': 0.3,
+          'alpha_soft_update': 1,
           'hidden_dims': (256, 256),
           'clipping': 1,
           'top_bar_coord': 1.2,  # 0.9,
@@ -227,10 +227,12 @@ if __name__ == "__main__":
             else:
                 filter_point = config['filter_point']
 
-            batch = filter_dataset(batch, advantages > filter_point,
+            filter_array = np.where(advantages > filter_point)[0][:512]
+
+            batch = filter_dataset(filter_array,
                                    target_keys=['states', 'actions', 'advantages'])
 
-            if (batch.advantages > filter_point).sum() > jnp.array(0):
+            if (batch.advantages > filter_point).sum() >= 512:
                 loss_info = agent.update_async(batch,
                                                actor_loss_fn={'clone': 0},
                                                actor=True)
