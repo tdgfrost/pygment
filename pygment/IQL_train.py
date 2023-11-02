@@ -98,7 +98,6 @@ if __name__ == "__main__":
     # config['gamma'] = jnp.array(config['gamma'])
     config['alpha_soft_update'] = jnp.array(config['alpha_soft_update'])
 
-
     # Make sure this matches with the desired dataset's extra_step metadata
     def extra_step_filter(x):
         # If tilted left
@@ -198,7 +197,7 @@ if __name__ == "__main__":
             else:
                 filter_point = config['filter_point']
 
-            filter_array = np.where(advantages > filter_point)[0][:512]
+            filter_array = np.where(np.array(advantages) > filter_point)[0][:512]
             batch = filter_dataset(batch, filter_array,
                                    target_keys=['states', 'actions', 'advantages'])
 
