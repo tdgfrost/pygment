@@ -92,6 +92,7 @@ if __name__ == "__main__":
 
     config['alpha_soft_update'] = jnp.array(config['alpha_soft_update'])
 
+
     # Make sure this matches with the desired dataset's extra_step metadata
     def extra_step_filter(x):
         # If tilted to the left
@@ -101,6 +102,7 @@ if __name__ == "__main__":
                 return config['step_delay']
         # Otherwise, normal time steps (no delay)
         return 0
+
 
     # Train agent
     def train(data):
@@ -179,7 +181,8 @@ if __name__ == "__main__":
             # Perform the update step for interval value and critic networks
             value_loss_info = agent.update_async(batch,
                                                  value_loss_fn={'expectile': 0},
-                                                 critic_loss_fn={'mc_mse': 0},
+                                                 #critic_loss_fn={'mc_mse': 0},
+                                                 critic_loss_fn={'expectile': 0},
                                                  expectile=config['expectile'],
                                                  value=True,
                                                  critic=True)
@@ -195,40 +198,53 @@ if __name__ == "__main__":
             average_value_loss_info['average_value_loss'] = average_value_loss_info['value_loss']
             del average_value_loss_info['value_loss']
 
+            value_loss_info.update(average_value_loss_info)
+
             agent.sync_target(config['alpha_soft_update'])
 
-            # For Actor:
-            # Calculate the advantages
-            state_values = agent.target_value(batch.states)[1]
+            # Log intermittently
+            if logging_bool:
+                # Log results
+                logged_results = {'training_step': total_training_steps,
+                                  'gradient_step': epoch,
+                                  'average_value_loss': value_loss_info['average_value_loss'],
+                                  'critic_loss': value_loss_info['critic_loss'],
+                                  'value_loss': value_loss_info['value_loss'],
+                                  }
 
-            critic_values = jnp.minimum(*agent.critic(batch.states)[1])
-            critic_values = filter_to_action(critic_values, batch.actions)
+                wandb.log(logged_results)
 
-            advantages = critic_values - state_values
+        # Then start training actor
+        total_training_steps = jnp.array(0)
+        # Filter out irrelevant data
+        state_values = agent.target_value(data.states)[1]
 
-            batch = alter_batch(batch, episode_rewards=None, next_states=None, next_actions=None,
-                                action_logprobs=None)
+        critic_values = jnp.minimum(*agent.critic(data.states)[1])
+        critic_values = filter_to_action(critic_values, data.actions)
 
-            # Filter for top half of actions
-            if 'filter_point' not in config.keys():
-                filter_point = np.quantile(np.array(advantages), config['top_actions_quantile'])
-            else:
-                filter_point = config['filter_point']
+        advantages = critic_values - state_values
 
-            filter_array = np.where(np.array(advantages) > filter_point)[0][:512]
+        if 'filter_point' not in config.keys():
+            filter_point = np.quantile(np.array(advantages), config['top_actions_quantile'])
+        else:
+            filter_point = config['filter_point']
 
-            batch = filter_dataset(batch, filter_array,
-                                   target_keys=['states', 'actions', 'advantages'])
+        data = filter_dataset(data, np.array(advantages) > filter_point,
+                              target_keys=['states', 'actions'])
 
-            if (np.array(advantages) > filter_point).sum() >= 512:
-                loss_info = agent.update_async(batch,
-                                               actor_loss_fn={'clone': 0},
-                                               actor=True)
-            else:
-                loss_info = {'actor_loss': None}
+        for epoch in range(config['epochs']):
+            progress_bar(epoch % 100, 100)
+            batch, idxs = agent.sample(data,
+                                       config['batch_size'],
+                                       p=sample_prob)
 
-            loss_info.update(value_loss_info)
-            loss_info.update(average_value_loss_info)
+            batch = alter_batch(batch, discounted_rewards=None, episode_rewards=None, next_states=None,
+                                next_actions=None, action_logprobs=None, len_actions=None, rewards=None,
+                                next_len_actions=None, intervals=None, dones=None)
+
+            actor_loss_info = agent.update_async(batch,
+                                                 actor_loss_fn={'clone': 0},
+                                                 actor=True)
 
             episode_rewards = None
             if epoch % config['sync_steps'] == 0:
@@ -242,17 +258,14 @@ if __name__ == "__main__":
                 # Log results
                 logged_results = {'training_step': total_training_steps,
                                   'gradient_step': epoch,
-                                  'actor_loss': loss_info['actor_loss'],
-                                  'average_value_loss': loss_info['average_value_loss'],
-                                  'critic_loss': loss_info['critic_loss'],
-                                  'value_loss': loss_info['value_loss'],
+                                  'actor_loss': actor_loss_info['actor_loss'],
                                   }
                 if epoch % config['sync_steps'] == 0:
                     logged_results.update({'mean_reward': np.mean(episode_rewards)})
 
                 wandb.log(logged_results)
 
-            if epoch % config['sync_steps'] == 0:
+            if epoch % 100 == 0:
                 # Save each model
                 agent.actor.save(os.path.join(model_dir, 'model_checkpoints/actor'))
                 agent.average_value.save(os.path.join(model_dir, 'model_checkpoints/average_value'))
