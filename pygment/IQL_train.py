@@ -43,7 +43,7 @@ if __name__ == "__main__":
     from core.envs import make_variable_env
 
     # Set whether to train and/or evaluate
-    logging_bool = False
+    logging_bool = True
     evaluate_bool = False
 
     if logging_bool:
@@ -172,7 +172,7 @@ if __name__ == "__main__":
             # Perform the update step for interval value and critic networks
             value_loss_info = agent.update_async(batch,
                                                  value_loss_fn={'expectile': 0},
-                                                 critic_loss_fn={'mc_mse': 0},
+                                                 critic_loss_fn={'expectile': 0},
                                                  expectile=config['expectile'],
                                                  value=True,
                                                  critic=True)
@@ -209,7 +209,7 @@ if __name__ == "__main__":
             filter_point = config['filter_point']
 
         data = filter_dataset(data, np.array(advantages) > filter_point,
-                              target_keys=['states', 'actions', 'advantages'])
+                              target_keys=['states', 'actions'])
 
         data = alter_batch(data, discounted_rewards=None, next_states=None, dones=None, intervals=None,
                            rewards=None, len_actions=None, next_len_actions=None)
