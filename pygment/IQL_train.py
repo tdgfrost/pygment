@@ -8,7 +8,7 @@ import wandb
 import flax.linen as nn
 
 # Set jax to CPU
-jax.config.update('jax_platform_name', 'cpu')
+# jax.config.update('jax_platform_name', 'cpu')
 # jax.config.update("jax_debug_nans", True)
 # jax.config.update('jax_disable_jit', True)
 
@@ -19,7 +19,7 @@ config = {'seed': 123,
           'early_stopping': jnp.array(1000),
           'batch_size': 10000,
           'step_delay': 2,
-          'sync_steps': 5,
+          'sync_steps': 20,
           'expectile': 0.5,
           'baseline_reward': 124,
           'n_episodes': 10000,
@@ -97,6 +97,7 @@ if __name__ == "__main__":
 
     # config['gamma'] = jnp.array(config['gamma'])
     config['alpha_soft_update'] = jnp.array(config['alpha_soft_update'])
+
 
     # Make sure this matches with the desired dataset's extra_step metadata
     def extra_step_filter(x):
@@ -179,36 +180,51 @@ if __name__ == "__main__":
             # Do a partial sync with the target network
             agent.sync_target(config['alpha_soft_update'])
 
-            # For Actor:
-            # Calculate the advantages
-            state_values = agent.target_value(batch.states)[1]
+            # Log intermittently
+            if logging_bool:
+                # Log results
+                logged_results = {'training_step': total_training_steps,
+                                  'gradient_step': epoch,
+                                  'value_loss': value_loss_info['value_loss'],
+                                  'critic_loss': value_loss_info['critic_loss'],
+                                  }
 
-            critic_values = jnp.minimum(*agent.critic(batch.states)[1])
-            critic_values = filter_to_action(critic_values, batch.actions)
+                wandb.log(logged_results)
 
-            advantages = critic_values - state_values
+        # And train the actor
+        total_training_steps = jnp.array(0)
 
-            batch = alter_batch(batch, discounted_rewards=None, next_states=None, dones=None, intervals=None,
-                                rewards=None, len_actions=None, next_len_actions=None)
+        # Calculate the advantages
+        state_values = agent.target_value(data.states)[1]
 
-            # Filter for top half of actions
-            if 'filter_point' not in config.keys():
-                filter_point = np.quantile(np.array(advantages), config['top_actions_quantile'])
-            else:
-                filter_point = config['filter_point']
+        critic_values = jnp.minimum(*agent.critic(data.states)[1])
+        critic_values = filter_to_action(critic_values, data.actions)
 
-            filter_array = np.where(np.array(advantages) > filter_point)[0][:512]
-            batch = filter_dataset(batch, filter_array,
-                                   target_keys=['states', 'actions', 'advantages'])
+        advantages = critic_values - state_values
 
-            if (np.array(advantages) > filter_point).sum() >= 512:
-                loss_info = agent.update_async(batch,
-                                               actor_loss_fn={'clone': 0},
-                                               actor=True)
-            else:
-                loss_info = {'actor_loss': None}
+        # Filter for top half of actions
+        if 'filter_point' not in config.keys():
+            filter_point = np.quantile(np.array(advantages), config['top_actions_quantile'])
+        else:
+            filter_point = config['filter_point']
 
-            loss_info.update(value_loss_info)
+        data = filter_dataset(data, np.array(advantages) > filter_point,
+                              target_keys=['states', 'actions', 'advantages'])
+
+        data = alter_batch(data, discounted_rewards=None, next_states=None, dones=None, intervals=None,
+                           rewards=None, len_actions=None, next_len_actions=None)
+
+        for epoch in range(config['epochs']):
+            if epoch > 0 and epoch % 100 == 0:
+                print(f'\n\n{epoch} epochs complete!\n')
+
+            progress_bar(epoch % 100, 100)
+            batch, idxs = agent.sample(data,
+                                       config['batch_size'])
+
+            actor_loss_info = agent.update_async(batch,
+                                                 actor_loss_fn={'clone': 0},
+                                                 actor=True)
 
             episode_rewards = None
             if epoch % config['sync_steps'] == 0:
@@ -222,9 +238,7 @@ if __name__ == "__main__":
                 # Log results
                 logged_results = {'training_step': total_training_steps,
                                   'gradient_step': epoch,
-                                  'actor_loss': loss_info['actor_loss'],
-                                  'critic_loss': loss_info['critic_loss'],
-                                  'value_loss': loss_info['value_loss'],
+                                  'actor_loss': actor_loss_info['actor_loss'],
                                   }
                 if epoch % config['sync_steps'] == 0:
                     logged_results.update({'mean_reward': np.mean(episode_rewards)})
