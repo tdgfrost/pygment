@@ -7,7 +7,7 @@ from stable_baselines3.common.env_util import make_vec_env
 import wandb
 
 # Set jax to CPU
-# jax.config.update('jax_platform_name', 'cpu')
+jax.config.update('jax_platform_name', 'cpu')
 # jax.config.update("jax_debug_nans", True)
 # jax.config.update('jax_disable_jit', True)
 
@@ -44,7 +44,7 @@ if __name__ == "__main__":
     from core.envs import make_variable_env
 
     # Set whether to train and/or evaluate
-    logging_bool = True
+    logging_bool = False
     evaluate_bool = False
 
     if logging_bool:
@@ -70,6 +70,8 @@ if __name__ == "__main__":
     # Start by defining the intervals between actions (both the current and next action)
     # intervals = the actual number of steps between actions
     intervals = np.array([len(traj) for traj in loaded_data.rewards])
+    intervals = np.array([interval if not done else intervals.max()
+                          for interval, done in zip(intervals.tolist(), loaded_data.dones.tolist())])
     intervals_unique = np.unique(intervals)
     mapping = {interval: idx for idx, interval in enumerate(intervals_unique)}
     len_actions = np.array([mapping[interval] for interval in intervals])
@@ -127,9 +129,6 @@ if __name__ == "__main__":
         # Standardise the state inputs
         agent.standardise_inputs(data.states)
 
-        # For advantage-prioritised cloning
-        sample_prob = None  # np.array(data.intervals / data.intervals.sum())
-
         print('\n\n', '=' * 50, '\n', ' ' * 3, '\U0001F483' * 3, ' ' * 1, f'Training network',
               ' ' * 2, '\U0001F483' * 3, '\n', '=' * 50, '\n')
 
@@ -142,14 +141,12 @@ if __name__ == "__main__":
             wandb.define_metric('critic_loss', summary='min')
             wandb.define_metric('value_loss', summary='min')
 
-        random_key = jax.random.PRNGKey(123)
         for epoch in range(config['epochs']):
             if epoch > 0 and epoch % 100 == 0:
                 print(f'\n\n{epoch} epochs complete!\n')
             progress_bar(epoch % 100, 100)
             batch, idxs = agent.sample(data,
-                                       config['batch_size'],
-                                       p=sample_prob)
+                                       config['batch_size'])
 
             # Add Gaussian noise - remember last two positions are boolean
             """
@@ -161,7 +158,7 @@ if __name__ == "__main__":
             """
 
             # Use TD learning for the value, average_value and critic networks
-            gammas = np.ones(shape=len(batch.rewards)) * config['gamma']
+            gammas = np.ones(shape=config['batch_size']) * config['gamma']
             gammas = np.power(gammas, np.array(batch.intervals))
 
             # For Interval Value and Critic (from average value):
