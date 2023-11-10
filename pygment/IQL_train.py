@@ -233,6 +233,8 @@ if __name__ == "__main__":
                               target_keys=['states', 'actions'])
 
         for epoch in range(config['epochs']):
+            if epoch > 0 and epoch % 100 == 0:
+                print(f'\n\n{epoch} epochs complete!\n')
             progress_bar(epoch % 100, 100)
             batch, idxs = agent.sample(data,
                                        config['batch_size'],
@@ -268,7 +270,7 @@ if __name__ == "__main__":
             if epoch % 100 == 0:
                 # Save each model
                 agent.actor.save(os.path.join(model_dir, 'model_checkpoints/actor'))
-                agent.average_value.save(os.path.join(model_dir, 'model_checkpoints/average_value'))
+                agent.target_value.save(os.path.join(model_dir, 'model_checkpoints/average_value'))
                 agent.critic.save(os.path.join(model_dir, 'model_checkpoints/critic'))
                 agent.value.save(os.path.join(model_dir, 'model_checkpoints/value'))
 
