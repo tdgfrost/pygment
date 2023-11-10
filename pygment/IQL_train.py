@@ -38,8 +38,8 @@ config = {'seed': 123,
 
 if __name__ == "__main__":
     from core.agent import IQLAgent
-    from core.common import (load_data, progress_bar, alter_batch, Batch, filter_to_action,
-                             calc_traj_discounted_rewards, move_to_gpu, filter_dataset, downsample_batch)
+    from core.common import (load_data, progress_bar, alter_batch, filter_to_action,
+                             calc_traj_discounted_rewards, move_to_gpu, filter_dataset)
     from core.evaluate import evaluate_envs, run_and_animate
     from core.envs import make_variable_env
 
@@ -64,8 +64,12 @@ if __name__ == "__main__":
     loaded_data = load_data(
         path=f"./offline_datasets/CartPole/{interval_probability}_probability/"
              f"dataset_reward_{baseline_reward}_{config['step_delay']}_steps_{config['n_episodes']}_episodes.pkl",
-        scale='standardise',
+        # scale='standardise',
         gamma=config['gamma'])
+
+    # Add in normalisation
+    discounted_reward_mean = np.mean(loaded_data.discounted_rewards)
+    discounted_reward_std = np.std(loaded_data.discounted_rewards)
 
     # Start by defining the intervals between actions (both the current and next action)
     # intervals = the actual number of steps between actions
@@ -168,6 +172,9 @@ if __name__ == "__main__":
                                                           + gammas * next_state_values_avg
                                                           * (1 - np.array(batch.dones)))
 
+            discounted_rewards_for_interval_and_critic = (discounted_rewards_for_interval_and_critic
+                                                          - discounted_reward_mean) / discounted_reward_std
+
             batch = alter_batch(batch, discounted_rewards=jnp.array(discounted_rewards_for_interval_and_critic),
                                 episode_rewards=None, next_states=None, next_actions=None, action_logprobs=None)
 
@@ -183,6 +190,9 @@ if __name__ == "__main__":
             # Then update for average network
             discounted_rewards_for_average = agent.value(batch.states)[1]
             discounted_rewards_for_average = filter_to_action(discounted_rewards_for_average, batch.len_actions)
+
+            discounted_rewards_for_average = (discounted_rewards_for_average
+                                              - discounted_reward_mean) / discounted_reward_std
 
             batch = alter_batch(batch,
                                 discounted_rewards=discounted_rewards_for_average)
@@ -233,8 +243,7 @@ if __name__ == "__main__":
                 print(f'\n\n{epoch} epochs complete!\n')
             progress_bar(epoch % 100, 100)
             batch, idxs = agent.sample(data,
-                                       config['batch_size'],
-                                       p=sample_prob)
+                                       config['batch_size'])
 
             batch = alter_batch(batch, discounted_rewards=None, episode_rewards=None, next_states=None,
                                 next_actions=None, action_logprobs=None, len_actions=None, rewards=None,
