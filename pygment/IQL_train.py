@@ -172,7 +172,8 @@ if __name__ == "__main__":
             # Perform the update step for interval value and critic networks
             value_loss_info = agent.update_async(batch,
                                                  value_loss_fn={'expectile': 0},
-                                                 critic_loss_fn={'expectile': 0},
+                                                 #critic_loss_fn={'expectile': 0},
+                                                 critic_loss_fn={'mc_mse': 0},
                                                  expectile=config['expectile'],
                                                  value=True,
                                                  critic=True)
