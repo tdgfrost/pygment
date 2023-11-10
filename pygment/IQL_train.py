@@ -235,6 +235,9 @@ if __name__ == "__main__":
         else:
             filter_point = config['filter_point']
 
+        if np.sum(np.array(advantages) > filter_point) < config['batch_size']:
+            return agent
+
         data = filter_dataset(data, np.array(advantages) > filter_point,
                               target_keys=['states', 'actions'])
 
