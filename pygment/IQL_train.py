@@ -41,16 +41,6 @@ if __name__ == "__main__":
     from core.envs import make_variable_env
     import argparse
 
-    # Set whether to train and/or evaluate
-    logging_bool = True
-    evaluate_bool = False
-
-    if logging_bool:
-        wandb.init(
-            project="CartPole-25pct-R-124",
-            config=config,
-        )
-
     # Set the flags for expectile and soft_update
     parser = argparse.ArgumentParser()
 
@@ -61,6 +51,16 @@ if __name__ == "__main__":
 
     config['expectile'] = args.expectile
     config['alpha_soft_update'] = args.soft_update
+
+    # Set whether to train and/or evaluate
+    logging_bool = True
+    evaluate_bool = False
+
+    if logging_bool:
+        wandb.init(
+            project="CartPole-25pct-R-124",
+            config=config,
+        )
 
     # ============================================================== #
     # ========================= TRAINING =========================== #
