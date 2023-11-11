@@ -1,4 +1,3 @@
-import jax
 import numpy as np
 from gymnasium.envs import make as make_env
 import os
@@ -42,6 +41,7 @@ if __name__ == "__main__":
                              calc_traj_discounted_rewards, move_to_gpu, filter_dataset)
     from core.evaluate import evaluate_envs, run_and_animate
     from core.envs import make_variable_env
+    import argparse
 
     # Set whether to train and/or evaluate
     logging_bool = True
@@ -52,6 +52,14 @@ if __name__ == "__main__":
             project="CartPole-25pct-R-124",
             config=config,
         )
+
+    # Set the flags for expectile and soft_update
+    parser = argparse.ArgumentParser()
+
+    parser.add_argument('--expectile', type=float, default=config['expectile'])
+    parser.add_argument('--soft_update', type=float, default=config['alpha_soft_update'])
+
+    args = parser.parse_args()
 
     # ============================================================== #
     # ========================= TRAINING =========================== #
