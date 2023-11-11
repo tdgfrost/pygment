@@ -1,11 +1,9 @@
-import jax
 import numpy as np
 from gymnasium.envs import make as make_env
 import os
 import jax.numpy as jnp
 from stable_baselines3.common.env_util import make_vec_env
 import wandb
-import flax.linen as nn
 
 # Set jax to CPU
 # jax.config.update('jax_platform_name', 'cpu')
@@ -41,6 +39,7 @@ if __name__ == "__main__":
                              calc_traj_discounted_rewards, move_to_gpu, filter_dataset)
     from core.evaluate import evaluate_envs, run_and_animate
     from core.envs import make_variable_env
+    import argparse
 
     # Set whether to train and/or evaluate
     logging_bool = True
@@ -51,6 +50,17 @@ if __name__ == "__main__":
             project="CartPole-25pct-R-124",
             config=config,
         )
+
+    # Set the flags for expectile and soft_update
+    parser = argparse.ArgumentParser()
+
+    parser.add_argument('--expectile', type=float, default=config['expectile'])
+    parser.add_argument('--soft_update', type=float, default=config['alpha_soft_update'])
+
+    args = parser.parse_args()
+
+    config['expectile'] = args.expectile
+    config['alpha_soft_update'] = args.soft_update
 
     # ============================================================== #
     # ========================= TRAINING =========================== #
