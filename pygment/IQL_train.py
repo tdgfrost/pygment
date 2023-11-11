@@ -43,6 +43,17 @@ if __name__ == "__main__":
     from core.envs import make_variable_env
     import argparse
 
+    # Set the flags for expectile and soft_update
+    parser = argparse.ArgumentParser()
+
+    parser.add_argument('--expectile', type=float, default=config['expectile'])
+    parser.add_argument('--soft_update', type=float, default=config['alpha_soft_update'])
+
+    args = parser.parse_args()
+
+    config['expectile'] = args.expectile
+    config['alpha_soft_update'] = args.soft_update
+
     # Set whether to train and/or evaluate
     logging_bool = True
     evaluate_bool = False
@@ -52,14 +63,6 @@ if __name__ == "__main__":
             project="CartPole-25pct-R-124",
             config=config,
         )
-
-    # Set the flags for expectile and soft_update
-    parser = argparse.ArgumentParser()
-
-    parser.add_argument('--expectile', type=float, default=config['expectile'])
-    parser.add_argument('--soft_update', type=float, default=config['alpha_soft_update'])
-
-    args = parser.parse_args()
 
     # ============================================================== #
     # ========================= TRAINING =========================== #
