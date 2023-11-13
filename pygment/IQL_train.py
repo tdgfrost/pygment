@@ -79,8 +79,8 @@ if __name__ == "__main__":
         gamma=config['gamma'])
 
     # Add in normalisation
-    discounted_reward_mean = np.mean(loaded_data.discounted_rewards)
-    discounted_reward_std = np.std(loaded_data.discounted_rewards)
+    # discounted_reward_mean = np.mean(loaded_data.discounted_rewards)
+    # discounted_reward_std = np.std(loaded_data.discounted_rewards)
 
     # Start by defining the intervals between actions (both the current and next action)
     # intervals = the actual number of steps between actions
@@ -179,9 +179,9 @@ if __name__ == "__main__":
             # For Interval Value and Critic (from average value):
             next_state_values_avg = np.array(agent.target_value(batch.next_states)[1])
 
-            discounted_rewards_for_interval_and_critic = ((np.array(batch.rewards) - discounted_reward_mean)
-                                                          / discounted_reward_std + gammas * next_state_values_avg
-                                                          * (1 - np.array(batch.dones)))
+            discounted_rewards_for_interval_and_critic = (np.array(batch.rewards)
+                                                          + gammas * next_state_values_avg * (1 - np.array(batch.dones))
+                                                          )
 
             batch = alter_batch(batch, discounted_rewards=jnp.array(discounted_rewards_for_interval_and_critic),
                                 episode_rewards=None, next_states=None, next_actions=None, action_logprobs=None)
