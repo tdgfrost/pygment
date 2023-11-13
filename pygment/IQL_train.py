@@ -201,9 +201,6 @@ if __name__ == "__main__":
             discounted_rewards_for_average = agent.value(batch.states)[1]
             discounted_rewards_for_average = filter_to_action(discounted_rewards_for_average, batch.len_actions)
 
-            discounted_rewards_for_average = (discounted_rewards_for_average
-                                              - discounted_reward_mean) / discounted_reward_std
-
             batch = alter_batch(batch,
                                 discounted_rewards=discounted_rewards_for_average)
 
