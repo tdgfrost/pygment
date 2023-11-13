@@ -178,9 +178,8 @@ if __name__ == "__main__":
             gammas = np.power(gammas, np.array(batch.intervals))
 
             next_state_values = np.array(agent.target_value(batch.next_states)[1])
-            discounted_rewards = np.array(batch.rewards) + gammas * next_state_values * (1 - np.array(batch.dones))
-
-            discounted_rewards = (discounted_rewards - discounted_reward_mean) / discounted_reward_std
+            discounted_rewards = ((np.array(batch.rewards) - discounted_reward_mean) / discounted_reward_std
+                                  + gammas * next_state_values * (1 - np.array(batch.dones)))
 
             batch = alter_batch(batch, discounted_rewards=jnp.array(discounted_rewards), next_states=None,
                                 dones=None, intervals=None, rewards=None)
