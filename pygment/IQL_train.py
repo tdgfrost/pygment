@@ -179,12 +179,9 @@ if __name__ == "__main__":
             # For Interval Value and Critic (from average value):
             next_state_values_avg = np.array(agent.target_value(batch.next_states)[1])
 
-            discounted_rewards_for_interval_and_critic = (np.array(batch.rewards)
-                                                          + gammas * next_state_values_avg
+            discounted_rewards_for_interval_and_critic = ((np.array(batch.rewards) - discounted_reward_mean)
+                                                          / discounted_reward_std + gammas * next_state_values_avg
                                                           * (1 - np.array(batch.dones)))
-
-            discounted_rewards_for_interval_and_critic = (discounted_rewards_for_interval_and_critic
-                                                          - discounted_reward_mean) / discounted_reward_std
 
             batch = alter_batch(batch, discounted_rewards=jnp.array(discounted_rewards_for_interval_and_critic),
                                 episode_rewards=None, next_states=None, next_actions=None, action_logprobs=None)
