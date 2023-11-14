@@ -1,12 +1,14 @@
+import jax
 import numpy as np
 from gymnasium.envs import make as make_env
 import os
 import jax.numpy as jnp
 from stable_baselines3.common.env_util import make_vec_env
 import wandb
+from scipy.stats import norm
 
 # Set jax to CPU
-# jax.config.update('jax_platform_name', 'cpu')
+jax.config.update('jax_platform_name', 'cpu')
 # jax.config.update("jax_debug_nans", True)
 # jax.config.update('jax_disable_jit', True)
 
@@ -23,6 +25,7 @@ config = {'seed': 123,
           'n_episodes': 10000,
           'interval_probability': 0.25,
           'top_actions_quantile': 0.5,
+          'gaussian_confidence': 0.5,
           'filter_point': 0,
           'gamma': 0.99,
           'actor_lr': 0.001,
@@ -38,7 +41,7 @@ config = {'seed': 123,
 if __name__ == "__main__":
     from core.agent import IQLAgent
     from core.common import (load_data, progress_bar, alter_batch, filter_to_action,
-                             calc_traj_discounted_rewards, move_to_gpu, filter_dataset)
+                             calc_traj_discounted_rewards, move_to_gpu, filter_dataset, split_output)
     from core.evaluate import evaluate_envs, run_and_animate
     from core.envs import make_variable_env
     import argparse
@@ -60,7 +63,7 @@ if __name__ == "__main__":
 
     if logging_bool:
         wandb.init(
-            project="CartPole-25pct-R-124",
+            project="CartPole-IQL-Gaussian-test",
             config=config,
         )
 
@@ -109,7 +112,6 @@ if __name__ == "__main__":
 
     config['alpha_soft_update'] = jnp.array(config['alpha_soft_update'])
 
-
     # Make sure this matches with the desired dataset's extra_step metadata
     def extra_step_filter(x):
         # If tilted to the left
@@ -119,7 +121,6 @@ if __name__ == "__main__":
                 return config['step_delay']
         # Otherwise, normal time steps (no delay)
         return 0
-
 
     # Train agent
     def train(data):
@@ -177,32 +178,32 @@ if __name__ == "__main__":
             gammas = np.power(gammas, np.array(batch.intervals))
 
             # For Interval Value and Critic (from average value):
-            next_state_values_avg = np.array(agent.target_value(batch.next_states)[1])
+            next_state_values_avg_mu, _ = split_output(np.array(agent.target_value(batch.next_states)[1]))
 
             discounted_rewards_for_interval_and_critic = (np.array(batch.rewards)
-                                                          + gammas * next_state_values_avg * (1 - np.array(batch.dones))
-                                                          )
+                                                          + gammas * next_state_values_avg_mu
+                                                          * (1 - np.array(batch.dones)))
 
             batch = alter_batch(batch, discounted_rewards=jnp.array(discounted_rewards_for_interval_and_critic),
                                 episode_rewards=None, next_states=None, next_actions=None, action_logprobs=None)
 
             # Perform the update step for interval value and critic networks
             value_loss_info = agent.update_async(batch,
-                                                 value_loss_fn={'expectile': 0},
-                                                 critic_loss_fn={'expectile': 0},
+                                                 value_loss_fn={'gaussian_expectile': 0},
+                                                 critic_loss_fn={'gaussian_expectile': 0},
                                                  expectile=config['expectile'],
                                                  value=True,
                                                  critic=True)
 
             # Then update for average network
-            discounted_rewards_for_average = agent.value(batch.states)[1]
+            discounted_rewards_for_average, _ = split_output(agent.value(batch.states)[1])
             discounted_rewards_for_average = filter_to_action(discounted_rewards_for_average, batch.len_actions)
 
             batch = alter_batch(batch,
                                 discounted_rewards=discounted_rewards_for_average)
 
             average_value_loss_info = agent.update_async(batch,
-                                                         value_loss_fn={'mc_mse': 0},
+                                                         value_loss_fn={'gaussian_mse': 0},
                                                          average_value=True)
 
             average_value_loss_info['average_value_loss'] = average_value_loss_info['value_loss']
@@ -227,22 +228,29 @@ if __name__ == "__main__":
         # Then start training actor
         total_training_steps = jnp.array(0)
         # Filter out irrelevant data
-        state_values = agent.target_value(data.states)[1]
+        state_values_mu, state_values_std = split_output(agent.target_value(data.states)[1])
 
-        critic_values = jnp.minimum(*agent.critic(data.states)[1])
-        critic_values = filter_to_action(critic_values, data.actions)
+        critic_values_mu, critic_values_std = split_output(jnp.minimum(*agent.critic(data.states)[1]))
+        critic_values_mu, critic_values_std = (filter_to_action(critic_values_mu, data.actions),
+                                               filter_to_action(critic_values_std, data.actions))
 
-        advantages = critic_values - state_values
+        advantages_mu = np.array(critic_values_mu - state_values_mu)
+        advantages_std = np.sqrt(np.array(critic_values_std ** 2 + state_values_std ** 2))
 
         if 'filter_point' not in config.keys():
-            filter_point = np.quantile(np.array(advantages), config['top_actions_quantile'])
+            filter_point = np.quantile(np.array(advantages_mu), config['top_actions_quantile'])
         else:
             filter_point = config['filter_point']
 
-        if np.sum(np.array(advantages) > filter_point) < config['batch_size']:
+        # Filter at 95th percentile of "good" actions
+        filter_bool = 1 - norm.cdf(filter_point,
+                                   advantages_mu,
+                                   advantages_std) > config['gaussian_confidence']
+
+        if np.sum(filter_bool) < config['batch_size']:
             return agent
 
-        data = filter_dataset(data, np.array(advantages) > filter_point,
+        data = filter_dataset(data, filter_bool,
                               target_keys=['states', 'actions'])
 
         for epoch in range(config['epochs']):

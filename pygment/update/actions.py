@@ -1,4 +1,4 @@
-from update.critic import update_q, update_v, update_advantage
+from update.critic import update_q, update_v
 from update.actor import update_policy
 from core.common import Batch
 

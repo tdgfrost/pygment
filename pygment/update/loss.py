@@ -32,7 +32,7 @@ def convert_logits_to_action_logprobs(logits, actions, **kwargs):
     return action_logprobs
 
 
-def expectile_loss(pred, batch, expectile=0.8, **kwargs):
+def expectile_loss(pred, batch, expectile=0.5, **kwargs):
     """
     Calculates the expectile of the Cauchy loss function for the residuals.
     Uses the formula L[ c^2/2 * log(loss^2 / c^2 + 1)]
@@ -51,6 +51,25 @@ def expectile_loss(pred, batch, expectile=0.8, **kwargs):
 
 def mc_mse_loss(pred, batch, **kwargs):
     return (pred - batch.discounted_rewards) ** 2
+
+
+def gaussian_mse_loss(pred, batch, **kwargs):
+    pred_mu, pred_std = pred
+    eps = 1e-8 if 'eps' not in kwargs.keys() else kwargs['eps']
+
+    return 0.5 * (jnp.log(jnp.maximum(pred_std ** 2, eps))
+                  + (pred_mu - batch.discounted_rewards) ** 2 / jnp.maximum(pred_std ** 2, eps))
+
+
+def gaussian_expectile_loss(pred, batch, expectile=0.5, **kwargs):
+    pred_mu, pred_std = pred
+    eps = 1e-8 if 'eps' not in kwargs.keys() else kwargs['eps']
+
+    diff = pred_mu - batch.discounted_rewards
+    weight = jnp.where(diff > 0, (1 - expectile), expectile)
+
+    return 0.5 * (jnp.log(jnp.maximum(pred_std ** 2, eps))
+                  + weight * (pred_mu - batch.discounted_rewards) ** 2 / jnp.maximum(pred_std ** 2, eps))
 
 
 def iql_loss(logits, batch, **kwargs):
@@ -129,23 +148,3 @@ def ppo_loss(logits, batch, clip_ratio=0.2, **kwargs):
 
     # Return the loss term
     return loss
-
-
-def log_softmax_cross_entropy(logits, labels, **kwargs):
-    logits_max = jnp.max(logits, axis=-1, keepdims=True)
-    logits -= jax.lax.stop_gradient(logits_max)
-
-    label_logits = filter_to_action(logits, labels)
-    log_normalizers = jnp.log(jnp.sum(jnp.exp(logits), axis=-1))
-
-    return log_normalizers - label_logits
-
-
-def binary_cross_entropy(logits, labels, **kwargs):
-    probs = nn.sigmoid(logits)
-    probs = jnp.clip(probs, 1e-6, 1 - 1e-6)
-    log_0 = jnp.log(probs)
-    log_1 = jnp.log(1 - probs)
-    loss = labels * log_0 + (1 - labels) * log_1
-    return -loss
-

@@ -320,3 +320,10 @@ def filter_dataset(batch: Batch, boolean_identity, target_keys: list):
 
     return Batch(**filtered_batch)
 
+
+def split_output(output, dim=2):
+    result = []
+    original_shape = output.shape[:-1]
+    for i in range(dim):
+        result.append(output.reshape(-1, dim)[:, i].reshape(original_shape))
+    return tuple(result)
