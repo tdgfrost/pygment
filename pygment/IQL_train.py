@@ -39,7 +39,7 @@ config = {'seed': 123,
 if __name__ == "__main__":
     from core.agent import IQLAgent
     from core.common import (load_data, progress_bar, alter_batch, filter_to_action,
-                             calc_traj_discounted_rewards, move_to_gpu, filter_dataset)
+                             calc_traj_discounted_rewards, move_to_gpu, filter_dataset, Batch)
     from core.evaluate import evaluate_envs, run_and_animate
     from core.envs import make_variable_env
     import argparse
@@ -56,7 +56,7 @@ if __name__ == "__main__":
     config['alpha_soft_update'] = args.soft_update
 
     # Set whether to train and/or evaluate
-    logging_bool = True
+    logging_bool = False
     evaluate_bool = False
 
     if logging_bool:
@@ -79,6 +79,12 @@ if __name__ == "__main__":
         # scale='standardise',
         gamma=config['gamma'])
 
+    # Remove excess data
+    loaded_data = loaded_data._asdict()
+    for key in ['episode_rewards', 'next_actions', 'action_logprobs']:
+        loaded_data[key] = None
+    loaded_data = Batch(**loaded_data)
+
     # Add in normalisation
     # discounted_reward_mean = np.mean(loaded_data.discounted_rewards)
     # discounted_reward_std = np.std(loaded_data.discounted_rewards)
@@ -98,7 +104,7 @@ if __name__ == "__main__":
     next_len_actions = jnp.array(next_len_actions)
 
     # Calculate rewards
-    rewards = calc_traj_discounted_rewards(loaded_data.rewards, config['gamma'])
+    rewards = jnp.array(calc_traj_discounted_rewards(loaded_data.rewards, config['gamma']))
     loaded_data = alter_batch(loaded_data, rewards=rewards, len_actions=len_actions, next_len_actions=next_len_actions,
                               intervals=intervals)
     del rewards
@@ -116,7 +122,7 @@ if __name__ == "__main__":
         # If tilted to the left
         if x[2] < 0:
             # with p == 0.25, delay by a further 5 steps (i.e., 6 total)
-            if np.random.uniform() < 0.25:
+            if np.random.uniform() < interval_probability:
                 return config['step_delay']
         # Otherwise, normal time steps (no delay)
         return 0
