@@ -4,6 +4,7 @@ import os
 import jax.numpy as jnp
 from stable_baselines3.common.env_util import make_vec_env
 import wandb
+import jax
 
 # Set jax to CPU
 # jax.config.update('jax_platform_name', 'cpu')
