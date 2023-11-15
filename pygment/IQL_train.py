@@ -89,6 +89,11 @@ if __name__ == "__main__":
     # Start by defining the intervals between actions (both the current and next action)
     # intervals = the actual number of steps between actions
     intervals = np.array([len(traj) for traj in loaded_data.rewards])
+    """
+    INCLUDE THIS??
+    intervals = np.array([interval if not done else intervals.max()
+                      for interval, done in zip(intervals.tolist(), loaded_data.dones.tolist())])
+    """
     intervals_unique = np.unique(intervals)
     mapping = {interval: idx for idx, interval in enumerate(intervals_unique)}
     len_actions = np.array([mapping[interval] for interval in intervals])
