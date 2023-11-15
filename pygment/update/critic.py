@@ -2,7 +2,7 @@ from jax import Array
 
 from core.agent import Model
 from core.common import Params, InfoDict, Batch, filter_to_action, split_output
-from update.loss import mc_mse_loss, expectile_loss, gaussian_mse_loss, gaussian_expectile_loss
+from update.loss import mc_mse_loss, expectile_loss, gaussian_mse_loss, gaussian_expectile_loss, gaussian_nll_loss
 
 from typing import Tuple
 
@@ -18,6 +18,7 @@ def update_v(value: Model, batch: Batch, **kwargs) -> Tuple[Model, InfoDict]:
 
     loss_fn = {'mc_mse': mc_mse_loss,
                'expectile': expectile_loss,
+               'gaussian_nll': gaussian_nll_loss,
                'gaussian_mse': gaussian_mse_loss,
                'gaussian_expectile': gaussian_expectile_loss}
 

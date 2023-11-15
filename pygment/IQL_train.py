@@ -196,8 +196,10 @@ if __name__ == "__main__":
                                                  critic=True)
 
             # Then update for average network
-            discounted_rewards_for_average, _ = split_output(agent.value(batch.states)[1])
-            discounted_rewards_for_average = filter_to_action(discounted_rewards_for_average, batch.len_actions)
+            (discounted_rewards_for_average_mu,
+             discounted_rewards_for_average_std) = split_output(agent.value(batch.states)[1])
+            discounted_rewards_for_average = (filter_to_action(discounted_rewards_for_average_mu, batch.len_actions),
+                                              filter_to_action(discounted_rewards_for_average_std, batch.len_actions))
 
             batch = alter_batch(batch,
                                 discounted_rewards=discounted_rewards_for_average)

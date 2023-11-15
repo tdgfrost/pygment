@@ -55,6 +55,13 @@ def mc_mse_loss(pred, batch, **kwargs):
 
 def gaussian_mse_loss(pred, batch, **kwargs):
     pred_mu, pred_std = pred
+    target_mu, target_std = batch.discounted_rewards
+
+    return (pred_mu - target_mu) ** 2 + (pred_std - target_std) ** 2
+
+
+def gaussian_nll_loss(pred, batch, **kwargs):
+    pred_mu, pred_std = pred
     eps = 1e-8 if 'eps' not in kwargs.keys() else kwargs['eps']
 
     return 0.5 * (jnp.log(jnp.maximum(pred_std ** 2, eps))
