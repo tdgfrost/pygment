@@ -2,7 +2,7 @@ from jax import Array
 
 from core.agent import Model
 from core.common import Params, InfoDict, Batch, filter_to_action, split_output
-from update.loss import mc_mse_loss, expectile_loss, gaussian_mse_loss, gaussian_expectile_loss, gaussian_nll_loss
+from update.loss import mse_loss, expectile_loss, gaussian_mse_loss, gaussian_expectile_loss, gaussian_nll_loss
 
 from typing import Tuple
 
@@ -16,11 +16,8 @@ def update_v(value: Model, batch: Batch, **kwargs) -> Tuple[Model, InfoDict]:
     :return: a tuple containing the new model parameters, plus metadata
     """
 
-    loss_fn = {'mc_mse': mc_mse_loss,
-               'expectile': expectile_loss,
-               'gaussian_nll': gaussian_nll_loss,
-               'gaussian_mse': gaussian_mse_loss,
-               'gaussian_expectile': gaussian_expectile_loss}
+    loss_fn = {'mse': mse_loss,
+               'expectile': expectile_loss}
 
     # Unpack the actions, states, and discounted rewards from the batch of samples
     states = batch.states
@@ -29,14 +26,11 @@ def update_v(value: Model, batch: Batch, **kwargs) -> Tuple[Model, InfoDict]:
         # Generate V(s) for the sample states
         layer_outputs, v = value.apply({'params': value_params}, states)
 
-        v_mu, v_std = split_output(v)
-
-        if batch.len_actions is not None and len(v_mu.shape) > 1:
-            v_mu = filter_to_action(v_mu, batch.len_actions)
-            v_std = filter_to_action(v_std, batch.len_actions)
+        if batch.len_actions is not None and len(v.shape) > 1:
+            v = filter_to_action(v, batch.len_actions)
 
         # Calculate the loss for V using Q with expectile regression
-        value_loss = loss_fn[list(kwargs['value_loss_fn'].keys())[0]]((v_mu, v_std), batch, **kwargs).mean()
+        value_loss = loss_fn[list(kwargs['value_loss_fn'].keys())[0]](v, batch, **kwargs).mean()
 
         # Return the loss value, plus metadata
         return value_loss, {
@@ -63,10 +57,8 @@ def update_q(critic: Model, batch: Batch, **kwargs) -> Tuple[Model, InfoDict]:
     actions = batch.actions
     states = batch.states
 
-    loss_fn = {'mc_mse': mc_mse_loss,
-               'expectile': expectile_loss,
-               'gaussian_mse': gaussian_mse_loss,
-               'gaussian_expectile': gaussian_expectile_loss}
+    loss_fn = {'mse': mse_loss,
+               'expectile': expectile_loss}
 
     def critic_loss_fn(critic_params: Params) -> tuple[Array, dict[str, Array]]:
         # Generate Q values from each of the two critic networks
@@ -79,14 +71,13 @@ def update_q(critic: Model, batch: Batch, **kwargs) -> Tuple[Model, InfoDict]:
         q1 = jnp.squeeze(jnp.take_along_axis(q1, actions, axis=-1), -1)
         q2 = jnp.squeeze(jnp.take_along_axis(q2, actions, axis=-1), -1)
         """
-        (q1_mu, q1_std), (q2_mu, q2_std) = split_output(q1), split_output(q2)
 
-        q1_mu, q1_std = filter_to_action(q1_mu, actions), filter_to_action(q1_std, actions)
-        q2_mu, q2_std = filter_to_action(q2_mu, actions), filter_to_action(q2_std, actions)
+        q1 = filter_to_action(q1, actions)
+        q2 = filter_to_action(q2, actions)
 
         # Calculate the loss for the critic networks using the target Q values with MSE
-        critic_loss_1 = loss_fn[list(kwargs['critic_loss_fn'].keys())[0]]((q1_mu, q2_std), batch, **kwargs).mean()
-        critic_loss_2 = loss_fn[list(kwargs['critic_loss_fn'].keys())[0]]((q2_mu, q2_std), batch, **kwargs).mean()
+        critic_loss_1 = loss_fn[list(kwargs['critic_loss_fn'].keys())[0]](q1, batch, **kwargs).mean()
+        critic_loss_2 = loss_fn[list(kwargs['critic_loss_fn'].keys())[0]](q2, batch, **kwargs).mean()
         critic_loss = critic_loss_1 + critic_loss_2
 
         # Return the loss value, plus metadata
@@ -101,3 +92,43 @@ def update_q(critic: Model, batch: Batch, **kwargs) -> Tuple[Model, InfoDict]:
     # Return the new model parameters, plus loss metadata
     return new_critic, info
 
+
+def update_uncertainty(uncertainty: Model, batch: Batch, **kwargs) -> Tuple[Model, InfoDict]:
+    """
+    Function to update the Value network
+
+    :param uncertainty: the Uncertainty network to be updated
+    :param batch: a Batch object of samples
+    :return: a tuple containing the new model parameters, plus metadata
+    """
+
+    loss_fn = {'gaussian_nll': gaussian_nll_loss,
+               'gaussian_mse': gaussian_mse_loss,
+               'gaussian_expectile': gaussian_expectile_loss}
+
+    # Unpack the actions, states, and discounted rewards from the batch of samples
+    states = batch.states
+
+    def uncertainty_loss_fn(uncertainty_params: Params) -> tuple[Array, dict[str, Array]]:
+        # Generate V(s) for the sample states
+        layer_outputs, sigma = uncertainty.apply({'params': uncertainty_params}, states)
+
+        if 'filter_interval' in kwargs.keys():
+            sigma = filter_to_action(sigma, batch.len_actions)
+        elif 'filter_critic' in kwargs.keys():
+            sigma = filter_to_action(sigma, batch.actions)
+
+        # Calculate the loss for V using Q with expectile regression
+        uncertainty_loss = loss_fn[list(kwargs['uncertainty_loss_fn'].keys())[0]](sigma, batch, **kwargs).mean()
+
+        # Return the loss value, plus metadata
+        return uncertainty_loss, {
+            'uncertainty_loss': uncertainty_loss,
+            'layer_outputs': layer_outputs,
+        }
+
+    # Calculate the updated model parameters using the loss function
+    new_uncertainty, info = uncertainty.apply_gradient(uncertainty_loss_fn)
+
+    # Return the new model parameters, plus loss metadata
+    return new_uncertainty, info

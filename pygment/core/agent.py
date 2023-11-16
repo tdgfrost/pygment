@@ -1,6 +1,7 @@
 from core.net import Model, ValueNet, ActorNet, DoubleCriticNet, CriticNet
 from core.common import Batch, InfoDict
-from update.actions import _update_jit, _update_value_jit, _update_critic_jit, _update_actor_jit, _update_advantage_jit
+from update.actions import (_update_jit, _update_value_jit, _update_critic_jit, _update_actor_jit,
+                            _update_uncertainty_jit)
 
 import os
 import datetime as dt
@@ -160,11 +161,23 @@ class IQLAgent(BaseAgent):
                                    optim=optimiser,
                                    continual_learning=continual_learning)
 
-        self.value = Model.create(ValueNet(hidden_dims, len(self.intervals_unique)),
-                                  inputs=[self.value_key, observations],
-                                  # optim=optax.adam(learning_rate=value_lr),
-                                  optim=optimiser,
-                                  continual_learning=continual_learning)
+        self.interval_value = Model.create(ValueNet(hidden_dims, len(self.intervals_unique)),
+                                           inputs=[self.value_key, observations],
+                                           # optim=optax.adam(learning_rate=value_lr),
+                                           optim=optimiser,
+                                           continual_learning=continual_learning)
+
+        self.interval_value_uncertainty = Model.create(ValueNet(hidden_dims, len(self.intervals_unique)),
+                                                       inputs=[self.value_key, observations],
+                                                       # optim=optax.adam(learning_rate=value_lr),
+                                                       optim=optimiser,
+                                                       continual_learning=continual_learning)
+
+        self.critic_uncertainty = Model.create(ValueNet(hidden_dims, self.action_dim),
+                                               inputs=[self.value_key, observations],
+                                               # optim=optax.adam(learning_rate=value_lr),
+                                               optim=optimiser,
+                                               continual_learning=continual_learning)
 
         self.average_value = Model.create(ValueNet(hidden_dims, 1),
                                           inputs=[self.value_key, observations],
@@ -172,15 +185,22 @@ class IQLAgent(BaseAgent):
                                           optim=optimiser,
                                           continual_learning=continual_learning)
 
+        self.average_value_uncertainty = Model.create(ValueNet(hidden_dims, 1),
+                                                      inputs=[self.value_key, observations],
+                                                      # optim=optax.adam(learning_rate=value_lr),
+                                                      optim=optimiser,
+                                                      continual_learning=continual_learning)
+
         self.target_value = Model.create(ValueNet(hidden_dims, 1),
                                          inputs=[self.value_key, observations],
-                                          # optim=optax.adam(learning_rate=value_lr),
+                                         # optim=optax.adam(learning_rate=value_lr),
                                          optim=optimiser,
                                          continual_learning=continual_learning)
 
         self.sync_target(1.0)
 
-        self.networks = [self.actor, self.critic, self.value, self.average_value, self.target_value]
+        self.networks = [self.actor, self.critic, self.interval_value, self.interval_value_uncertainty,
+                         self.critic_uncertainty, self.average_value, self.average_value_uncertainty, self.target_value]
 
     def update(self, batch: Batch, **kwargs) -> InfoDict:
         """
@@ -191,30 +211,35 @@ class IQLAgent(BaseAgent):
         """
 
         # Create an updated copy of all the networks
-        new_rng, new_actor, new_critic, new_value, info = _update_jit(
-            self.rng, self.actor, self.critic, self.value,
+        new_rng, new_actor, new_critic, new_interval_value, info = _update_jit(
+            self.rng, self.actor, self.critic, self.interval_value,
             batch, **kwargs)
 
         # Update the agent's networks with the updated copies
         self.rng = new_rng
         self.actor = new_actor
         self.critic = new_critic
-        self.value = new_value
+        self.interval_value = new_interval_value
 
         # Return the metadata
         return info
 
     def update_async(self, batch: Batch, actor: bool = False,
-                     critic: bool = False, value: bool = False,
-                     average_value: bool = False, **kwargs) -> InfoDict:
+                     critic: bool = False, interval_value: bool = False,
+                     average_value: bool = False, average_value_uncertainty: bool = False,
+                     interval_value_uncertainty: bool = False,
+                     critic_uncertainty: bool = False, **kwargs) -> InfoDict:
         """
         Updates the agent's networks asynchronously.
 
         :param batch: a Batch object.
         :param actor: whether to update the actor network.
         :param critic: whether to update the critic network.
-        :param value: whether to update the value network.
+        :param interval_value: whether to update the interval value network.
         :param average_value: whether to update the average_value network.
+        :param average_value_uncertainty: whether to update the average value uncertainty network.
+        :param interval_value_uncertainty: whether to update the interval value uncertainty network.
+        :param critic_uncertainty: whether to update the critic uncertainty network.
         :return: an InfoDict object containing metadata.
         """
 
@@ -225,30 +250,49 @@ class IQLAgent(BaseAgent):
         new_critic, critic_info = _update_critic_jit(
             self.critic, batch, **kwargs) if critic else (self.critic, {})
 
-        new_value, value_info = _update_value_jit(
-            self.value, batch, **kwargs) if value else (self.value, {})
+        new_interval_value, interval_value_info = _update_value_jit(
+            self.interval_value, batch, **kwargs) if interval_value else (self.interval_value, {})
 
         new_average_value, average_value_info = _update_value_jit(
             self.average_value, batch, **kwargs) if average_value else (self.average_value, {})
+
+        new_average_value_uncertainty, average_value_uncertainty_info = _update_value_jit(
+            self.average_value_uncertainty, batch, **kwargs) if average_value_uncertainty \
+            else (self.average_value_uncertainty, {})
+
+        new_interval_value_uncertainty, interval_value_uncertainty_info = _update_uncertainty_jit(
+            self.interval_value_uncertainty, batch, **kwargs) if interval_value_uncertainty \
+            else (self.interval_value_uncertainty, {})
+
+        new_critic_uncertainty, critic_uncertainty_info = _update_uncertainty_jit(
+            self.critic_uncertainty, batch, **kwargs) if critic_uncertainty \
+            else (self.critic_uncertainty, {})
 
         # Update the agent's networks with the updated copies
         self.rng = new_rng
         self.actor = new_actor
         self.critic = new_critic
-        self.value = new_value
+        self.interval_value = new_interval_value
         self.average_value = new_average_value
+        self.average_value_uncertainty = new_average_value_uncertainty
+        self.interval_value_uncertainty = new_interval_value_uncertainty
+        self.critic_uncertainty = new_critic_uncertainty
 
         # Return the metadata
         return {**critic_info,
-                **value_info,
+                **interval_value_info,
                 **actor_info,
                 **average_value_info,
+                **interval_value_uncertainty_info,
+                **critic_uncertainty_info,
+                **average_value_uncertainty_info,
                 }
 
     def sync_target(self, alpha=0.01):
         """
         Soft update of the target value network.
         """
+
         def soft_update_dict(source, target):
             new_params = {}
             for key, value in source.items():

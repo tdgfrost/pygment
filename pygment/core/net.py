@@ -32,7 +32,6 @@ class MLP(nn.Module):
     hidden_dims: Sequence[int]
     activations: Callable[[jnp.ndarray], jnp.ndarray] = nn.relu
     activate_final: int = False
-    Gaussian: bool = False
 
     @nn.compact
     def __call__(self, x: jnp.ndarray) -> tuple[dict[int, Any], Array | Any]:
@@ -48,9 +47,6 @@ class MLP(nn.Module):
         # Iterate through each layer
         for i, size in enumerate(self.hidden_dims):
             is_final_layer = i + 1 == len(self.hidden_dims)
-            if is_final_layer and self.Gaussian:
-                # If final output, we want double the outputs (for mean and variance)
-                size *= 2
 
             # Apply a dense layer
             """
@@ -68,10 +64,6 @@ class MLP(nn.Module):
                 self.activations(x),
                 x
             )
-
-            if is_final_layer and self.Gaussian:
-                if self.hidden_dims[-1] > 1:
-                    x = x.reshape(x.shape[:-1] + (-1, 2))
 
             layer_outputs[i] = x.copy()
 
@@ -105,8 +97,7 @@ class ValueNet(nn.Module):
 
         # Do a forward pass with the MLP
         layer_outputs, value = MLP((*self.hidden_dims, self.output_dims),
-                                   activations=self.activations,
-                                   Gaussian=True)(observations)
+                                   activations=self.activations)(observations)
 
         # Return the output
         if value.shape[-1] == 1:
@@ -149,8 +140,7 @@ class CriticNet(nn.Module):
 
         # Forward pass
         layer_outputs, critic = MLP((*self.hidden_dims, self.action_dims),
-                                    activations=self.activations,
-                                    Gaussian=True)(observations)
+                                    activations=self.activations)(observations)
 
         # Return the output of the MLP
         return {'MLP_0': layer_outputs}, critic
@@ -183,11 +173,9 @@ class DoubleCriticNet(nn.Module):
 
         # Forward pass for each critic network MLP
         layer_outputs_q1, critic1 = MLP((*self.hidden_dims, self.action_dims),
-                                        activations=self.activations,
-                                        Gaussian=True)(observations)
+                                        activations=self.activations)(observations)
         layer_outputs_q2, critic2 = MLP((*self.hidden_dims, self.action_dims),
-                                        activations=self.activations,
-                                        Gaussian=True)(observations)
+                                        activations=self.activations)(observations)
 
         # Return both outputs
         return {'MLP_0': layer_outputs_q1,

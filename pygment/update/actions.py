@@ -1,4 +1,4 @@
-from update.critic import update_q, update_v
+from update.critic import update_q, update_v, update_uncertainty
 from update.actor import update_policy
 from core.common import Batch
 
@@ -69,13 +69,14 @@ def _update_value_jit(
     }
 
 
+
 @jit
-def _update_advantage_jit(
-    advantage: Model, batch: Batch, **kwargs
+def _update_uncertainty_jit(
+    uncertainty: Model, batch: Batch, **kwargs
 ) -> tuple[Model, dict[Any, Any]]:
 
-    new_advantage, advantage_info = update_advantage(advantage, batch, **kwargs)
+    new_uncertainty, uncertainty_info = update_uncertainty(uncertainty, batch, **kwargs)
 
-    return new_advantage, {
-        **advantage_info
+    return new_uncertainty, {
+        **uncertainty_info
     }

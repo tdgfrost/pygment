@@ -8,7 +8,7 @@ import wandb
 from scipy.stats import norm
 
 # Set jax to CPU
-jax.config.update('jax_platform_name', 'cpu')
+# jax.config.update('jax_platform_name', 'cpu')
 # jax.config.update("jax_debug_nans", True)
 # jax.config.update('jax_disable_jit', True)
 
@@ -17,7 +17,7 @@ config = {'seed': 123,
           'env_id': 'CartPole-v1',
           'step_delay': 2,
           'sync_steps': 20,
-          'epochs': 100000,
+          'epochs': 20000,
           'early_stopping': jnp.array(1000),
           'batch_size': 10000,
           'expectile': 0.5,
@@ -112,6 +112,7 @@ if __name__ == "__main__":
 
     config['alpha_soft_update'] = jnp.array(config['alpha_soft_update'])
 
+
     # Make sure this matches with the desired dataset's extra_step metadata
     def extra_step_filter(x):
         # If tilted to the left
@@ -121,6 +122,7 @@ if __name__ == "__main__":
                 return config['step_delay']
         # Otherwise, normal time steps (no delay)
         return 0
+
 
     # Train agent
     def train(data):
@@ -173,45 +175,89 @@ if __name__ == "__main__":
                                 next_states=batch.next_states + noise)
             """
 
-            # Use TD learning for the value, average_value and critic networks
+            # Use TD learning for the value and critic networks
+            # 1) Create the discount gammas
             gammas = np.ones(shape=config['batch_size']) * config['gamma']
             gammas = np.power(gammas, np.array(batch.intervals))
 
-            # For Interval Value and Critic (from average value):
-            next_state_values_avg_mu, _ = split_output(np.array(agent.target_value(batch.next_states)[1]))
+            # 2) Calculate the discounted rewards for the value and critic networks
+            next_state_values_avg = np.array(agent.target_value(batch.next_states)[1])
 
             discounted_rewards_for_interval_and_critic = (np.array(batch.rewards)
-                                                          + gammas * next_state_values_avg_mu
+                                                          + gammas * next_state_values_avg
                                                           * (1 - np.array(batch.dones)))
 
-            batch = alter_batch(batch, discounted_rewards=jnp.array(discounted_rewards_for_interval_and_critic),
+            pred_v = np.array(filter_to_action(agent.interval_value(batch.states)[1], batch.len_actions))
+            pred_q = np.array(filter_to_action(jnp.minimum(*agent.critic(data.states)[1]), batch.actions))
+
+            pred_v -= discounted_rewards_for_interval_and_critic
+            pred_q -= discounted_rewards_for_interval_and_critic
+
+            batch = alter_batch(batch,
+                                discounted_rewards=jnp.array(discounted_rewards_for_interval_and_critic),
                                 episode_rewards=None, next_states=None, next_actions=None, action_logprobs=None)
 
             # Perform the update step for interval value and critic networks
             value_loss_info = agent.update_async(batch,
-                                                 value_loss_fn={'gaussian_expectile': 0},
-                                                 critic_loss_fn={'gaussian_expectile': 0},
+                                                 value_loss_fn={'expectile': 0},
+                                                 critic_loss_fn={'expectile': 0},
                                                  expectile=config['expectile'],
-                                                 value=True,
+                                                 interval_value=True,
                                                  critic=True)
 
-            # Then update for average network
-            (discounted_rewards_for_average_mu,
-             discounted_rewards_for_average_std) = split_output(agent.value(batch.states)[1])
-            discounted_rewards_for_average = (filter_to_action(discounted_rewards_for_average_mu, batch.len_actions),
-                                              filter_to_action(discounted_rewards_for_average_std, batch.len_actions))
+            value_loss_info['interval_value_loss'] = value_loss_info['value_loss']
+            del value_loss_info['value_loss']
+
+            # Update the uncertainty networks
+            batch = alter_batch(batch, discounted_rewards=jnp.array(pred_v))
+            interval_uncertainty_loss_info = agent.update_async(batch,
+                                                                uncertainty_loss_fn={'gaussian_nll': 0},
+                                                                interval_value_uncertainty=True,
+                                                                filter_interval=True)
+
+            batch = alter_batch(batch, discounted_rewards=jnp.array(pred_q))
+            critic_uncertainty_loss_info = agent.update_async(batch,
+                                                              uncertainty_loss_fn={'gaussian_nll': 0},
+                                                              critic_uncertainty=True,
+                                                              filter_critic=True)
+
+            critic_uncertainty_loss_info['critic_uncertainty_loss'] = critic_uncertainty_loss_info['uncertainty_loss']
+            interval_uncertainty_loss_info['interval_value_uncertainty_loss'] = interval_uncertainty_loss_info[
+                'uncertainty_loss']
+            del critic_uncertainty_loss_info['uncertainty_loss']
+            del interval_uncertainty_loss_info['uncertainty_loss']
+
+            # Then update for average network, and average_uncertainty network
+            discounted_rewards_for_average = agent.interval_value(batch.states)[1]
+            discounted_rewards_for_average = filter_to_action(discounted_rewards_for_average, batch.len_actions)
+
+            predicted_uncertainty_for_average = agent.interval_value_uncertainty(batch.states)[1]
+            predicted_uncertainty_for_average = filter_to_action(predicted_uncertainty_for_average, batch.len_actions)
 
             batch = alter_batch(batch,
                                 discounted_rewards=discounted_rewards_for_average)
 
             average_value_loss_info = agent.update_async(batch,
-                                                         value_loss_fn={'gaussian_mse': 0},
+                                                         value_loss_fn={'mse': 0},
                                                          average_value=True)
 
+            batch = alter_batch(batch,
+                                discounted_rewards=predicted_uncertainty_for_average)
+
+            average_uncertainty_loss_info = agent.update_async(batch,
+                                                               value_loss_fn={'mse': 0},
+                                                               average_value_uncertainty=True)
+
             average_value_loss_info['average_value_loss'] = average_value_loss_info['value_loss']
+            average_uncertainty_loss_info['average_value_uncertainty_loss'] = average_uncertainty_loss_info[
+                'value_loss']
             del average_value_loss_info['value_loss']
+            del average_uncertainty_loss_info['value_loss']
 
             value_loss_info.update(average_value_loss_info)
+            value_loss_info.update(interval_uncertainty_loss_info)
+            value_loss_info.update(average_uncertainty_loss_info)
+            value_loss_info.update(critic_uncertainty_loss_info)
 
             agent.sync_target(config['alpha_soft_update'])
 
@@ -222,7 +268,10 @@ if __name__ == "__main__":
                                   'gradient_step': epoch,
                                   'average_value_loss': value_loss_info['average_value_loss'],
                                   'critic_loss': value_loss_info['critic_loss'],
-                                  'value_loss': value_loss_info['value_loss'],
+                                  'interval_value_loss': value_loss_info['interval_value_loss'],
+                                  'interval_uncertainty_loss': value_loss_info['interval_value_uncertainty_loss'],
+                                  'average_uncertainty_loss': value_loss_info['average_value_uncertainty_loss'],
+                                  'critic_uncertainty_loss': value_loss_info['critic_uncertainty_loss'],
                                   }
 
                 wandb.log(logged_results)
@@ -230,14 +279,16 @@ if __name__ == "__main__":
         # Then start training actor
         total_training_steps = jnp.array(0)
         # Filter out irrelevant data
-        state_values_mu, state_values_std = split_output(agent.target_value(data.states)[1])
+        state_values = agent.target_value(data.states)[1]
+        value_uncertainties = agent.average_value_uncertainty(data.states)[1]
 
-        critic_values_mu, critic_values_std = split_output(jnp.minimum(*agent.critic(data.states)[1]))
-        critic_values_mu, critic_values_std = (filter_to_action(critic_values_mu, data.actions),
-                                               filter_to_action(critic_values_std, data.actions))
+        critic_values = jnp.minimum(*agent.critic(data.states)[1])
+        critic_values = filter_to_action(critic_values, data.actions)
+        critic_uncertainties = agent.critic_uncertainty(data.states)[1]
+        critic_uncertainties = filter_to_action(critic_uncertainties, data.actions)
 
-        advantages_mu = np.array(critic_values_mu - state_values_mu)
-        advantages_std = np.sqrt(np.array(critic_values_std ** 2 + state_values_std ** 2))
+        advantages_mu = np.array(critic_values - state_values)
+        advantages_std = np.sqrt(np.array(critic_uncertainties ** 2 + value_uncertainties ** 2))
 
         if 'filter_point' not in config.keys():
             filter_point = np.quantile(np.array(advantages_mu), config['top_actions_quantile'])
@@ -294,7 +345,10 @@ if __name__ == "__main__":
                 agent.actor.save(os.path.join(model_dir, 'model_checkpoints/actor'))
                 agent.target_value.save(os.path.join(model_dir, 'model_checkpoints/average_value'))
                 agent.critic.save(os.path.join(model_dir, 'model_checkpoints/critic'))
-                agent.value.save(os.path.join(model_dir, 'model_checkpoints/value'))
+                agent.interval_value.save(os.path.join(model_dir, 'model_checkpoints/interval_value'))
+                agent.average_value_uncertainty.save(os.path.join(model_dir, 'model_checkpoints/average_value_uncertainty'))
+                agent.interval_value_uncertainty.save(os.path.join(model_dir, 'model_checkpoints/interval_value_uncertainty'))
+                agent.critic_uncertainty.save(os.path.join(model_dir, 'model_checkpoints/critic_uncertainty'))
 
         # Evaluate agent
         n_envs = 1000

@@ -49,7 +49,7 @@ def expectile_loss(pred, batch, expectile=0.5, **kwargs):
     return weight * diff ** 2
 
 
-def mc_mse_loss(pred, batch, **kwargs):
+def mse_loss(pred, batch, **kwargs):
     return (pred - batch.discounted_rewards) ** 2
 
 
@@ -60,12 +60,13 @@ def gaussian_mse_loss(pred, batch, **kwargs):
     return (pred_mu - target_mu) ** 2 + (pred_std - target_std) ** 2
 
 
-def gaussian_nll_loss(pred, batch, **kwargs):
-    pred_mu, pred_std = pred
+def gaussian_nll_loss(sigma, batch, **kwargs):
     eps = 1e-8 if 'eps' not in kwargs.keys() else kwargs['eps']
 
-    return 0.5 * (jnp.log(jnp.maximum(pred_std ** 2, eps))
-                  + (pred_mu - batch.discounted_rewards) ** 2 / jnp.maximum(pred_std ** 2, eps))
+    s_i = jnp.log(jnp.maximum(sigma ** 2, eps))
+
+    # Here, batch.discounted_rewards represents the difference between V(s) and r + gamma * V(s')
+    return 0.5 * (jnp.exp(-s_i) * batch.discounted_rewards ** 2 + s_i)
 
 
 def gaussian_expectile_loss(pred, batch, expectile=0.5, **kwargs):
