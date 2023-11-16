@@ -159,17 +159,20 @@ class IQLAgent(BaseAgent):
 
         self.critic = Model.create(DoubleCriticNet(hidden_dims, self.action_dim),
                                    inputs=[self.critic_key, observations],
-                                   optim=optax.adam(learning_rate=critic_lr),
+                                   # optim=optax.adam(learning_rate=critic_lr),
+                                   optim=optimiser,
                                    continual_learning=continual_learning)
 
         self.value = Model.create(ValueNet(hidden_dims, 1),
                                   inputs=[self.value_key, observations],
-                                  optim=optax.adam(learning_rate=value_lr),
+                                  # optim=optax.adam(learning_rate=value_lr),
+                                  optim=optimiser,
                                   continual_learning=continual_learning)
 
         self.target_value = Model.create(ValueNet(hidden_dims, 1),
                                          inputs=[self.value_key, observations],
-                                         optim=optax.adam(learning_rate=value_lr),
+                                         # optim=optax.adam(learning_rate=value_lr),
+                                         optim=optimiser,
                                          continual_learning=continual_learning)
 
         self.sync_target(alpha=1.0)
