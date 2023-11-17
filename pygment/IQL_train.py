@@ -351,8 +351,6 @@ if __name__ == "__main__":
                 agent.interval_value.save(os.path.join(model_dir, 'model_checkpoints/interval_value'))
                 agent.average_value_uncertainty.save(os.path.join(model_dir,
                                                                   'model_checkpoints/average_value_uncertainty'))
-                agent.interval_value_uncertainty.save(os.path.join(model_dir,
-                                                                   'model_checkpoints/interval_value_uncertainty'))
                 agent.critic_uncertainty.save(os.path.join(model_dir, 'model_checkpoints/critic_uncertainty'))
 
         # Evaluate agent
