@@ -20,13 +20,12 @@ config = {'seed': 123,
           'epochs': 10000,
           'early_stopping': jnp.array(1000),
           'batch_size': 10000,
-          'expectile': 0.5,
+          'expectile': 0.8,
           'baseline_reward': 124,
           'n_episodes': 10000,
           'interval_probability': 0.25,
-          'top_actions_quantile': 0.5,
-          'filter_point': 0,
-          'gaussian_confidence': 0.5,
+          'gaussian_confidence': None,
+          'exclude_actions_quantile': 0.2,
           'gamma': 0.99,
           'lr': 0.001,
           'alpha_soft_update': 1,
@@ -149,7 +148,7 @@ if __name__ == "__main__":
         # Standardise the state inputs
         agent.standardise_inputs(data.states)
 
-        print('\n\n', '=' * 50, '\n', ' ' * 3, '\U0001F483' * 3, ' ' * 1, f'Training network',
+        print('\n\n', '=' * 50, '\n', ' ' * 3, '\U0001F483' * 3, ' ' * 1, f'Training value networks',
               ' ' * 2, '\U0001F483' * 3, '\n', '=' * 50, '\n')
 
         if logging_bool:
@@ -234,19 +233,23 @@ if __name__ == "__main__":
                 wandb.log(logged_results)
 
         # Perform MC dropout inference to assess uncertainty in values
+        print('\n\n', '=' * 50, '\n', ' ' * 3, '\U0001F9D9' * 3, ' ' * 1, f'Calculating uncertainty',
+              ' ' * 2, '\U0001F9D9' * 3, '\n', '=' * 50, '\n')
+
         agent.refresh_keys()
         state_values = np.array(agent.target_value(data.states,
                                                    rngs={'dropout': agent.target_value_key})[1])
         state_value_shape = state_values.shape
         state_values = state_values.reshape(1, *state_value_shape)
 
-        critic_values = jnp.minimum(*agent.critic(data.states,
-                                                  rngs={'dropout': agent.critic_key})[1])
+        critic_values = agent.critic(data.states,
+                                     rngs={'dropout': agent.critic_key})[1]
         critic_values = np.array(filter_to_action(critic_values, data.actions))
         critic_values_shape = critic_values.shape
         critic_values = critic_values.reshape(1, *critic_values_shape)
 
-        for _ in range(100):
+        for _ in range(10):
+            progress_bar(_, 10)
             agent.refresh_keys()
             state_values = np.concatenate((state_values,
                                            np.array(agent.target_value(data.states,
@@ -254,8 +257,8 @@ if __name__ == "__main__":
                                                     ).reshape(1, *state_value_shape)))
             critic_values = np.concatenate((critic_values,
                                             np.array(filter_to_action(
-                                                jnp.minimum(*agent.critic(data.states,
-                                                                          rngs={'dropout': agent.critic_key})[1]),
+                                                agent.critic(data.states,
+                                                             rngs={'dropout': agent.critic_key})[1],
                                                 data.actions)).reshape(1, *critic_values_shape)))
 
         state_values_mean = np.mean(state_values, axis=0)
@@ -266,21 +269,30 @@ if __name__ == "__main__":
         advantages = critic_values_mean - state_values_mean
         advantages_std = np.sqrt(state_values_std ** 2 + critic_values_std ** 2)
 
+        """
         if 'filter_point' not in config.keys():
             filter_point = np.quantile(np.array(advantages), config['top_actions_quantile'])
         else:
             filter_point = config['filter_point']
+        """
 
-        # Filter at 95th percentile of "good" actions
-        filter_bool = 1 - norm.cdf(filter_point,
-                                   advantages,
-                                   advantages_std) > config['gaussian_confidence']
+        # Filter for top x% of "good" actions
+        cdf = 1 - norm.cdf(0, advantages, advantages_std)
+        if 'gaussian_confidence' in config.keys() and config['gaussian_confidence'] is not None:
+            filter_point = config['gaussian_confidence']
+        else:
+            filter_point = np.quantile(cdf, config['exclude_actions_quantile'])
+
+        filter_bool = cdf > filter_point
 
         if np.sum(filter_bool) < config['batch_size']:
             return agent
 
         data = filter_dataset(data, filter_bool,
                               target_keys=['states', 'actions'])
+
+        print('\n\n', '=' * 50, '\n', ' ' * 3, '\U0001F483' * 3, ' ' * 1, f'Training actor',
+              ' ' * 2, '\U0001F483' * 3, '\n', '=' * 50, '\n')
 
         # Now we start training the actor
         for epoch in range(config['epochs']):
