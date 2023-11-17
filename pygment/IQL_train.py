@@ -8,7 +8,7 @@ import wandb
 from scipy.stats import norm
 
 # Set jax to CPU
-jax.config.update('jax_platform_name', 'cpu')
+# jax.config.update('jax_platform_name', 'cpu')
 # jax.config.update("jax_debug_nans", True)
 # jax.config.update('jax_disable_jit', True)
 
@@ -17,7 +17,7 @@ config = {'seed': 123,
           'env_id': 'CartPole-v1',
           'step_delay': 2,
           'sync_steps': 20,
-          'epochs': 20000,
+          'epochs': 10000,
           'early_stopping': jnp.array(1000),
           'batch_size': 10000,
           'expectile': 0.5,
@@ -245,7 +245,7 @@ if __name__ == "__main__":
                                                           + gammas * next_state_values_avg
                                                           * (1 - np.array(batch.dones)))
 
-            pred_v = np.array(filter_to_action(agent.interval_value(batch.states)[1], batch.len_actions))
+            pred_v = np.array(agent.target_value(batch.states)[1])
             pred_q = np.array(filter_to_action(jnp.minimum(*agent.critic(data.states)[1]), batch.actions))
 
             pred_v -= discounted_rewards_for_interval_and_critic
@@ -253,9 +253,8 @@ if __name__ == "__main__":
 
             batch = alter_batch(batch, discounted_rewards=jnp.array(pred_v))
             uncertainty_loss_info = agent.update_async(batch,
-                                                                uncertainty_loss_fn={'gaussian_nll': 0},
-                                                                interval_value_uncertainty=True,
-                                                                filter_interval=True)
+                                                       uncertainty_loss_fn={'gaussian_nll': 0},
+                                                       average_value_uncertainty=True)
 
             batch = alter_batch(batch, discounted_rewards=jnp.array(pred_q))
             critic_uncertainty_loss_info = agent.update_async(batch,
@@ -264,27 +263,11 @@ if __name__ == "__main__":
                                                               filter_critic=True)
 
             critic_uncertainty_loss_info['critic_uncertainty_loss'] = critic_uncertainty_loss_info['uncertainty_loss']
-            uncertainty_loss_info['interval_value_uncertainty_loss'] = uncertainty_loss_info['uncertainty_loss']
+            uncertainty_loss_info['average_value_uncertainty_loss'] = uncertainty_loss_info['uncertainty_loss']
             del critic_uncertainty_loss_info['uncertainty_loss']
             del uncertainty_loss_info['uncertainty_loss']
 
-            # Then update the average_uncertainty network
-            predicted_uncertainty_for_average = agent.interval_value_uncertainty(batch.states)[1]
-            predicted_uncertainty_for_average = filter_to_action(predicted_uncertainty_for_average, batch.len_actions)
-
-            batch = alter_batch(batch,
-                                discounted_rewards=predicted_uncertainty_for_average)
-
-            average_uncertainty_loss_info = agent.update_async(batch,
-                                                               value_loss_fn={'mse': 0},
-                                                               average_value_uncertainty=True)
-
-            average_uncertainty_loss_info['average_value_uncertainty_loss'] = average_uncertainty_loss_info[
-                'value_loss']
-            del average_uncertainty_loss_info['value_loss']
-
             uncertainty_loss_info.update(critic_uncertainty_loss_info)
-            uncertainty_loss_info.update(average_uncertainty_loss_info)
 
             agent.sync_target(config['alpha_soft_update'])
 
@@ -292,7 +275,6 @@ if __name__ == "__main__":
             if logging_bool:
                 # Log results
                 logged_results = {'gradient_step': epoch,
-                                  'interval_uncertainty_loss': uncertainty_loss_info['interval_value_uncertainty_loss'],
                                   'average_uncertainty_loss': uncertainty_loss_info['average_value_uncertainty_loss'],
                                   'critic_uncertainty_loss': uncertainty_loss_info['critic_uncertainty_loss'],
                                   }

@@ -61,12 +61,13 @@ def gaussian_mse_loss(pred, batch, **kwargs):
 
 
 def gaussian_nll_loss(sigma, batch, **kwargs):
-    eps = 1e-8 if 'eps' not in kwargs.keys() else kwargs['eps']
+    eps = 1e-4 if 'eps' not in kwargs.keys() else kwargs['eps']
 
-    s_i = jnp.log(jnp.maximum(sigma ** 2, eps))
+    s_i = jnp.maximum(sigma ** 2, eps)
+    log_s_i = jnp.log(s_i)
 
     # Here, batch.discounted_rewards represents the difference between V(s) and r + gamma * V(s')
-    return 0.5 * (jnp.exp(-s_i) * batch.discounted_rewards ** 2 + s_i)
+    return 0.5 * ((1/s_i) * jnp.sqrt(batch.discounted_rewards ** 2) + log_s_i)
 
 
 def gaussian_expectile_loss(pred, batch, expectile=0.5, **kwargs):

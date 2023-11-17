@@ -167,12 +167,6 @@ class IQLAgent(BaseAgent):
                                            optim=optimiser,
                                            continual_learning=continual_learning)
 
-        self.interval_value_uncertainty = Model.create(ValueNet(hidden_dims, len(self.intervals_unique)),
-                                                       inputs=[self.value_key, observations],
-                                                       # optim=optax.adam(learning_rate=value_lr),
-                                                       optim=optimiser,
-                                                       continual_learning=continual_learning)
-
         self.critic_uncertainty = Model.create(ValueNet(hidden_dims, self.action_dim),
                                                inputs=[self.value_key, observations],
                                                # optim=optax.adam(learning_rate=value_lr),
@@ -199,8 +193,8 @@ class IQLAgent(BaseAgent):
 
         self.sync_target(1.0)
 
-        self.networks = [self.actor, self.critic, self.interval_value, self.interval_value_uncertainty,
-                         self.critic_uncertainty, self.average_value, self.average_value_uncertainty, self.target_value]
+        self.networks = [self.actor, self.critic, self.interval_value, self.critic_uncertainty,
+                         self.average_value, self.average_value_uncertainty, self.target_value]
 
     def update(self, batch: Batch, **kwargs) -> InfoDict:
         """
@@ -227,7 +221,6 @@ class IQLAgent(BaseAgent):
     def update_async(self, batch: Batch, actor: bool = False,
                      critic: bool = False, interval_value: bool = False,
                      average_value: bool = False, average_value_uncertainty: bool = False,
-                     interval_value_uncertainty: bool = False,
                      critic_uncertainty: bool = False, **kwargs) -> InfoDict:
         """
         Updates the agent's networks asynchronously.
@@ -238,7 +231,6 @@ class IQLAgent(BaseAgent):
         :param interval_value: whether to update the interval value network.
         :param average_value: whether to update the average_value network.
         :param average_value_uncertainty: whether to update the average value uncertainty network.
-        :param interval_value_uncertainty: whether to update the interval value uncertainty network.
         :param critic_uncertainty: whether to update the critic uncertainty network.
         :return: an InfoDict object containing metadata.
         """
@@ -256,13 +248,9 @@ class IQLAgent(BaseAgent):
         new_average_value, average_value_info = _update_value_jit(
             self.average_value, batch, **kwargs) if average_value else (self.average_value, {})
 
-        new_average_value_uncertainty, average_value_uncertainty_info = _update_value_jit(
+        new_average_value_uncertainty, average_value_uncertainty_info = _update_uncertainty_jit(
             self.average_value_uncertainty, batch, **kwargs) if average_value_uncertainty \
             else (self.average_value_uncertainty, {})
-
-        new_interval_value_uncertainty, interval_value_uncertainty_info = _update_uncertainty_jit(
-            self.interval_value_uncertainty, batch, **kwargs) if interval_value_uncertainty \
-            else (self.interval_value_uncertainty, {})
 
         new_critic_uncertainty, critic_uncertainty_info = _update_uncertainty_jit(
             self.critic_uncertainty, batch, **kwargs) if critic_uncertainty \
@@ -275,7 +263,6 @@ class IQLAgent(BaseAgent):
         self.interval_value = new_interval_value
         self.average_value = new_average_value
         self.average_value_uncertainty = new_average_value_uncertainty
-        self.interval_value_uncertainty = new_interval_value_uncertainty
         self.critic_uncertainty = new_critic_uncertainty
 
         # Return the metadata
@@ -283,7 +270,6 @@ class IQLAgent(BaseAgent):
                 **interval_value_info,
                 **actor_info,
                 **average_value_info,
-                **interval_value_uncertainty_info,
                 **critic_uncertainty_info,
                 **average_value_uncertainty_info,
                 }
