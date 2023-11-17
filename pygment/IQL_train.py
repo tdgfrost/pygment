@@ -116,7 +116,6 @@ if __name__ == "__main__":
 
     config['alpha_soft_update'] = jnp.array(config['alpha_soft_update'])
 
-
     # Make sure this matches with the desired dataset's extra_step metadata
     def extra_step_filter(x):
         # If tilted to the left
@@ -126,7 +125,6 @@ if __name__ == "__main__":
                 return config['step_delay']
         # Otherwise, normal time steps (no delay)
         return 0
-
 
     # Train agent
     def train(data):
@@ -153,8 +151,6 @@ if __name__ == "__main__":
 
         print('\n\n', '=' * 50, '\n', ' ' * 3, '\U0001F483' * 3, ' ' * 1, f'Training network',
               ' ' * 2, '\U0001F483' * 3, '\n', '=' * 50, '\n')
-
-        total_training_steps = jnp.array(0)
 
         if logging_bool:
             # Keep track of the best loss values
@@ -222,8 +218,7 @@ if __name__ == "__main__":
             # Log intermittently
             if logging_bool:
                 # Log results
-                logged_results = {'training_step': total_training_steps,
-                                  'gradient_step': epoch,
+                logged_results = {'gradient_step': epoch,
                                   'average_value_loss': value_loss_info['average_value_loss'],
                                   'critic_loss': value_loss_info['critic_loss'],
                                   'value_loss': value_loss_info['value_loss'],
@@ -231,20 +226,35 @@ if __name__ == "__main__":
 
                 wandb.log(logged_results)
 
-        # Then start training actor
-        total_training_steps = jnp.array(0)
-        # Filter out irrelevant data
-        state_values = agent.target_value(data.states)[1]
+        # Perform MC dropout inference to assess uncertainty in values
+        state_values = np.array(agent.target_value(data.states)[1])
+        state_value_shape = state_values.shape
 
         critic_values = jnp.minimum(*agent.critic(data.states)[1])
-        critic_values = filter_to_action(critic_values, data.actions)
+        critic_values = np.array(filter_to_action(critic_values, data.actions))
+        critic_values_shape = critic_values.shape
+
+        for _ in range(1000):
+            state_values = np.concatenate((state_values,
+                                           np.array(agent.target_value(data.states)[1]).reshape(1, *state_value_shape)))
+            critic_values = np.concatenate((critic_values,
+                                            np.array(filter_to_action(jnp.minimum(*agent.critic(data.states)[1]),
+                                                                      data.actions)).reshape(1, *critic_values_shape)))
+
+        state_values_mean = np.mean(state_values, axis=0)
+        state_values_std = np.std(state_values, axis=0)
+        critic_values_mean = np.mean(critic_values, axis=0)
+        critic_values_std = np.std(critic_values, axis=0)
 
         advantages = critic_values - state_values
+        advantages_std = np.sqrt(state_values_std ** 2 + critic_values_std ** 2)
 
         if 'filter_point' not in config.keys():
             filter_point = np.quantile(np.array(advantages), config['top_actions_quantile'])
         else:
             filter_point = config['filter_point']
+
+        
 
         if np.sum(np.array(advantages) > filter_point) < config['batch_size']:
             return agent
@@ -252,6 +262,7 @@ if __name__ == "__main__":
         data = filter_dataset(data, np.array(advantages) > filter_point,
                               target_keys=['states', 'actions'])
 
+        # Now we start training the actor
         for epoch in range(config['epochs']):
             if epoch > 0 and epoch % 100 == 0:
                 print(f'\n\n{epoch} epochs complete!\n')
@@ -277,8 +288,7 @@ if __name__ == "__main__":
             # Log intermittently
             if logging_bool:
                 # Log results
-                logged_results = {'training_step': total_training_steps,
-                                  'gradient_step': epoch,
+                logged_results = {'gradient_step': epoch,
                                   'actor_loss': actor_loss_info['actor_loss'],
                                   }
                 if epoch % config['sync_steps'] == 0:
