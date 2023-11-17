@@ -6,6 +6,7 @@ import numpy as np
 
 import jax
 from jax import grad, Array, jit
+from jax.random import PRNGKey
 from flax import struct
 import flax.linen as nn
 from flax.training import orbax_utils
@@ -32,10 +33,10 @@ class MLP(nn.Module):
     hidden_dims: Sequence[int]
     activations: Callable[[jnp.ndarray], jnp.ndarray] = nn.relu
     activate_final: int = False
-    dropout_rate: Optional[float] = None
+    dropout_rate: Optional[float] = 0.0
 
     @nn.compact
-    def __call__(self, x: jnp.ndarray) -> tuple[dict[int, Any], Array | Any]:
+    def __call__(self, x: jnp.ndarray, deterministic=False) -> tuple[dict[int, Any], Array | Any]:
         """
         MLP forward pass.
 
@@ -57,17 +58,19 @@ class MLP(nn.Module):
 
             # Apply the activation function
             before_final_layer = i + 1 < len(self.hidden_dims) or self.activate_final
-            is_dropout = self.dropout_rate is not None and before_final_layer
 
             x = jax.lax.select(
                 before_final_layer,
                 self.activations(x),
                 x
             )
-
+            """
+            if is_dropout:
+                x = nn.Dropout(rate=self.dropout_rate)(x, deterministic=False)
+            """
             x = jax.lax.select(
-                is_dropout,
-                nn.Dropout(rate=self.dropout_rate)(x, deterministic=False),
+                before_final_layer,
+                nn.Dropout(rate=self.dropout_rate)(x, deterministic=deterministic),
                 x
             )
 
@@ -91,7 +94,7 @@ class ValueNet(nn.Module):
     dropout_rate: float = 0.1
 
     @nn.compact
-    def __call__(self, observations: jnp.ndarray, input_mean=0, input_std=1) -> tuple[dict[str, dict[int, Any]], Array]:
+    def __call__(self, observations: jnp.ndarray, input_mean=0, input_std=1, **kwargs) -> tuple[dict[str, dict[int, Any]], Array]:
         """
         Value network forward pass.
 
@@ -105,7 +108,7 @@ class ValueNet(nn.Module):
         # Do a forward pass with the MLP
         layer_outputs, value = MLP((*self.hidden_dims, self.output_dims),
                                    activations=self.activations,
-                                   dropout_rate=self.dropout_rate)(observations)
+                                   dropout_rate=self.dropout_rate)(observations, **kwargs)
 
         # Return the output
         if value.shape[-1] == 1:
@@ -130,7 +133,7 @@ class CriticNet(nn.Module):
     dropout_rate: float = 0.1
 
     @nn.compact
-    def __call__(self, observations: jnp.ndarray, input_mean=0, input_std=1) -> tuple[dict[str, dict[int, Any]], Any]:
+    def __call__(self, observations: jnp.ndarray, input_mean=0, input_std=1, **kwargs) -> tuple[dict[str, dict[int, Any]], Any]:
         """
         Critic network forward pass.
 
@@ -150,7 +153,7 @@ class CriticNet(nn.Module):
         # Forward pass
         layer_outputs, critic = MLP((*self.hidden_dims, self.action_dims),
                                     activations=self.activations,
-                                    dropout_rate=self.dropout_rate)(observations)
+                                    dropout_rate=self.dropout_rate)(observations, **kwargs)
 
         # Return the output of the MLP
         return {'MLP_0': layer_outputs}, critic
@@ -172,7 +175,7 @@ class DoubleCriticNet(nn.Module):
     dropout_rate: float = 0.1
 
     @nn.compact
-    def __call__(self, observations: jnp.ndarray, input_mean=0, input_std=1) -> tuple[dict[str, dict[int, Any]], tuple[Any, Any]]:
+    def __call__(self, observations: jnp.ndarray, input_mean=0, input_std=1, **kwargs) -> tuple[dict[str, dict[int, Any]], tuple[Any, Any]]:
         """
         Double critic network forward pass.
 
@@ -185,10 +188,10 @@ class DoubleCriticNet(nn.Module):
         # Forward pass for each critic network MLP
         layer_outputs_q1, critic1 = MLP((*self.hidden_dims, self.action_dims),
                                         activations=self.activations,
-                                        dropout_rate=self.dropout_rate)(observations)
+                                        dropout_rate=self.dropout_rate)(observations, **kwargs)
         layer_outputs_q2, critic2 = MLP((*self.hidden_dims, self.action_dims),
                                         activations=self.activations,
-                                        dropout_rate=self.dropout_rate)(observations)
+                                        dropout_rate=self.dropout_rate)(observations, **kwargs)
 
         # Return both outputs
         return {'MLP_0': layer_outputs_q1,
@@ -210,7 +213,7 @@ class ActorNet(nn.Module):
     activations: Callable[[jnp.ndarray], jnp.ndarray] = nn.relu
 
     @nn.compact
-    def __call__(self, observations: jnp.ndarray, input_mean=0, input_std=1) -> tuple[dict[str, dict[int, Any]], Any]:
+    def __call__(self, observations: jnp.ndarray, input_mean=0, input_std=1, **kwargs) -> tuple[dict[str, dict[int, Any]], Any]:
         """
         Actor network forward pass.
 
@@ -221,7 +224,7 @@ class ActorNet(nn.Module):
         observations = (observations - input_mean) / input_std
 
         # Forward pass with the MLP
-        layer_outputs, logits = MLP((*self.hidden_dims, self.action_dims))(observations)
+        layer_outputs, logits = MLP((*self.hidden_dims, self.action_dims))(observations, **kwargs)
 
         # Return the output
         return {'MLP_0': layer_outputs}, logits
@@ -275,7 +278,7 @@ class Model:
         """
 
         # Initialise the neural network
-        variables = model_def.init(*inputs)
+        variables = model_def.init(*inputs, deterministic=True)
 
         # Extract the parameters (variables: dictionary has only one key, 'params')
         params = variables.pop('params')
@@ -312,7 +315,7 @@ class Model:
                    bias_corrected_util=bias_corrected_util)
 
     @jit
-    def __call__(self, *args):
+    def __call__(self, *args, **kwargs):
         """
         Forward pass through the neural network.
 
@@ -322,7 +325,8 @@ class Model:
 
         return self.network.apply({'params': self.params}, *args,
                                   input_mean=self.input_mean,
-                                  input_std=self.input_std)
+                                  input_std=self.input_std,
+                                  **kwargs)
 
     @jit
     def apply(self, *args, **kwargs):

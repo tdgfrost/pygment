@@ -1,6 +1,6 @@
 from core.net import Model, ValueNet, ActorNet, DoubleCriticNet, CriticNet
 from core.common import Batch, InfoDict
-from update.actions import _update_jit, _update_value_jit, _update_critic_jit, _update_actor_jit, _update_advantage_jit
+from update.actions import _update_jit, _update_value_jit, _update_critic_jit, _update_actor_jit
 
 import os
 import datetime as dt
@@ -107,9 +107,7 @@ class IQLAgent(BaseAgent):
                  observations: np.ndarray,
                  action_dim: int,
                  intervals_unique: np.ndarray,
-                 actor_lr: float = 3e-4,
-                 value_lr: float = 3e-4,
-                 critic_lr: float = 3e-4,
+                 lr: float = 3e-4,
                  hidden_dims: Sequence[int] = (256, 256),
                  gamma: float = 0.99,
                  expectile: float = 0.8,
@@ -125,7 +123,8 @@ class IQLAgent(BaseAgent):
 
         # Set random seed
         rng = jax.random.PRNGKey(seed)
-        self.rng, self.actor_key, self.critic_key, self.value_key = jax.random.split(rng, 4)
+        (self.rng, self.actor_key, self.critic_key, self.interval_value_key, self.average_value_key,
+         self.target_value_key) = jax.random.split(rng, 6)
 
         # Set parameters
         self.action_dim = action_dim
@@ -137,12 +136,12 @@ class IQLAgent(BaseAgent):
 
         # Set optimizers
         if opt_decay_schedule == "cosine":
-            schedule_fn = optax.cosine_decay_schedule(-actor_lr, epochs)
+            schedule_fn = optax.cosine_decay_schedule(-lr, epochs)
             optimiser = optax.chain(optax.clip_by_global_norm(clipping),
                                     optax.scale_by_adam(),
                                     optax.scale_by_schedule(schedule_fn))
         else:
-            optimiser = optax.adam(learning_rate=actor_lr)
+            optimiser = optax.adam(learning_rate=lr)
 
         """
         Each Model essentially contains a neural network structure, parameters, and optimiser.
@@ -153,34 +152,30 @@ class IQLAgent(BaseAgent):
                                   inputs=[self.actor_key, observations],
                                   optim=optimiser,
                                   continual_learning=continual_learning)
-
+        
         self.critic = Model.create(DoubleCriticNet(hidden_dims, self.action_dim),
                                    inputs=[self.critic_key, observations],
-                                   # optim=optax.adam(learning_rate=critic_lr),
                                    optim=optimiser,
                                    continual_learning=continual_learning)
 
-        self.value = Model.create(ValueNet(hidden_dims, len(self.intervals_unique)),
-                                  inputs=[self.value_key, observations],
-                                  # optim=optax.adam(learning_rate=value_lr),
-                                  optim=optimiser,
-                                  continual_learning=continual_learning)
+        self.interval_value = Model.create(ValueNet(hidden_dims, len(self.intervals_unique)),
+                                           inputs=[self.interval_value_key, observations],
+                                           optim=optimiser,
+                                           continual_learning=continual_learning)
 
         self.average_value = Model.create(ValueNet(hidden_dims, 1),
-                                          inputs=[self.value_key, observations],
-                                          # optim=optax.adam(learning_rate=value_lr),
+                                          inputs=[self.average_value_key, observations],
                                           optim=optimiser,
                                           continual_learning=continual_learning)
 
         self.target_value = Model.create(ValueNet(hidden_dims, 1),
-                                         inputs=[self.value_key, observations],
-                                         # optim=optax.adam(learning_rate=value_lr),
+                                         inputs=[self.target_value_key, observations],
                                          optim=optimiser,
                                          continual_learning=continual_learning)
 
         self.sync_target(1.0)
 
-        self.networks = [self.actor, self.critic, self.value, self.average_value, self.target_value]
+        self.networks = [self.actor, self.critic, self.interval_value, self.average_value, self.target_value]
 
     def update(self, batch: Batch, **kwargs) -> InfoDict:
         """
@@ -205,7 +200,7 @@ class IQLAgent(BaseAgent):
         return info
 
     def update_async(self, batch: Batch, actor: bool = False,
-                     critic: bool = False, value: bool = False,
+                     critic: bool = False, interval_value: bool = False,
                      average_value: bool = False, **kwargs) -> InfoDict:
         """
         Updates the agent's networks asynchronously.
@@ -213,34 +208,39 @@ class IQLAgent(BaseAgent):
         :param batch: a Batch object.
         :param actor: whether to update the actor network.
         :param critic: whether to update the critic network.
-        :param value: whether to update the value network.
+        :param interval_value: whether to update the interval_value network.
         :param average_value: whether to update the average_value network.
         :return: an InfoDict object containing metadata.
         """
 
         # Create an updated copy of the required networks
-        new_rng, new_actor, actor_info = _update_actor_jit(
-            self.rng, self.actor, batch, **kwargs) if actor else (self.rng, self.actor, {})
+        new_actor, actor_info = _update_actor_jit(
+            self.actor, batch, **kwargs) if actor else (self.actor, {})
 
-        new_critic, critic_info = _update_critic_jit(
-            self.critic, batch, **kwargs) if critic else (self.critic, {})
+        new_critic_rng, new_critic, critic_info = _update_critic_jit(
+            self.critic_key, self.critic, batch, **kwargs) if critic else (self.critic_key, self.critic, {})
 
-        new_value, value_info = _update_value_jit(
-            self.value, batch, **kwargs) if value else (self.value, {})
+        new_interval_value_rng, new_interval_value, interval_value_info = _update_value_jit(
+            self.interval_value_key, self.interval_value, batch, **kwargs) \
+            if interval_value else (self.interval_value_key, self.interval_value, {})
 
-        new_average_value, average_value_info = _update_value_jit(
-            self.average_value, batch, **kwargs) if average_value else (self.average_value, {})
+        new_average_value_rng, new_average_value, average_value_info = _update_value_jit(
+            self.average_value_key, self.average_value, batch, **kwargs) if average_value else (self.average_value_key,
+                                                                                                self.average_value, {})
 
         # Update the agent's networks with the updated copies
-        self.rng = new_rng
         self.actor = new_actor
         self.critic = new_critic
-        self.value = new_value
+        self.interval_value = new_interval_value
         self.average_value = new_average_value
+
+        self.critic_key = new_critic_rng
+        self.interval_value_key = new_interval_value_rng
+        self.average_value_key = new_average_value_rng
 
         # Return the metadata
         return {**critic_info,
-                **value_info,
+                **interval_value_info,
                 **actor_info,
                 **average_value_info,
                 }
@@ -283,6 +283,14 @@ class IQLAgent(BaseAgent):
         log_probs = nn.log_softmax(logits, axis=-1)
         action = jax.random.categorical(key, logits, axis=-1)
         return action, log_probs
+
+    def refresh_keys(self):
+        """
+        Refreshes the keys for the agent.
+        """
+
+        (self.rng, self.actor_key, self.critic_key, self.interval_value_key, self.average_value_key,
+         self.target_value_key) = jax.random.split(self.rng, 6)
 
 
 class PPOAgent(BaseAgent):

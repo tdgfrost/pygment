@@ -4,6 +4,7 @@ import os
 import jax.numpy as jnp
 from stable_baselines3.common.env_util import make_vec_env
 import wandb
+from scipy.stats import norm
 import jax
 
 # Set jax to CPU
@@ -16,7 +17,7 @@ config = {'seed': 123,
           'env_id': 'CartPole-v1',
           'step_delay': 2,
           'sync_steps': 20,
-          'epochs': 100000,
+          'epochs': 10000,
           'early_stopping': jnp.array(1000),
           'batch_size': 10000,
           'expectile': 0.5,
@@ -25,10 +26,9 @@ config = {'seed': 123,
           'interval_probability': 0.25,
           'top_actions_quantile': 0.5,
           'filter_point': 0,
+          'gaussian_confidence': 0.5,
           'gamma': 0.99,
-          'actor_lr': 0.001,
-          'value_lr': 0.001,
-          'critic_lr': 0.001,
+          'lr': 0.001,
           'alpha_soft_update': 1,
           'hidden_dims': (256, 256),
           'clipping': 1,
@@ -61,7 +61,7 @@ if __name__ == "__main__":
 
     if logging_bool:
         wandb.init(
-            project="CartPole-25pct-R-124",
+            project="CartPole-IQL-Gaussian-test",
             config=config,
         )
 
@@ -180,7 +180,9 @@ if __name__ == "__main__":
             gammas = np.power(gammas, np.array(batch.intervals))
 
             # For Interval Value and Critic (from average value):
-            next_state_values_avg = np.array(agent.target_value(batch.next_states)[1])
+            agent.refresh_keys()
+            next_state_values_avg = np.array(agent.target_value(batch.next_states,
+                                                                rngs={'dropout': agent.target_value_key})[1])
 
             discounted_rewards_for_interval_and_critic = (np.array(batch.rewards)
                                                           + gammas * next_state_values_avg * (1 - np.array(batch.dones))
@@ -194,11 +196,16 @@ if __name__ == "__main__":
                                                  value_loss_fn={'expectile': 0},
                                                  critic_loss_fn={'expectile': 0},
                                                  expectile=config['expectile'],
-                                                 value=True,
+                                                 interval_value=True,
                                                  critic=True)
 
+            value_loss_info['interval_value_loss'] = value_loss_info['value_loss']
+            del value_loss_info['value_loss']
+
             # Then update for average network
-            discounted_rewards_for_average = agent.value(batch.states)[1]
+            agent.refresh_keys()
+            discounted_rewards_for_average = agent.interval_value(batch.states,
+                                                                  rngs={'dropout': agent.interval_value_key})[1]
             discounted_rewards_for_average = filter_to_action(discounted_rewards_for_average, batch.len_actions)
 
             batch = alter_batch(batch,
@@ -221,32 +228,42 @@ if __name__ == "__main__":
                 logged_results = {'gradient_step': epoch,
                                   'average_value_loss': value_loss_info['average_value_loss'],
                                   'critic_loss': value_loss_info['critic_loss'],
-                                  'value_loss': value_loss_info['value_loss'],
+                                  'interval_value_loss': value_loss_info['interval_value_loss'],
                                   }
 
                 wandb.log(logged_results)
 
         # Perform MC dropout inference to assess uncertainty in values
-        state_values = np.array(agent.target_value(data.states)[1])
+        agent.refresh_keys()
+        state_values = np.array(agent.target_value(data.states,
+                                                   rngs={'dropout': agent.target_value_key})[1])
         state_value_shape = state_values.shape
+        state_values = state_values.reshape(1, *state_value_shape)
 
-        critic_values = jnp.minimum(*agent.critic(data.states)[1])
+        critic_values = jnp.minimum(*agent.critic(data.states,
+                                                  rngs={'dropout': agent.critic_key})[1])
         critic_values = np.array(filter_to_action(critic_values, data.actions))
         critic_values_shape = critic_values.shape
+        critic_values = critic_values.reshape(1, *critic_values_shape)
 
-        for _ in range(1000):
+        for _ in range(100):
+            agent.refresh_keys()
             state_values = np.concatenate((state_values,
-                                           np.array(agent.target_value(data.states)[1]).reshape(1, *state_value_shape)))
+                                           np.array(agent.target_value(data.states,
+                                                                       rngs={'dropout': agent.target_value_key})[1]
+                                                    ).reshape(1, *state_value_shape)))
             critic_values = np.concatenate((critic_values,
-                                            np.array(filter_to_action(jnp.minimum(*agent.critic(data.states)[1]),
-                                                                      data.actions)).reshape(1, *critic_values_shape)))
+                                            np.array(filter_to_action(
+                                                jnp.minimum(*agent.critic(data.states,
+                                                                          rngs={'dropout': agent.critic_key})[1]),
+                                                data.actions)).reshape(1, *critic_values_shape)))
 
         state_values_mean = np.mean(state_values, axis=0)
         state_values_std = np.std(state_values, axis=0)
         critic_values_mean = np.mean(critic_values, axis=0)
         critic_values_std = np.std(critic_values, axis=0)
 
-        advantages = critic_values - state_values
+        advantages = critic_values_mean - state_values_mean
         advantages_std = np.sqrt(state_values_std ** 2 + critic_values_std ** 2)
 
         if 'filter_point' not in config.keys():
@@ -254,12 +271,15 @@ if __name__ == "__main__":
         else:
             filter_point = config['filter_point']
 
-        
+        # Filter at 95th percentile of "good" actions
+        filter_bool = 1 - norm.cdf(filter_point,
+                                   advantages,
+                                   advantages_std) > config['gaussian_confidence']
 
-        if np.sum(np.array(advantages) > filter_point) < config['batch_size']:
+        if np.sum(filter_bool) < config['batch_size']:
             return agent
 
-        data = filter_dataset(data, np.array(advantages) > filter_point,
+        data = filter_dataset(data, filter_bool,
                               target_keys=['states', 'actions'])
 
         # Now we start training the actor
@@ -299,9 +319,9 @@ if __name__ == "__main__":
             if epoch % 100 == 0:
                 # Save each model
                 agent.actor.save(os.path.join(model_dir, 'model_checkpoints/actor'))
-                agent.target_value.save(os.path.join(model_dir, 'model_checkpoints/average_value'))
+                agent.target_value.save(os.path.join(model_dir, 'model_checkpoints/target_value'))
                 agent.critic.save(os.path.join(model_dir, 'model_checkpoints/critic'))
-                agent.value.save(os.path.join(model_dir, 'model_checkpoints/value'))
+                agent.interval_value.save(os.path.join(model_dir, 'model_checkpoints/interval_value'))
 
         # Evaluate agent
         n_envs = 1000

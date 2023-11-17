@@ -1,4 +1,4 @@
-from update.critic import update_q, update_v, update_advantage
+from update.critic import update_q, update_v
 from update.actor import update_policy
 from core.common import Batch
 
@@ -6,7 +6,7 @@ from jax import jit
 from jax.random import PRNGKey
 import jax
 
-from typing import Any
+from typing import Any, Tuple, Dict
 
 from core.net import Model
 
@@ -33,49 +33,38 @@ def _update_jit(
 
 @jit
 def _update_actor_jit(
-    rng: PRNGKey, actor: Model,
+    actor: Model,
     batch: Batch, **kwargs
-) -> tuple[Any, Model, dict[Any, Any]]:
+) -> tuple[Model, dict[Any, Any]]:
 
-    key, rng = jax.random.split(rng)
     new_actor, actor_info = update_policy(actor, batch, **kwargs)
 
-    return rng, new_actor, {
+    return new_actor, {
         **actor_info
     }
 
 
 @jit
 def _update_critic_jit(
-    critic: Model, batch: Batch, **kwargs
-) -> tuple[Model, dict[Any, Any]]:
+    key: PRNGKey, critic: Model, batch: Batch, **kwargs
+) -> tuple[Any, Model, dict[Any, Any]]:
 
-    new_critic, critic_info = update_q(critic, batch, **kwargs)
+    key, rng = jax.random.split(key)
+    new_critic, critic_info = update_q(rng, critic, batch, **kwargs)
 
-    return new_critic, {
+    return key, new_critic, {
         **critic_info
     }
 
 
 @jit
 def _update_value_jit(
-    value: Model, batch: Batch, **kwargs
-) -> tuple[Model, dict[Any, Any]]:
+    key: PRNGKey, value: Model, batch: Batch, **kwargs
+) -> tuple[Any, Model, dict[Any, Any]]:
 
-    new_value, value_info = update_v(value, batch, **kwargs)
+    key, rng = jax.random.split(key)
+    new_value, value_info = update_v(rng, value, batch, **kwargs)
 
-    return new_value, {
+    return key, new_value, {
         **value_info
-    }
-
-
-@jit
-def _update_advantage_jit(
-    advantage: Model, batch: Batch, **kwargs
-) -> tuple[Model, dict[Any, Any]]:
-
-    new_advantage, advantage_info = update_advantage(advantage, batch, **kwargs)
-
-    return new_advantage, {
-        **advantage_info
     }
