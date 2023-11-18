@@ -17,15 +17,16 @@ config = {'seed': 123,
           'env_id': 'CartPole-v1',
           'step_delay': 2,
           'sync_steps': 20,
-          'epochs': 10000,
+          'epochs': 20000,
           'early_stopping': jnp.array(1000),
           'batch_size': 10000,
           'expectile': 0.8,
+          'dropout_rate': 0.05,
           'baseline_reward': 124,
           'n_episodes': 10000,
           'interval_probability': 0.25,
-          'gaussian_confidence': None,
-          'exclude_actions_quantile': 0.2,
+          # 'gaussian_confidence': 0.6,
+          # 'confidence_quantile': None,
           'gamma': 0.99,
           'lr': 0.001,
           'alpha_soft_update': 1,
@@ -57,6 +58,8 @@ if __name__ == "__main__":
     # Set whether to train and/or evaluate
     logging_bool = True
     evaluate_bool = False
+    skip_value_training = False
+    model_dir = './experiments/IQL/2023_11_17_183359'
 
     if logging_bool:
         wandb.init(
@@ -126,7 +129,7 @@ if __name__ == "__main__":
         return 0
 
     # Train agent
-    def train(data):
+    def train(data, model_dir=model_dir):
         # Create agent
         dummy_env = make_env(config['env_id'])
 
@@ -136,101 +139,116 @@ if __name__ == "__main__":
                          opt_decay_schedule="cosine",
                          **config)
 
-        model_dir = os.path.join('./experiments/IQL', agent.path)
-        agent.path = model_dir
-        os.makedirs(model_dir, exist_ok=True)
-        with open(os.path.join(model_dir, 'config.txt'), 'w') as f:
-            f.write(str(config))
-            f.close()
+        if skip_value_training:
+            agent.path = model_dir
+
+        else:
+            model_dir = os.path.join('./experiments/IQL', agent.path)
+            agent.path = model_dir
+            os.makedirs(model_dir, exist_ok=True)
+            with open(os.path.join(model_dir, 'config.txt'), 'w') as f:
+                f.write(str(config))
+                f.close()
 
         del dummy_env
 
         # Standardise the state inputs
         agent.standardise_inputs(data.states)
 
-        print('\n\n', '=' * 50, '\n', ' ' * 3, '\U0001F483' * 3, ' ' * 1, f'Training value networks',
-              ' ' * 2, '\U0001F483' * 3, '\n', '=' * 50, '\n')
+        if not skip_value_training:
+            print('\n\n', '=' * 50, '\n', ' ' * 3, '\U0001F483' * 3, ' ' * 1, f'Training value networks',
+                  ' ' * 2, '\U0001F483' * 3, '\n', '=' * 50, '\n')
 
-        if logging_bool:
-            # Keep track of the best loss values
-            wandb.define_metric('actor_loss', summary='min')
-            wandb.define_metric('average_value_loss', summary='min')
-            wandb.define_metric('critic_loss', summary='min')
-            wandb.define_metric('value_loss', summary='min')
-
-        for epoch in range(config['epochs']):
-            if epoch > 0 and epoch % 100 == 0:
-                print(f'\n\n{epoch} epochs complete!\n')
-            progress_bar(epoch % 100, 100)
-            batch, idxs = agent.sample(data,
-                                       config['batch_size'])
-
-            # Add Gaussian noise - remember last two positions are boolean
-            """
-            noise = np.random.normal(0, 0.01, size=batch.states.shape)
-            noise[:, -2:] = 0
-            batch = alter_batch(batch,
-                                states=batch.states + noise,
-                                next_states=batch.next_states + noise)
-            """
-
-            # Use TD learning for the value, average_value and critic networks
-            gammas = np.ones(shape=config['batch_size']) * config['gamma']
-            gammas = np.power(gammas, np.array(batch.intervals))
-
-            # For Interval Value and Critic (from average value):
-            agent.refresh_keys()
-            next_state_values_avg = np.array(agent.target_value(batch.next_states,
-                                                                rngs={'dropout': agent.target_value_key})[1])
-
-            discounted_rewards_for_interval_and_critic = (np.array(batch.rewards)
-                                                          + gammas * next_state_values_avg * (1 - np.array(batch.dones))
-                                                          )
-
-            batch = alter_batch(batch, discounted_rewards=jnp.array(discounted_rewards_for_interval_and_critic),
-                                episode_rewards=None, next_states=None, next_actions=None, action_logprobs=None)
-
-            # Perform the update step for interval value and critic networks
-            value_loss_info = agent.update_async(batch,
-                                                 value_loss_fn={'expectile': 0},
-                                                 critic_loss_fn={'expectile': 0},
-                                                 expectile=config['expectile'],
-                                                 interval_value=True,
-                                                 critic=True)
-
-            value_loss_info['interval_value_loss'] = value_loss_info['value_loss']
-            del value_loss_info['value_loss']
-
-            # Then update for average network
-            agent.refresh_keys()
-            discounted_rewards_for_average = agent.interval_value(batch.states,
-                                                                  rngs={'dropout': agent.interval_value_key})[1]
-            discounted_rewards_for_average = filter_to_action(discounted_rewards_for_average, batch.len_actions)
-
-            batch = alter_batch(batch,
-                                discounted_rewards=discounted_rewards_for_average)
-
-            average_value_loss_info = agent.update_async(batch,
-                                                         value_loss_fn={'mc_mse': 0},
-                                                         average_value=True)
-
-            average_value_loss_info['average_value_loss'] = average_value_loss_info['value_loss']
-            del average_value_loss_info['value_loss']
-
-            value_loss_info.update(average_value_loss_info)
-
-            agent.sync_target(config['alpha_soft_update'])
-
-            # Log intermittently
             if logging_bool:
-                # Log results
-                logged_results = {'gradient_step': epoch,
-                                  'average_value_loss': value_loss_info['average_value_loss'],
-                                  'critic_loss': value_loss_info['critic_loss'],
-                                  'interval_value_loss': value_loss_info['interval_value_loss'],
-                                  }
+                # Keep track of the best loss values
+                wandb.define_metric('actor_loss', summary='min')
+                wandb.define_metric('average_value_loss', summary='min')
+                wandb.define_metric('critic_loss', summary='min')
+                wandb.define_metric('value_loss', summary='min')
 
-                wandb.log(logged_results)
+            for epoch in range(config['epochs']):
+                if epoch > 0 and epoch % 100 == 0:
+                    print(f'\n\n{epoch} epochs complete!\n')
+                progress_bar(epoch % 100, 100)
+                batch, idxs = agent.sample(data,
+                                           config['batch_size'])
+
+                # Add Gaussian noise - remember last two positions are boolean
+                """
+                noise = np.random.normal(0, 0.01, size=batch.states.shape)
+                noise[:, -2:] = 0
+                batch = alter_batch(batch,
+                                    states=batch.states + noise,
+                                    next_states=batch.next_states + noise)
+                """
+
+                # Use TD learning for the value, average_value and critic networks
+                gammas = np.ones(shape=config['batch_size']) * config['gamma']
+                gammas = np.power(gammas, np.array(batch.intervals))
+
+                # For Interval Value and Critic (from average value):
+                agent.refresh_keys()
+                next_state_values_avg = np.array(agent.target_value(batch.next_states,
+                                                                    rngs={'dropout': agent.target_value_key})[1])
+
+                discounted_rewards_for_interval_and_critic = (np.array(batch.rewards)
+                                                              + gammas * next_state_values_avg * (1 - np.array(batch.dones))
+                                                              )
+
+                batch = alter_batch(batch, discounted_rewards=jnp.array(discounted_rewards_for_interval_and_critic),
+                                    episode_rewards=None, next_states=None, next_actions=None, action_logprobs=None)
+
+                # Perform the update step for interval value and critic networks
+                value_loss_info = agent.update_async(batch,
+                                                     value_loss_fn={'expectile': 0},
+                                                     critic_loss_fn={'expectile': 0},
+                                                     expectile=config['expectile'],
+                                                     interval_value=True,
+                                                     critic=True)
+
+                value_loss_info['interval_value_loss'] = value_loss_info['value_loss']
+                del value_loss_info['value_loss']
+
+                # Then update for average network
+                agent.refresh_keys()
+                discounted_rewards_for_average = agent.interval_value(batch.states,
+                                                                      rngs={'dropout': agent.interval_value_key})[1]
+                discounted_rewards_for_average = filter_to_action(discounted_rewards_for_average, batch.len_actions)
+
+                batch = alter_batch(batch,
+                                    discounted_rewards=discounted_rewards_for_average)
+
+                average_value_loss_info = agent.update_async(batch,
+                                                             value_loss_fn={'mc_mse': 0},
+                                                             average_value=True)
+
+                average_value_loss_info['average_value_loss'] = average_value_loss_info['value_loss']
+                del average_value_loss_info['value_loss']
+
+                value_loss_info.update(average_value_loss_info)
+
+                agent.sync_target(config['alpha_soft_update'])
+
+                # Log intermittently
+                if logging_bool:
+                    # Log results
+                    logged_results = {'gradient_step': epoch,
+                                      'average_value_loss': value_loss_info['average_value_loss'],
+                                      'critic_loss': value_loss_info['critic_loss'],
+                                      'interval_value_loss': value_loss_info['interval_value_loss'],
+                                      }
+
+                    wandb.log(logged_results)
+
+                if epoch % 100 == 0:
+                    agent.target_value.save(os.path.join(model_dir, 'model_checkpoints/target_value'))
+                    agent.critic.save(os.path.join(model_dir, 'model_checkpoints/critic'))
+                    agent.interval_value.save(os.path.join(model_dir, 'model_checkpoints/interval_value'))
+
+        else:
+            agent.critic = agent.critic.load(os.path.join(model_dir, 'model_checkpoints/critic'))
+            agent.interval_value = agent.interval_value.load(os.path.join(model_dir, 'model_checkpoints/interval_value'))
+            agent.target_value = agent.target_value.load(os.path.join(model_dir, 'model_checkpoints/target_value'))
 
         # Perform MC dropout inference to assess uncertainty in values
         print('\n\n', '=' * 50, '\n', ' ' * 3, '\U0001F9D9' * 3, ' ' * 1, f'Calculating uncertainty',
@@ -248,8 +266,8 @@ if __name__ == "__main__":
         critic_values_shape = critic_values.shape
         critic_values = critic_values.reshape(1, *critic_values_shape)
 
-        for _ in range(10):
-            progress_bar(_, 10)
+        for _ in range(15):
+            progress_bar(_, 15)
             agent.refresh_keys()
             state_values = np.concatenate((state_values,
                                            np.array(agent.target_value(data.states,
@@ -269,21 +287,16 @@ if __name__ == "__main__":
         advantages = critic_values_mean - state_values_mean
         advantages_std = np.sqrt(state_values_std ** 2 + critic_values_std ** 2)
 
-        """
-        if 'filter_point' not in config.keys():
-            filter_point = np.quantile(np.array(advantages), config['top_actions_quantile'])
-        else:
-            filter_point = config['filter_point']
-        """
-
         # Filter for top x% of "good" actions
+        """
         cdf = 1 - norm.cdf(0, advantages, advantages_std)
         if 'gaussian_confidence' in config.keys() and config['gaussian_confidence'] is not None:
             filter_point = config['gaussian_confidence']
         else:
-            filter_point = np.quantile(cdf, config['exclude_actions_quantile'])
-
-        filter_bool = cdf > filter_point
+            filter_point = np.quantile(cdf, config['confidence_quantile'])
+        """
+        # filter_bool = cdf > filter_point
+        filter_bool = advantages > 0
 
         if np.sum(filter_bool) < config['batch_size']:
             return agent
@@ -331,9 +344,6 @@ if __name__ == "__main__":
             if epoch % 100 == 0:
                 # Save each model
                 agent.actor.save(os.path.join(model_dir, 'model_checkpoints/actor'))
-                agent.target_value.save(os.path.join(model_dir, 'model_checkpoints/target_value'))
-                agent.critic.save(os.path.join(model_dir, 'model_checkpoints/critic'))
-                agent.interval_value.save(os.path.join(model_dir, 'model_checkpoints/interval_value'))
 
         # Evaluate agent
         n_envs = 1000

@@ -115,6 +115,7 @@ class IQLAgent(BaseAgent):
                  opt_decay_schedule: str = "cosine",
                  clipping: float = 0.01,
                  continual_learning: bool = False,
+                 dropout_rate: float = 0.1,
                  *args,
                  **kwargs):
 
@@ -158,22 +159,22 @@ class IQLAgent(BaseAgent):
                                    optim=optimiser,
                                    continual_learning=continual_learning)
         """
-        self.critic = Model.create(CriticNet(hidden_dims, self.action_dim),
+        self.critic = Model.create(CriticNet(hidden_dims, self.action_dim, dropout_rate),
                                    inputs=[self.critic_key, observations],
                                    optim=optimiser,
                                    continual_learning=continual_learning)
 
-        self.interval_value = Model.create(ValueNet(hidden_dims, len(self.intervals_unique)),
+        self.interval_value = Model.create(ValueNet(hidden_dims, len(self.intervals_unique), dropout_rate),
                                            inputs=[self.interval_value_key, observations],
                                            optim=optimiser,
                                            continual_learning=continual_learning)
 
-        self.average_value = Model.create(ValueNet(hidden_dims, 1),
+        self.average_value = Model.create(ValueNet(hidden_dims, 1, dropout_rate),
                                           inputs=[self.average_value_key, observations],
                                           optim=optimiser,
                                           continual_learning=continual_learning)
 
-        self.target_value = Model.create(ValueNet(hidden_dims, 1),
+        self.target_value = Model.create(ValueNet(hidden_dims, 1, dropout_rate),
                                          inputs=[self.target_value_key, observations],
                                          optim=optimiser,
                                          continual_learning=continual_learning)
