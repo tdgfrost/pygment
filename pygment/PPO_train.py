@@ -49,9 +49,9 @@ if __name__ == "__main__":
 
     # Create variable environment template
     def extra_step_filter(x):
-        # If tilted to the left
-        if x[2] < 0:
-            # with p == 0.25, delay by a further 5 steps (i.e., 6 total)
+        # If in rectangle
+        if config['bottom_bar_coord'] < x[1] < config['top_bar_coord']:
+            # with p == 0.5, delay by 20 steps
             if np.random.uniform() < 0.25:
                 return config['step_delay']
         # Otherwise, normal time steps (no delay)
