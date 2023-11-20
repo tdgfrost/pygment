@@ -70,7 +70,7 @@ if __name__ == "__main__":
 
     if logging_bool:
         wandb.init(
-            project="PPO-VariableTimeSteps",
+            project="LunarLander-PPO-baseline",
             allow_val_change=True,
         )
         wandb.define_metric('actor_loss', summary='min')
