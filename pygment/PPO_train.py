@@ -53,9 +53,8 @@ if __name__ == "__main__":
     # ============================================================== #
 
     # Set whether to train and/or evaluate
-    logging_bool = False
+    logging_bool = True
     evaluate_bool = False
-
 
     # Create variable environment template
     def extra_step_filter(x):
