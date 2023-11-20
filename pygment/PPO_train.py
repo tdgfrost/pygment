@@ -7,7 +7,7 @@ from tqdm import tqdm
 from stable_baselines3.common.env_util import make_vec_env
 
 # Set jax to CPU
-jax.config.update('jax_platform_name', 'cpu')
+# jax.config.update('jax_platform_name', 'cpu')
 # jax.config.update("jax_debug_nans", True)
 # jax.config.update('jax_disable_jit', True)
 
@@ -16,6 +16,7 @@ config = {'seed': 123,
           'epochs': int(1e6),
           'continual_learning': True,
           'steps': None,
+          'delay_steps': 0,
           'batch_size': 32,
           'n_envs': 20,
           'gamma': 0.99,
@@ -45,9 +46,9 @@ if __name__ == "__main__":
     def extra_step_filter(x):
         # If in rectangle
         if config['bottom_bar_coord'] < x[1] < config['top_bar_coord']:
-            # with p == 0.5, delay by 20 steps
-            if np.random.uniform() < 0.05:
-                return 5
+            # with p == 0.25, delay by x steps
+            if np.random.uniform() < 0.25:
+                return config['delay_steps']
         # Otherwise, normal time steps (no delay)
         return 0
 
