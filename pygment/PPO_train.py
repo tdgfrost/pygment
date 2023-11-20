@@ -37,6 +37,16 @@ if __name__ == "__main__":
     from core.common import progress_bar, shuffle_split_batch, alter_batch, flatten_batch, downsample_batch
     from core.evaluate import evaluate_envs, run_and_animate
     from core.envs import EpisodeGenerator, make_variable_env
+    import argparse
+
+    # Set the flags for expectile and soft_update
+    parser = argparse.ArgumentParser()
+
+    parser.add_argument('--step-delay', type=int, default=config['step_delay'])
+
+    args = parser.parse_args()
+
+    config['step_delay'] = args.step_delay
 
     # ============================================================== #
     # ======================== PREPARATION ========================= #
