@@ -17,11 +17,11 @@ config = {'seed': 123,
           'env_id': 'CartPole-v1',
           'step_delay': 2,
           'sync_steps': 20,
-          'epochs': 20000,
+          'epochs': 100000,
           'early_stopping': jnp.array(1000),
           'batch_size': 10000,
-          'expectile': 0.8,
-          'dropout_rate': 0.05,
+          'expectile': 0.6,
+          'dropout_rate': 0.5,
           'baseline_reward': 124,
           'n_episodes': 10000,
           'interval_probability': 0.25,
@@ -58,8 +58,8 @@ if __name__ == "__main__":
     # Set whether to train and/or evaluate
     logging_bool = True
     evaluate_bool = False
-    skip_value_training = False
-    model_dir = './experiments/IQL/2023_11_17_183359'
+    skip_value_training = True
+    model_dir = './experiments/IQL/2023_11_18_161746'
 
     if logging_bool:
         wandb.init(

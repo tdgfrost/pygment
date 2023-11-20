@@ -159,22 +159,23 @@ class IQLAgent(BaseAgent):
                                    optim=optimiser,
                                    continual_learning=continual_learning)
         """
-        self.critic = Model.create(CriticNet(hidden_dims, self.action_dim, dropout_rate),
+        self.critic = Model.create(CriticNet(hidden_dims, self.action_dim, dropout_rate=dropout_rate),
                                    inputs=[self.critic_key, observations],
                                    optim=optimiser,
                                    continual_learning=continual_learning)
 
-        self.interval_value = Model.create(ValueNet(hidden_dims, len(self.intervals_unique), dropout_rate),
+        self.interval_value = Model.create(ValueNet(hidden_dims, len(self.intervals_unique),
+                                                    dropout_rate=dropout_rate),
                                            inputs=[self.interval_value_key, observations],
                                            optim=optimiser,
                                            continual_learning=continual_learning)
 
-        self.average_value = Model.create(ValueNet(hidden_dims, 1, dropout_rate),
+        self.average_value = Model.create(ValueNet(hidden_dims, 1, dropout_rate=dropout_rate),
                                           inputs=[self.average_value_key, observations],
                                           optim=optimiser,
                                           continual_learning=continual_learning)
 
-        self.target_value = Model.create(ValueNet(hidden_dims, 1, dropout_rate),
+        self.target_value = Model.create(ValueNet(hidden_dims, 1, dropout_rate=dropout_rate),
                                          inputs=[self.target_value_key, observations],
                                          optim=optimiser,
                                          continual_learning=continual_learning)

@@ -133,7 +133,8 @@ class CriticNet(nn.Module):
     dropout_rate: float = 0.1
 
     @nn.compact
-    def __call__(self, observations: jnp.ndarray, input_mean=0, input_std=1, **kwargs) -> tuple[dict[str, dict[int, Any]], Any]:
+    def __call__(self, observations: jnp.ndarray, input_mean=0, input_std=1,
+                 **kwargs) -> tuple[dict[str, dict[int, Any]], Any]:
         """
         Critic network forward pass.
 
