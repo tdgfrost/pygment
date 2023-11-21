@@ -16,9 +16,9 @@ from math import ceil
 config = {'seed': 123,
           'env_id': 'LunarLander-v2',
           'step_delay': 0,
-          'sync_steps': 1,
-          'epochs': int(1e6),
-          'end_training_steps': int(1e5),
+          'sync_steps': 5,
+          'epochs': 200,
+          'end_training_steps': int(1e6),
           'continual_learning': True,
           'steps': None,
           'batch_size': 32,
@@ -70,7 +70,7 @@ if __name__ == "__main__":
     if logging_bool:
         wandb.init(
             project="LunarLander-PPO-baseline",
-            allow_val_change=True,
+            config=config,
         )
         wandb.define_metric('actor_loss', summary='min')
         wandb.define_metric('value_loss', summary='min')
@@ -201,7 +201,7 @@ if __name__ == "__main__":
                 results = evaluate_envs(agent,
                                         environments=make_vec_env(lambda: make_variable_env(config['env_id'],
                                                                                             fn=extra_step_filter),
-                                                                  n_envs=1000))
+                                                                  n_envs=500))
                 evaluate_reward = np.mean(results)
                 print('\n\n', '=' * 50,
                       f'\nMedian reward: {np.median(results)}, Mean reward: {np.mean(results)}, Best reward: {best_reward}, Training steps: {total_training_steps}\n',

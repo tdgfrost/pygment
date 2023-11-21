@@ -327,7 +327,8 @@ class PPOAgent(BaseAgent):
 
         self.value = Model.create(ValueNet(hidden_dims),
                                   inputs=[self.value_key, observations],
-                                  optim=optax.adam(learning_rate=value_lr))
+                                  # optim=optax.adam(learning_rate=value_lr)
+                                  optim=optimiser)
 
         self.networks = [self.actor, self.value]
 
