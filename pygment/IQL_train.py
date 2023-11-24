@@ -4,6 +4,7 @@ import os
 import jax.numpy as jnp
 from stable_baselines3.common.env_util import make_vec_env
 import wandb
+from math import ceil
 
 # Set jax to CPU
 # jax.config.update('jax_platform_name', 'cpu')
@@ -213,24 +214,33 @@ if __name__ == "__main__":
         # And train the actor
         total_training_steps = jnp.array(0)
 
-        # Calculate the advantages
-        state_values = agent.target_value(data.states)[1]
+        print('\n\n', '=' * 50, '\n', ' ' * 3, '\U0001F9D9' * 3, ' ' * 1, f'Filtering data',
+              ' ' * 2, '\U0001F9D9' * 3, '\n', '=' * 50, '\n')
 
-        critic_values = jnp.minimum(*agent.critic(data.states)[1])
-        critic_values = filter_to_action(critic_values, data.actions)
+        advantages = []
+        step_size = int(5e5)
+        for i in range(ceil(data.states.shape[0] / step_size)):
+            progress_bar(i, ceil(data.states.shape[0] / step_size))
+            idx = slice(i * step_size, (i+1)*step_size, 1)
+            state_values = agent.target_value(data.states[idx])[1]
 
-        advantages = critic_values - state_values
+            critic_values = jnp.minimum(*agent.critic(data.states[idx])[1])
+            critic_values = filter_to_action(critic_values, data.actions[idx])
+
+            advantages += [critic_values - state_values]
+
+        advantages = np.concatenate(advantages)
 
         # Filter for top half of actions
         if 'filter_point' not in config.keys():
-            filter_point = np.quantile(np.array(advantages), config['top_actions_quantile'])
+            filter_point = np.quantile(advantages, config['top_actions_quantile'])
         else:
             filter_point = config['filter_point']
 
-        if np.sum(np.array(advantages) > filter_point) < config['batch_size']:
+        if np.sum(advantages > filter_point) < config['batch_size']:
             return agent
 
-        data = filter_dataset(data, np.array(advantages) > filter_point,
+        data = filter_dataset(data, advantages > filter_point,
                               target_keys=['states', 'actions'])
 
         data = alter_batch(data, discounted_rewards=None, next_states=None, dones=None, intervals=None,
