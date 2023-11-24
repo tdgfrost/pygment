@@ -71,6 +71,8 @@ if __name__ == "__main__":
     # Flatten the batch
     batch = flatten_batch(batch)
 
+    print(f'Average reward of dataset: {np.array(batch.episode_rewards).mean()}')
+
     # Create directory if it doesn't exist
     os.makedirs(target_directory, exist_ok=True)
 
