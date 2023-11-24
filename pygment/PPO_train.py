@@ -17,8 +17,8 @@ config = {'seed': 123,
           'env_id': 'LunarLander-v2',
           'step_delay': 0,
           'sync_steps': 5,
-          'epochs': 200,
-          'end_training_steps': int(1e6),
+          'epochs': 300,
+          'end_training_steps': int(1e9),
           'continual_learning': True,
           'steps': None,
           'batch_size': 32,
@@ -201,7 +201,7 @@ if __name__ == "__main__":
                 results = evaluate_envs(agent,
                                         environments=make_vec_env(lambda: make_variable_env(config['env_id'],
                                                                                             fn=extra_step_filter),
-                                                                  n_envs=500))
+                                                                  n_envs=300))
                 evaluate_reward = np.mean(results)
                 print('\n\n', '=' * 50,
                       f'\nMedian reward: {np.median(results)}, Mean reward: {np.mean(results)}, Best reward: {best_reward}, Training steps: {total_training_steps}\n',
