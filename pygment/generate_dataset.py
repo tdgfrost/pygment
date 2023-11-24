@@ -77,5 +77,5 @@ if __name__ == "__main__":
     os.makedirs(target_directory, exist_ok=True)
 
     # Save batch
-    with open(os.path.join(target_directory, f"dataset_reward_{reward}_{config['n_episodes']}_episodes.pkl"), 'wb') as f:
+    with open(os.path.join(target_directory, f"dataset_reward_{reward}_{steps}_steps_{config['n_episodes']}_episodes.pkl"), 'wb') as f:
         pickle.dump(batch, f)
