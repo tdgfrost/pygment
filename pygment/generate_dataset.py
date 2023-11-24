@@ -20,15 +20,16 @@ if __name__ == "__main__":
     # Load previous checkpoints
     reward = 0
     probability = 0.25
-    dirname = f'./experiments/{probability}_probability_5_steps/PPO/2023_10_11_132558'
+    steps = 11
+    dirname = f'./experiments/{probability}_probability/PPO/insert_model_dir_here'
     model_checkpoints = os.path.join(dirname, 'model_checkpoints')
-    target_directory = f'./offline_datasets/LunarLander/{probability}_probability_5_steps'
+    target_directory = f'./offline_datasets/LunarLander/{probability}_probability'
 
     with open(os.path.join(dirname, 'config.txt'), 'r') as f:
         config = eval(f.read())
 
     config['max_episode_steps'] = 1000
-    config['n_episodes'] = 100000
+    config['n_episodes'] = 10000
 
     # Create agent
     env = make_env('LunarLander-v2', max_episode_steps=config['max_episode_steps'])
@@ -46,7 +47,7 @@ if __name__ == "__main__":
         if config['bottom_bar_coord'] < x[1] < config['top_bar_coord']:
             # with p == 0.05, delay by 20 steps
             if np.random.uniform() < probability:
-                return 5
+                return steps
         # Otherwise, normal time steps (no delay)
         return 0
 
