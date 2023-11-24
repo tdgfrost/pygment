@@ -19,7 +19,7 @@ config = {'seed': 123,
           'step_delay': 2,
           'sync_steps': 20,
           'expectile': 0.5,
-          'baseline_reward': 124,
+          'baseline_reward': 45,
           'n_episodes': 10000,
           'interval_probability': 0.25,
           'top_actions_quantile': 0.5,
@@ -58,7 +58,7 @@ if __name__ == "__main__":
 
     if logging_bool:
         wandb.init(
-            project="LunarLander-25pct-R-124",
+            project="LunarLander-25pct-R-45",
             config=config,
         )
 
