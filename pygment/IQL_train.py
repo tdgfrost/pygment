@@ -71,7 +71,7 @@ if __name__ == "__main__":
     baseline_reward = config['baseline_reward']
     interval_probability = config['interval_probability']
     loaded_data = load_data(
-        path=f"./offline_datasets/CartPole/{interval_probability}_probability/"
+        path=f"./offline_datasets/LunarLander/{interval_probability}_probability/"
              f"dataset_reward_{baseline_reward}_{config['step_delay']}_steps_{config['n_episodes']}_episodes.pkl",
         # scale='standardise',
         gamma=config['gamma'])
