@@ -13,7 +13,7 @@ import wandb
 # Define config file - could change to FLAGS at some point
 config = {'seed': 123,
           'epochs': 100000,
-          'env_id': 'CartPole-v1',
+          'env_id': 'LunarLander-v2',
           'early_stopping': jnp.array(1000),
           'batch_size': 10000,
           'step_delay': 11,
