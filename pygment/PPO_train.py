@@ -244,7 +244,7 @@ if __name__ == "__main__":
                 # Log results
                 wandb.log(logged_results)
 
-            if total_training_steps >= config['end_training_steps']:
+            if total_training_steps >= config['end_training_steps'] or epoch == config['epochs'] - 1:
                 agent.actor.save(os.path.join(model_dir, 'model_checkpoints/actor_best'))
                 agent.value.save(os.path.join(model_dir, 'model_checkpoints/value_best'))
                 print('=' * 50, '\nTraining complete!\n', '=' * 50)
