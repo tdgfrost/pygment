@@ -4,6 +4,7 @@ import os
 import jax.numpy as jnp
 from stable_baselines3.common.env_util import make_vec_env
 import wandb
+from math import ceil
 
 # Set jax to CPU
 # jax.config.update('jax_platform_name', 'cpu')
@@ -70,6 +71,7 @@ if __name__ == "__main__":
     print('Loading and processing dataset...')
     baseline_reward = config['baseline_reward']
     interval_probability = config['interval_probability']
+
     loaded_data = load_data(
         path=f"./offline_datasets/LunarLander/{interval_probability}_probability/"
              f"dataset_reward_{baseline_reward}_{config['step_delay']}_steps_{config['n_episodes']}_episodes.pkl",
@@ -214,12 +216,17 @@ if __name__ == "__main__":
         total_training_steps = jnp.array(0)
 
         # Calculate the advantages
-        state_values = agent.target_value(data.states)[1]
+        advantages = []
+        step_size = int(5e5)
+        for i in range(ceil(data.states.shape[0] / step_size)):
+            progress_bar(i, ceil(data.states.shape[0] / step_size))
+            idx = slice(i * step_size, (i+1)*step_size, 1)
+            state_values = agent.target_value(data.states[idx])[1]
 
-        critic_values = jnp.minimum(*agent.critic(data.states)[1])
-        critic_values = filter_to_action(critic_values, data.actions)
+            critic_values = jnp.minimum(*agent.critic(data.states[idx])[1])
+            critic_values = filter_to_action(critic_values, data.actions[idx])
 
-        advantages = critic_values - state_values
+            advantages += [critic_values - state_values]
 
         # Filter for top half of actions
         if 'filter_point' not in config.keys():
