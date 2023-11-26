@@ -15,7 +15,7 @@ import jax
 # Define config file - could change to FLAGS at some point
 config = {'seed': 123,
           'env_id': 'LunarLander-v2',
-          'step_delay': 2,
+          'step_delay': 11,
           'sync_steps': 20,
           'epochs': 100000,
           'early_stopping': jnp.array(1000),
