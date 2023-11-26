@@ -1,6 +1,6 @@
 from core.net import Model, ValueNet, ActorNet, DoubleCriticNet, CriticNet
 from core.common import Batch, InfoDict
-from update.actions import _update_jit, _update_value_jit, _update_critic_jit, _update_actor_jit, _update_advantage_jit
+from update.actions import _update_jit, _update_value_jit, _update_critic_jit, _update_actor_jit
 
 import os
 import datetime as dt
@@ -191,12 +191,11 @@ class IQLAgent(BaseAgent):
         """
 
         # Create an updated copy of all the networks
-        new_rng, new_actor, new_critic, new_value, info = _update_jit(
-            self.rng, self.actor, self.critic, self.value,
+        new_actor, new_critic, new_value, info = _update_jit(
+            self.actor, self.critic, self.value,
             batch, **kwargs)
 
         # Update the agent's networks with the updated copies
-        self.rng = new_rng
         self.actor = new_actor
         self.critic = new_critic
         self.value = new_value
@@ -219,8 +218,8 @@ class IQLAgent(BaseAgent):
         """
 
         # Create an updated copy of the required networks
-        new_rng, new_actor, actor_info = _update_actor_jit(
-            self.rng, self.actor, batch, **kwargs) if actor else (self.rng, self.actor, {})
+        new_actor, actor_info = _update_actor_jit(
+            self.actor, batch, **kwargs) if actor else (self.actor, {})
 
         new_critic, critic_info = _update_critic_jit(
             self.critic, batch, **kwargs) if critic else (self.critic, {})
@@ -232,7 +231,6 @@ class IQLAgent(BaseAgent):
             self.average_value, batch, **kwargs) if average_value else (self.average_value, {})
 
         # Update the agent's networks with the updated copies
-        self.rng = new_rng
         self.actor = new_actor
         self.critic = new_critic
         self.value = new_value

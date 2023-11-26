@@ -2,7 +2,7 @@ from jax import Array
 
 from core.agent import Model
 from core.common import Params, InfoDict, Batch, filter_to_action
-from update.loss import mc_mse_loss, expectile_loss, log_softmax_cross_entropy, binary_cross_entropy
+from update.loss import mc_mse_loss, expectile_loss
 
 from typing import Tuple
 
@@ -92,35 +92,3 @@ def update_q(critic: Model, batch: Batch, **kwargs) -> Tuple[Model, InfoDict]:
     # Return the new model parameters, plus loss metadata
     return new_critic, info
 
-
-def update_advantage(advantage: Model, batch: Batch, **kwargs) -> Tuple[Model, InfoDict]:
-    """
-    Function to update the advantage network
-    :param advantage: the critic network to be updated
-    :param batch: a Batch object of samples
-    :return: a tuple containing the new model parameters, plus metadata
-    """
-
-    # Unpack the actions, states, and discounted rewards from the batch of samples
-    states = batch.states
-
-    loss_fn = {'mc_mse': mc_mse_loss}
-
-    def advantage_loss_fn(advantage_params: Params) -> tuple[Array, dict[str, Array]]:
-        # Generate Q values from each of the two critic networks
-        layer_outputs, adv = advantage.apply({'params': advantage_params}, states)
-
-        # Calculate the loss for the critic networks using the target Q values with MSE
-        advantage_loss = loss_fn[list(kwargs['advantage_loss_fn'].keys())[0]](adv, batch, **kwargs).mean()
-
-        # Return the loss value, plus metadata
-        return advantage_loss, {
-            'advantage_loss': advantage_loss,
-            'layer_outputs': layer_outputs,
-        }
-
-    # Calculate the updated model parameters using the loss function
-    new_advantage, info = advantage.apply_gradient(advantage_loss_fn)
-
-    # Return the new model parameters, plus loss metadata
-    return new_advantage, info
