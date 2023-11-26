@@ -212,6 +212,12 @@ if __name__ == "__main__":
 
                 wandb.log(logged_results)
 
+            if epoch % 100 == 0:
+                # Save each model
+                agent.target_value.save(os.path.join(model_dir, 'model_checkpoints/target_value'))
+                agent.critic.save(os.path.join(model_dir, 'model_checkpoints/critic'))
+                agent.value.save(os.path.join(model_dir, 'model_checkpoints/value'))
+
         # And train the actor
         total_training_steps = jnp.array(0)
 
@@ -282,9 +288,6 @@ if __name__ == "__main__":
             if epoch % 100 == 0:
                 # Save each model
                 agent.actor.save(os.path.join(model_dir, 'model_checkpoints/actor'))
-                agent.target_value.save(os.path.join(model_dir, 'model_checkpoints/target_value'))
-                agent.critic.save(os.path.join(model_dir, 'model_checkpoints/critic'))
-                agent.value.save(os.path.join(model_dir, 'model_checkpoints/value'))
 
         # Evaluate agent
         n_envs = 1000
