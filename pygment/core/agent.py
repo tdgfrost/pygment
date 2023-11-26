@@ -333,11 +333,13 @@ class PPOAgent(BaseAgent):
         # Set models
         self.actor = Model.create(ActorNet(hidden_dims, self.action_dim),
                                   inputs=[self.actor_key, observations],
-                                  optim=optimiser)
+                                  optim=optax.adam(learning_rate=value_lr))
+                                  # optim=optimiser)
 
         self.value = Model.create(ValueNet(hidden_dims),
                                   inputs=[self.value_key, observations],
                                   optim=optax.adam(learning_rate=value_lr))
+                                  # optim=optimiser)
 
         self.networks = [self.actor, self.value]
 
@@ -350,15 +352,13 @@ class PPOAgent(BaseAgent):
         """
 
         # Create an updated copy of all the networks
-        new_rng, new_actor, _, new_value, info = _update_jit(
-            rng=self.rng,
+        new_actor, _, new_value, info = _update_jit(
             actor=self.actor,
             value=self.value,
             batch=batch,
             **kwargs)
 
         # Update the agent's networks with the updated copies
-        self.rng = new_rng
         self.actor = new_actor
         self.value = new_value
 
