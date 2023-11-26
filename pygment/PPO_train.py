@@ -8,17 +8,17 @@ from stable_baselines3.common.env_util import make_vec_env
 from math import ceil
 
 # Set jax to CPU
-jax.config.update('jax_platform_name', 'cpu')
+# jax.config.update('jax_platform_name', 'cpu')
 # jax.config.update("jax_debug_nans", True)
 # jax.config.update('jax_disable_jit', True)
 
 # Define config file - could change to FLAGS at some point
 config = {'seed': 123,
-          'env_id': 'CartPole-v1',
-          'step_delay': 2,
-          'sync_steps': 1,
-          'epochs': int(1e6),
-          'end_training_steps': int(1e5),
+          'env_id': 'LunarLander-v2',
+          'step_delay': 0,
+          'sync_steps': 5,
+          'epochs': 300,
+          'end_training_steps': int(1e9),
           'continual_learning': True,
           'steps': None,
           'batch_size': 32,
@@ -37,20 +37,30 @@ if __name__ == "__main__":
     from core.common import progress_bar, shuffle_split_batch, alter_batch, flatten_batch, downsample_batch
     from core.evaluate import evaluate_envs, run_and_animate
     from core.envs import EpisodeGenerator, make_variable_env
+    import argparse
+
+    # Set the flags for expectile and soft_update
+    parser = argparse.ArgumentParser()
+
+    parser.add_argument('--step-delay', type=int, default=config['step_delay'])
+
+    args = parser.parse_args()
+
+    config['step_delay'] = args.step_delay
 
     # ============================================================== #
     # ======================== PREPARATION ========================= #
     # ============================================================== #
 
     # Set whether to train and/or evaluate
-    logging_bool = False
+    logging_bool = True
     evaluate_bool = False
 
     # Create variable environment template
     def extra_step_filter(x):
-        # If tilted to the left
-        if x[2] < 0:
-            # with p == 0.25, delay by a further 5 steps (i.e., 6 total)
+        # If in rectangle
+        if config['bottom_bar_coord'] < x[1] < config['top_bar_coord']:
+            # with p == 0.5, delay by 20 steps
             if np.random.uniform() < 0.25:
                 return config['step_delay']
         # Otherwise, normal time steps (no delay)
@@ -59,12 +69,13 @@ if __name__ == "__main__":
 
     if logging_bool:
         wandb.init(
-            project="PPO-VariableTimeSteps",
-            allow_val_change=True,
+            project="LunarLander-PPO-baseline",
+            config=config,
         )
         wandb.define_metric('actor_loss', summary='min')
         wandb.define_metric('value_loss', summary='min')
         wandb.define_metric('episode_reward', summary='max')
+
 
     def train():
         # Create agent
@@ -172,13 +183,13 @@ if __name__ == "__main__":
 
             # Select a random subset of the batch
             remaining_steps = ceil((config['end_training_steps'] - total_training_steps) /
-                                   config['batch_size'])*config['batch_size']
+                                   config['batch_size']) * config['batch_size']
 
             if remaining_steps < sum([len(i) for i in batch.actions]):
                 config['steps'] = remaining_steps
 
             batch, random_key = downsample_batch(flatten_batch(batch), random_key,
-                                                     steps=config['steps'])
+                                                 steps=config['steps'])
 
             # Calculate the average reward, log and print it
             average_reward = np.median(excess_data['episode_rewards'])
@@ -190,9 +201,10 @@ if __name__ == "__main__":
                 results = evaluate_envs(agent,
                                         environments=make_vec_env(lambda: make_variable_env(config['env_id'],
                                                                                             fn=extra_step_filter),
-                                                                  n_envs=1000))
+                                                                  n_envs=300))
                 evaluate_reward = np.mean(results)
-                print('\n\n', '=' * 50, f'\nMedian reward: {np.median(results)}, Mean reward: {np.mean(results)}, Best reward: {best_reward}, Training steps: {total_training_steps}\n',
+                print('\n\n', '=' * 50,
+                      f'\nMedian reward: {np.median(results)}, Mean reward: {np.mean(results)}, Best reward: {best_reward}, Training steps: {total_training_steps}\n',
                       '=' * 50,
                       '\n')
                 if int(evaluate_reward) > best_reward:
@@ -205,7 +217,7 @@ if __name__ == "__main__":
 
             """
             if int(average_reward) > best_reward:
-                
+
                 print('Evaluating performance...')
                 results = evaluate_envs(agent,
                                         environments=make_vec_env(lambda: make_variable_env('LunarLander-v2',
@@ -216,15 +228,15 @@ if __name__ == "__main__":
                       '\n')
                 if int(average_reward) > best_reward:
                     best_reward = int(average_reward)
-    
+
                     agent.actor.save(os.path.join(model_dir, f'model_checkpoints/actor_{best_reward}'))  # if actor else None
                     agent.value.save(os.path.join(model_dir, f'model_checkpoints/value_{best_reward}'))  # if value else None
                 """
             if logging_bool:
                 logged_results = {'actor_loss': actor_loss,
-                           'critic_loss': critic_loss,
-                           'gradient_step': epoch,
-                           'training_step': total_training_steps}
+                                  'critic_loss': critic_loss,
+                                  'gradient_step': epoch,
+                                  'training_step': total_training_steps}
 
                 if epoch % config['sync_steps'] == 0:
                     logged_results['episode_reward'] = evaluate_reward
@@ -232,13 +244,14 @@ if __name__ == "__main__":
                 # Log results
                 wandb.log(logged_results)
 
-            if total_training_steps >= config['end_training_steps']:
+            if total_training_steps >= config['end_training_steps'] or epoch == config['epochs'] - 1:
                 agent.actor.save(os.path.join(model_dir, 'model_checkpoints/actor_best'))
                 agent.value.save(os.path.join(model_dir, 'model_checkpoints/value_best'))
-                print('='*50, '\nTraining complete!\n', '='*50)
+                print('=' * 50, '\nTraining complete!\n', '=' * 50)
                 break
 
         return agent
+
 
     # Set up hyperparameter sweep
     agent = train()
