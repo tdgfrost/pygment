@@ -202,6 +202,9 @@ if __name__ == "__main__":
                                                  value=True,
                                                  critic=True)
 
+            value_loss_info['interval_value_loss'] = value_loss_info['value_loss']
+            del value_loss_info['value_loss']
+
             # Then update for average network
             discounted_rewards_for_average = agent.interval_value(batch.states)[1]
             discounted_rewards_for_average = filter_to_action(discounted_rewards_for_average, batch.len_actions)
@@ -227,7 +230,7 @@ if __name__ == "__main__":
                                   'gradient_step': epoch,
                                   'average_value_loss': value_loss_info['average_value_loss'],
                                   'critic_loss': value_loss_info['critic_loss'],
-                                  'value_loss': value_loss_info['value_loss'],
+                                  'interval_value_loss': value_loss_info['interval_value_loss'],
                                   }
 
                 wandb.log(logged_results)
