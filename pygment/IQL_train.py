@@ -199,7 +199,7 @@ if __name__ == "__main__":
                                                  value_loss_fn={'expectile': 0},
                                                  critic_loss_fn={'expectile': 0},
                                                  expectile=config['expectile'],
-                                                 value=True,
+                                                 interval_value=True,
                                                  critic=True)
 
             value_loss_info['interval_value_loss'] = value_loss_info['value_loss']

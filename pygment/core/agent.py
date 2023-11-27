@@ -212,7 +212,7 @@ class IQLAgent(BaseAgent):
         :param batch: a Batch object.
         :param actor: whether to update the actor network.
         :param critic: whether to update the critic network.
-        :param value: whether to update the value network.
+        :param interval_value: whether to update the value network.
         :param average_value: whether to update the average_value network.
         :return: an InfoDict object containing metadata.
         """
