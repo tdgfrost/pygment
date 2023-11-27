@@ -31,7 +31,9 @@ config = {'seed': 123,
           'critic_lr': 0.001,
           'alpha_soft_update': 1,
           'hidden_dims': (256, 256),
-          'clipping': 1
+          'clipping': 1,
+          'top_bar_coord': 1.2,  # 0.9,
+          'bottom_bar_coord': 0.8,  # 0.5
           }
 
 if __name__ == "__main__":
