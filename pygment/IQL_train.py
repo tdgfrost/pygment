@@ -119,17 +119,15 @@ if __name__ == "__main__":
 
     config['alpha_soft_update'] = jnp.array(config['alpha_soft_update'])
 
-
     # Make sure this matches with the desired dataset's extra_step metadata
     def extra_step_filter(x):
-        # If tilted to the left
-        if x[2] < 0:
-            # with p == 0.25, delay by a further 5 steps (i.e., 6 total)
-            if np.random.uniform() < interval_probability:
+        # If in rectangle
+        if config['bottom_bar_coord'] < x[1] < config['top_bar_coord']:
+            # Slow zone
+            if np.random.uniform() < config['interval_probability']:
                 return config['step_delay']
         # Otherwise, normal time steps (no delay)
         return 0
-
 
     # Train agent
     def train(data):
