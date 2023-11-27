@@ -2,7 +2,7 @@ from jax import Array
 
 from core.agent import Model
 from core.common import Params, InfoDict, Batch, filter_to_action
-from update.loss import mc_mse_loss, expectile_loss
+from update.loss import mse_loss, expectile_loss
 
 from typing import Tuple
 
@@ -16,7 +16,7 @@ def update_v(value: Model, batch: Batch, **kwargs) -> Tuple[Model, InfoDict]:
     :return: a tuple containing the new model parameters, plus metadata
     """
 
-    loss_fn = {'mc_mse': mc_mse_loss,
+    loss_fn = {'mse': mse_loss,
                'expectile': expectile_loss}
 
     # Unpack the actions, states, and discounted rewards from the batch of samples
@@ -57,7 +57,7 @@ def update_q(critic: Model, batch: Batch, **kwargs) -> Tuple[Model, InfoDict]:
     actions = batch.actions
     states = batch.states
 
-    loss_fn = {'mc_mse': mc_mse_loss,
+    loss_fn = {'mse': mse_loss,
                'expectile': expectile_loss}
 
     def critic_loss_fn(critic_params: Params) -> tuple[Array, dict[str, Array]]:

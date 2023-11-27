@@ -20,7 +20,7 @@ config = {'seed': 123,
           'epochs': 100000,
           'early_stopping': jnp.array(1000),
           'batch_size': 10000,
-          'expectile': 0.5,
+          'expectile': 0.7,
           'baseline_reward': 45,
           'n_episodes': 10000,
           'interval_probability': 0.25,
@@ -57,7 +57,7 @@ if __name__ == "__main__":
     config['alpha_soft_update'] = args.soft_update
 
     # Set whether to train and/or evaluate
-    logging_bool = True
+    logging_bool = False
     evaluate_bool = False
 
     if logging_bool:
@@ -93,8 +93,10 @@ if __name__ == "__main__":
     # Start by defining the intervals between actions (both the current and next action)
     # intervals = the actual number of steps between actions
     intervals = np.array([len(traj) for traj in loaded_data.rewards])
+    """
     intervals = np.array([interval if not done else intervals.max()
                           for interval, done in zip(intervals.tolist(), loaded_data.dones.tolist())])
+    """
     intervals_unique = np.unique(intervals)
     mapping = {interval: idx for idx, interval in enumerate(intervals_unique)}
     len_actions = np.array([mapping[interval] for interval in intervals])
@@ -162,7 +164,7 @@ if __name__ == "__main__":
             wandb.define_metric('actor_loss', summary='min')
             wandb.define_metric('average_value_loss', summary='min')
             wandb.define_metric('critic_loss', summary='min')
-            wandb.define_metric('value_loss', summary='min')
+            wandb.define_metric('interval_value_loss', summary='min')
 
         for epoch in range(config['epochs']):
             if epoch > 0 and epoch % 100 == 0:
@@ -203,14 +205,14 @@ if __name__ == "__main__":
                                                  critic=True)
 
             # Then update for average network
-            discounted_rewards_for_average = agent.value(batch.states)[1]
+            discounted_rewards_for_average = agent.interval_value(batch.states)[1]
             discounted_rewards_for_average = filter_to_action(discounted_rewards_for_average, batch.len_actions)
 
             batch = alter_batch(batch,
                                 discounted_rewards=discounted_rewards_for_average)
 
             average_value_loss_info = agent.update_async(batch,
-                                                         value_loss_fn={'mc_mse': 0},
+                                                         value_loss_fn={'mse': 0},
                                                          average_value=True)
 
             average_value_loss_info['average_value_loss'] = average_value_loss_info['value_loss']
@@ -235,7 +237,7 @@ if __name__ == "__main__":
             if epoch % 100 == 0:
                 agent.target_value.save(os.path.join(model_dir, 'model_checkpoints/average_value'))
                 agent.critic.save(os.path.join(model_dir, 'model_checkpoints/critic'))
-                agent.value.save(os.path.join(model_dir, 'model_checkpoints/value'))
+                agent.interval_value.save(os.path.join(model_dir, 'model_checkpoints/interval_value'))
 
         # Then start training actor
         total_training_steps = jnp.array(0)

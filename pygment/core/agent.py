@@ -160,7 +160,7 @@ class IQLAgent(BaseAgent):
                                    optim=optimiser,
                                    continual_learning=continual_learning)
 
-        self.value = Model.create(ValueNet(hidden_dims, len(self.intervals_unique)),
+        self.interval_value = Model.create(ValueNet(hidden_dims, len(self.intervals_unique)),
                                   inputs=[self.value_key, observations],
                                   # optim=optax.adam(learning_rate=value_lr),
                                   optim=optimiser,
@@ -180,7 +180,7 @@ class IQLAgent(BaseAgent):
 
         self.sync_target(1.0)
 
-        self.networks = [self.actor, self.critic, self.value, self.average_value, self.target_value]
+        self.networks = [self.actor, self.critic, self.interval_value, self.average_value, self.target_value]
 
     def update(self, batch: Batch, **kwargs) -> InfoDict:
         """
@@ -191,20 +191,20 @@ class IQLAgent(BaseAgent):
         """
 
         # Create an updated copy of all the networks
-        new_actor, new_critic, new_value, info = _update_jit(
+        new_actor, new_critic, new_interval_value, info = _update_jit(
             self.actor, self.critic, self.value,
             batch, **kwargs)
 
         # Update the agent's networks with the updated copies
         self.actor = new_actor
         self.critic = new_critic
-        self.value = new_value
+        self.interval_value = new_interval_value
 
         # Return the metadata
         return info
 
     def update_async(self, batch: Batch, actor: bool = False,
-                     critic: bool = False, value: bool = False,
+                     critic: bool = False, interval_value: bool = False,
                      average_value: bool = False, **kwargs) -> InfoDict:
         """
         Updates the agent's networks asynchronously.
@@ -224,8 +224,8 @@ class IQLAgent(BaseAgent):
         new_critic, critic_info = _update_critic_jit(
             self.critic, batch, **kwargs) if critic else (self.critic, {})
 
-        new_value, value_info = _update_value_jit(
-            self.value, batch, **kwargs) if value else (self.value, {})
+        new_interval_value, interval_value_info = _update_value_jit(
+            self.interval_value, batch, **kwargs) if interval_value else (self.value, {})
 
         new_average_value, average_value_info = _update_value_jit(
             self.average_value, batch, **kwargs) if average_value else (self.average_value, {})
@@ -233,12 +233,12 @@ class IQLAgent(BaseAgent):
         # Update the agent's networks with the updated copies
         self.actor = new_actor
         self.critic = new_critic
-        self.value = new_value
+        self.interval_value = new_interval_value
         self.average_value = new_average_value
 
         # Return the metadata
         return {**critic_info,
-                **value_info,
+                **interval_value_info,
                 **actor_info,
                 **average_value_info,
                 }

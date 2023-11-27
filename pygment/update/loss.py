@@ -49,7 +49,7 @@ def expectile_loss(pred, batch, expectile=0.8, **kwargs):
     return weight * diff ** 2
 
 
-def mc_mse_loss(pred, batch, **kwargs):
+def mse_loss(pred, batch, **kwargs):
     return (pred - batch.discounted_rewards) ** 2
 
 
