@@ -192,7 +192,7 @@ class IQLAgent(BaseAgent):
 
         # Create an updated copy of all the networks
         new_actor, new_critic, new_interval_value, info = _update_jit(
-            self.actor, self.critic, self.value,
+            self.actor, self.critic, self.interval_value,
             batch, **kwargs)
 
         # Update the agent's networks with the updated copies
@@ -225,7 +225,7 @@ class IQLAgent(BaseAgent):
             self.critic, batch, **kwargs) if critic else (self.critic, {})
 
         new_interval_value, interval_value_info = _update_value_jit(
-            self.interval_value, batch, **kwargs) if interval_value else (self.value, {})
+            self.interval_value, batch, **kwargs) if interval_value else (self.interval_value, {})
 
         new_average_value, average_value_info = _update_value_jit(
             self.average_value, batch, **kwargs) if average_value else (self.average_value, {})
