@@ -140,10 +140,9 @@ class IQLAgent(BaseAgent):
 
         # Set optimizers
         if opt_decay_schedule == "cosine":
-            schedule_fn = optax.cosine_decay_schedule(-actor_lr, epochs)
+            schedule_fn = optax.cosine_decay_schedule(actor_lr, epochs)
             optimiser = optax.chain(optax.clip_by_global_norm(clipping),
-                                    optax.scale_by_adam(),
-                                    optax.scale_by_schedule(schedule_fn))
+                                    optax.adamw(learning_rate=schedule_fn))
         else:
             optimiser = optax.adam(learning_rate=actor_lr)
 

@@ -185,18 +185,30 @@ if __name__ == "__main__":
             gammas = np.power(gammas, np.array(batch.intervals))
 
             next_state_values = np.array(agent.target_value(batch.next_states)[1])
-            discounted_rewards = np.array(batch.rewards) + gammas * next_state_values * (1 - np.array(batch.dones))
+            discounted_rewards_for_critic = (np.array(batch.rewards)
+                                             + gammas * next_state_values * (1 - np.array(batch.dones)))
 
-            batch = alter_batch(batch, discounted_rewards=jnp.array(discounted_rewards), next_states=None,
+            batch = alter_batch(batch, discounted_rewards=jnp.array(discounted_rewards_for_critic), next_states=None,
                                 dones=None, intervals=None, rewards=None)
+
+            # Perform the update step for critic networks
+            critic_loss_info = agent.update_async(batch,
+                                                  critic_loss_fn={'mse': 0},
+                                                  critic=True)
+
+            # Perform the update step for the value network
+            discounted_rewards_for_value = jnp.minimum(*agent.critic(batch.states)[1])
+            discounted_rewards_for_value = filter_to_action(discounted_rewards_for_value, batch.actions)
+
+            batch = alter_batch(batch, discounted_rewards=jnp.array(discounted_rewards_for_value))
 
             # Perform the update step for interval value and critic networks
             value_loss_info = agent.update_async(batch,
                                                  value_loss_fn={'expectile': 0},
-                                                 critic_loss_fn={'expectile': 0},
                                                  expectile=config['expectile'],
-                                                 value=True,
-                                                 critic=True)
+                                                 value=True)
+
+            value_loss_info.update(critic_loss_info)
 
             # Do a partial sync with the target network
             agent.sync_target(config['alpha_soft_update'])
@@ -229,7 +241,7 @@ if __name__ == "__main__":
         step_size = int(5e5)
         for i in range(ceil(data.states.shape[0] / step_size)):
             progress_bar(i, ceil(data.states.shape[0] / step_size))
-            idx = slice(i * step_size, (i+1)*step_size, 1)
+            idx = slice(i * step_size, (i + 1) * step_size, 1)
             state_values = agent.target_value(data.states[idx])[1]
 
             critic_values = jnp.minimum(*agent.critic(data.states[idx])[1])
