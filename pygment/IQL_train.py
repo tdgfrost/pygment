@@ -5,6 +5,7 @@ import jax.numpy as jnp
 from stable_baselines3.common.env_util import make_vec_env
 import wandb
 from math import ceil
+import jax
 
 # Set jax to CPU
 # jax.config.update('jax_platform_name', 'cpu')
@@ -240,22 +241,58 @@ if __name__ == "__main__":
         total_training_steps = jnp.array(0)
 
         # Calculate the advantages
-        print('\n\n', '=' * 50, '\n', ' ' * 3, '\U0001F9D9' * 3, ' ' * 1, f'Filtering data',
+        # Perform MC dropout inference to assess uncertainty in values
+        print('\n\n', '=' * 50, '\n', ' ' * 3, '\U0001F9D9' * 3, ' ' * 1, f'Calculating uncertainty',
               ' ' * 2, '\U0001F9D9' * 3, '\n', '=' * 50, '\n')
 
-        advantages = []
         step_size = int(5e5)
-        for i in range(ceil(data.states.shape[0] / step_size)):
-            progress_bar(i, ceil(data.states.shape[0] / step_size))
-            idx = slice(i * step_size, (i + 1) * step_size, 1)
-            state_values = agent.target_value(data.states[idx])[1]
+        chunk_shape = (1, len(data.actions))
 
-            critic_values = jnp.minimum(*agent.critic(data.states[idx])[1])
-            critic_values = filter_to_action(critic_values, data.actions[idx])
+        def iter_through_data(input_data, current_agent):
+            current_sample_values = []
+            current_critic_values = []
+            for i in range(ceil(input_data.states.shape[0] / step_size)):
+                current_agent.refresh_keys()
+                idx = slice(i * step_size, (i + 1) * step_size, 1)
+                state_value_iter = current_agent.target_value(input_data.states[idx],
+                                                              rngs={'dropout': current_agent.target_value_key})[1]
 
-            advantages += [critic_values - state_values]
+                critic_value_iter = current_agent.critic(input_data.states[idx],
+                                                         rngs={'dropout': current_agent.critic_key})[1]
+                critic_value_iter = filter_to_action(critic_value_iter, input_data.actions[idx])
 
-        advantages = np.concatenate(advantages)
+                current_sample_values += [state_value_iter]
+                current_critic_values += [critic_value_iter]
+
+            current_sample_values = np.concatenate(current_sample_values).reshape(chunk_shape)
+            current_critic_values = np.concatenate(current_critic_values).reshape(chunk_shape)
+
+            return current_agent, current_sample_values, current_critic_values
+
+        agent, state_values, critic_values = iter_through_data(data, agent)
+
+        for _ in range(15):
+            progress_bar(_, 15)
+
+            agent, sample_state_values, sample_critic_values = iter_through_data(data, agent)
+
+            state_values = np.concatenate((state_values, sample_state_values))
+            critic_values = np.concatenate((critic_values, sample_critic_values))
+
+        state_values_mean = np.mean(state_values, axis=0)
+        state_values_std = np.std(state_values, axis=0)
+        critic_values_mean = np.mean(critic_values, axis=0)
+        critic_values_std = np.std(critic_values, axis=0)
+
+        advantages = critic_values_mean - state_values_mean
+        advantages_std = np.sqrt(state_values_std ** 2 + critic_values_std ** 2)
+        """
+        cdf = 1 - norm.cdf(0, advantages, advantages_std)
+        if 'gaussian_confidence' in config.keys() and config['gaussian_confidence'] is not None:
+            filter_point = config['gaussian_confidence']
+        else:
+            filter_point = np.quantile(cdf, config['confidence_quantile'])
+        """
 
         # Filter for top half of actions
         if 'filter_point' not in config.keys():

@@ -104,7 +104,8 @@ class ValueNet(nn.Module):
 
         # Do a forward pass with the MLP
         layer_outputs, value = MLP((*self.hidden_dims, self.output_dims),
-                                   activations=self.activations)(observations, **kwargs)
+                                   activations=self.activations,
+                                   dropout_rate=self.dropout_rate)(observations, **kwargs)
 
         # Return the output
         if value.shape[-1] == 1:
@@ -274,7 +275,7 @@ class Model:
         """
 
         # Initialise the neural network
-        variables = model_def.init(*inputs)
+        variables = model_def.init(*inputs, deterministic=True)
 
         # Extract the parameters (variables: dictionary has only one key, 'params')
         params = variables.pop('params')
