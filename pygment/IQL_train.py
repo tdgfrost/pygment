@@ -164,6 +164,7 @@ if __name__ == "__main__":
             wandb.define_metric('actor_loss', summary='min')
             wandb.define_metric('critic_loss', summary='min')
             wandb.define_metric('value_loss', summary='min')
+            wandb.define_metric('expectile_loss', summary='min')
 
         for epoch in range(config['epochs']):
             if epoch > 0 and epoch % 100 == 0:
@@ -225,6 +226,7 @@ if __name__ == "__main__":
                                   'gradient_step': epoch,
                                   'value_loss': loss_info['value_loss'],
                                   'critic_loss': loss_info['critic_loss'],
+                                  'expectile_loss': loss_info['expectile_loss'],
                                   }
 
                 wandb.log(logged_results)
