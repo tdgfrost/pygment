@@ -110,9 +110,7 @@ class IQLAgent(BaseAgent):
                  observations: np.ndarray,
                  action_dim: int,
                  intervals_unique: np.ndarray,
-                 actor_lr: float = 3e-4,
-                 value_lr: float = 3e-4,
-                 critic_lr: float = 3e-4,
+                 lr: float = 3e-4,
                  hidden_dims: Sequence[int] = (256, 256),
                  gamma: float = 0.99,
                  expectile: float = 0.8,
@@ -120,6 +118,7 @@ class IQLAgent(BaseAgent):
                  opt_decay_schedule: str = "cosine",
                  clipping: float = 0.01,
                  continual_learning: bool = False,
+                 dropout_rate: float = 0.1,
                  *args,
                  **kwargs):
 
@@ -140,35 +139,35 @@ class IQLAgent(BaseAgent):
 
         # Set optimizers
         if opt_decay_schedule == "cosine":
-            schedule_fn = optax.cosine_decay_schedule(actor_lr, int(0.2 * epochs))
+            schedule_fn = optax.cosine_decay_schedule(lr, int(0.2 * epochs))
             optimiser = optax.chain(optax.clip_by_global_norm(clipping),
                                     optax.adamw(learning_rate=schedule_fn))
         else:
-            optimiser = optax.adam(learning_rate=actor_lr)
+            optimiser = optax.adam(learning_rate=lr)
 
         """
         Each Model essentially contains a neural network structure, parameters, and optimiser.
         The parameters are kept separate from the neural network structure, and updated separately.
         """
         # Set models
-        self.actor = Model.create(ActorNet(hidden_dims, self.action_dim),
+        self.actor = Model.create(ActorNet(hidden_dims, self.action_dim, dropout_rate=0.0),
                                   inputs=[self.actor_key, observations],
                                   optim=optimiser,
                                   continual_learning=continual_learning)
 
-        self.critic = Model.create(DoubleCriticNet(hidden_dims, self.action_dim),
+        self.critic = Model.create(DoubleCriticNet(hidden_dims, self.action_dim, dropout_rate=dropout_rate),
                                    inputs=[self.critic_key, observations],
                                    # optim=optax.adam(learning_rate=critic_lr),
                                    optim=optimiser,
                                    continual_learning=continual_learning)
 
-        self.value = Model.create(ValueNet(hidden_dims, 1),
+        self.value = Model.create(ValueNet(hidden_dims, 1, dropout_rate=dropout_rate),
                                   inputs=[self.value_key, observations],
                                   # optim=optax.adam(learning_rate=value_lr),
                                   optim=optimiser,
                                   continual_learning=continual_learning)
 
-        self.target_value = Model.create(ValueNet(hidden_dims, 1),
+        self.target_value = Model.create(ValueNet(hidden_dims, 1, dropout_rate=dropout_rate),
                                          inputs=[self.value_key, observations],
                                          # optim=optax.adam(learning_rate=value_lr),
                                          optim=optimiser,
