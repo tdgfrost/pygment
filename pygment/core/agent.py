@@ -128,7 +128,7 @@ class IQLAgent(BaseAgent):
 
         # Set random seed
         rng = jax.random.PRNGKey(seed)
-        self.actor_key, self.critic_key, self.value_key = jax.random.split(rng, 3)
+        self.actor_key, self.critic_key, self.value_key, self.expectile_value_key = jax.random.split(rng, 4)
 
         # Set parameters
         self.action_dim = action_dim
@@ -158,25 +158,27 @@ class IQLAgent(BaseAgent):
 
         self.critic = Model.create(DoubleCriticNet(hidden_dims, self.action_dim),
                                    inputs=[self.critic_key, observations],
-                                   # optim=optax.adam(learning_rate=critic_lr),
                                    optim=optimiser,
                                    continual_learning=continual_learning)
 
         self.value = Model.create(ValueNet(hidden_dims, 1),
                                   inputs=[self.value_key, observations],
-                                  # optim=optax.adam(learning_rate=value_lr),
                                   optim=optimiser,
                                   continual_learning=continual_learning)
 
         self.target_value = Model.create(ValueNet(hidden_dims, 1),
                                          inputs=[self.value_key, observations],
-                                         # optim=optax.adam(learning_rate=value_lr),
                                          optim=optimiser,
                                          continual_learning=continual_learning)
 
+        self.expectile_value = Model.create(ValueNet(hidden_dims, 1),
+                                            inputs=[self.expectile_value_key, observations],
+                                            optim=optimiser,
+                                            continual_learning=continual_learning)
+
         self.sync_target(alpha=1.0)
 
-        self.networks = [self.actor, self.critic, self.value, self.target_value]
+        self.networks = [self.actor, self.critic, self.value, self.target_value, self.expectile_value]
 
     def update(self, batch: Batch, **kwargs) -> InfoDict:
         """
@@ -200,7 +202,8 @@ class IQLAgent(BaseAgent):
         return info
 
     def update_async(self, batch: Batch, actor: bool = False,
-                     critic: bool = False, value: bool = False, **kwargs) -> InfoDict:
+                     critic: bool = False, value: bool = False,
+                     expectile_value: bool = False, **kwargs) -> InfoDict:
         """
         Updates the agent's networks asynchronously.
 
@@ -208,6 +211,7 @@ class IQLAgent(BaseAgent):
         :param actor: whether to update the actor network.
         :param critic: whether to update the critic network.
         :param value: whether to update the value network.
+        :param expectile_value: whether to update the expectile value network.
         :return: an InfoDict object containing metadata.
         """
 
@@ -221,15 +225,20 @@ class IQLAgent(BaseAgent):
         new_value, value_info = _update_value_jit(
             self.value, batch, **kwargs) if value else (self.value, {})
 
+        new_expectile_value, expectile_value_info = _update_value_jit(
+            self.expectile_value, batch, **kwargs) if expectile_value else (self.expectile_value, {})
+
         # Update the agent's networks with the updated copies
         self.actor = new_actor
         self.critic = new_critic
         self.value = new_value
+        self.expectile_value = new_expectile_value
 
         # Return the metadata
         return {**critic_info,
                 **value_info,
                 **actor_info,
+                **expectile_value_info
                 }
 
     def sync_target(self, alpha=0.01):
