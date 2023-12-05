@@ -183,7 +183,11 @@ if __name__ == "__main__":
             gammas = np.ones(shape=len(batch.rewards)) * config['gamma']
             gammas = np.power(gammas, np.array(batch.intervals))
 
-            next_state_values = np.array(agent.target_value(batch.next_states)[1])
+            # Learn the Q values
+            agent.refresh_keys()
+
+            next_state_values = np.array(agent.target_value(batch.next_states,
+                                                            rngs={'dropout': agent.target_value_key})[1])
             discounted_rewards_for_critic = (np.array(batch.rewards)
                                              + gammas * next_state_values * (1 - np.array(batch.dones)))
 
@@ -195,8 +199,11 @@ if __name__ == "__main__":
                                                   critic_loss_fn={'mse': 0},
                                                   critic=True)
 
-            # Perform the update step for the value network
-            discounted_rewards_for_value = jnp.minimum(*agent.critic(batch.states)[1])
+            # Learn the expectile V(s) values
+            agent.refresh_keys()
+
+            discounted_rewards_for_value = agent.critic(batch.states,
+                                                        rngs={'dropout': agent.critic_key})[1]
             discounted_rewards_for_value = filter_to_action(discounted_rewards_for_value, batch.actions)
 
             batch = alter_batch(batch, discounted_rewards=jnp.array(discounted_rewards_for_value))

@@ -1,4 +1,5 @@
 from jax import Array
+from jax.random import PRNGKey
 
 from core.agent import Model
 from core.common import Params, InfoDict, Batch, filter_to_action
@@ -7,10 +8,11 @@ from update.loss import mse_loss, expectile_loss
 from typing import Tuple
 
 
-def update_v(value: Model, batch: Batch, **kwargs) -> Tuple[Model, InfoDict]:
+def update_v(rng: PRNGKey, value: Model, batch: Batch, **kwargs) -> Tuple[Model, InfoDict]:
     """
     Function to update the Value network
 
+    :param rng: the random number generator
     :param value: the Value network to be updated
     :param batch: a Batch object of samples
     :return: a tuple containing the new model parameters, plus metadata
@@ -24,7 +26,7 @@ def update_v(value: Model, batch: Batch, **kwargs) -> Tuple[Model, InfoDict]:
 
     def value_loss_fn(value_params: Params) -> tuple[Array, dict[str, Array]]:
         # Generate V(s) for the sample states
-        layer_outputs, v = value.apply({'params': value_params}, states)
+        layer_outputs, v = value.apply({'params': value_params}, states, rngs={'dropout': rng})
 
         if batch.len_actions is not None and len(v.shape) > 1:
             v = filter_to_action(v, batch.len_actions)
@@ -45,9 +47,11 @@ def update_v(value: Model, batch: Batch, **kwargs) -> Tuple[Model, InfoDict]:
     return new_value, info
 
 
-def update_q(critic: Model, batch: Batch, **kwargs) -> Tuple[Model, InfoDict]:
+def update_q(rng: PRNGKey, critic: Model, batch: Batch, **kwargs) -> Tuple[Model, InfoDict]:
     """
     Function to update the Q network
+
+    :param rng: the random number generator
     :param critic: the critic network to be updated
     :param batch: a Batch object of samples
     :return: a tuple containing the new model parameters, plus metadata
@@ -62,7 +66,7 @@ def update_q(critic: Model, batch: Batch, **kwargs) -> Tuple[Model, InfoDict]:
 
     def critic_loss_fn(critic_params: Params) -> tuple[Array, dict[str, Array]]:
         # Generate Q values from each of the two critic networks
-        layer_outputs, (q1, q2) = critic.apply({'params': critic_params}, states)
+        layer_outputs, q = critic.apply({'params': critic_params}, states, rngs={'dropout': rng})
 
         # Select the sampled actions
         """
@@ -72,13 +76,10 @@ def update_q(critic: Model, batch: Batch, **kwargs) -> Tuple[Model, InfoDict]:
         q2 = jnp.squeeze(jnp.take_along_axis(q2, actions, axis=-1), -1)
         """
 
-        q1 = filter_to_action(q1, actions)
-        q2 = filter_to_action(q2, actions)
+        q = filter_to_action(q, actions)
 
         # Calculate the loss for the critic networks using the target Q values with MSE
-        critic_loss_1 = loss_fn[list(kwargs['critic_loss_fn'].keys())[0]](q1, batch, **kwargs).mean()
-        critic_loss_2 = loss_fn[list(kwargs['critic_loss_fn'].keys())[0]](q2, batch, **kwargs).mean()
-        critic_loss = critic_loss_1 + critic_loss_2
+        critic_loss = loss_fn[list(kwargs['critic_loss_fn'].keys())[0]](q, batch, **kwargs).mean()
 
         # Return the loss value, plus metadata
         return critic_loss, {

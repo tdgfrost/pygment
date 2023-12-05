@@ -32,37 +32,39 @@ def _update_jit(
 
 @jit
 def _update_actor_jit(
-    actor: Model,
-    batch: Batch, **kwargs
-) -> tuple[Model, dict[Any, Any]]:
+        key: PRNGKey, actor: Model, batch: Batch, **kwargs
+) -> tuple[Any, Model, dict[Any, Any]]:
 
-    new_actor, actor_info = update_policy(actor, batch, **kwargs)
+    key, rng = jax.random.split(key)
+    new_actor, actor_info = update_policy(rng, actor, batch, **kwargs)
 
-    return new_actor, {
+    return key, new_actor, {
         **actor_info
     }
 
 
 @jit
 def _update_critic_jit(
-    critic: Model, batch: Batch, **kwargs
-) -> tuple[Model, dict[Any, Any]]:
+    key: PRNGKey, critic: Model, batch: Batch, **kwargs
+) -> tuple[Any, Model, dict[Any, Any]]:
 
-    new_critic, critic_info = update_q(critic, batch, **kwargs)
+    key, rng = jax.random.split(key)
+    new_critic, critic_info = update_q(rng, critic, batch, **kwargs)
 
-    return new_critic, {
+    return key, new_critic, {
         **critic_info
     }
 
 
 @jit
 def _update_value_jit(
-    value: Model, batch: Batch, **kwargs
-) -> tuple[Model, dict[Any, Any]]:
+    key: PRNGKey, value: Model, batch: Batch, **kwargs
+) -> tuple[Any, Model, dict[Any, Any]]:
 
-    new_value, value_info = update_v(value, batch, **kwargs)
+    key, rng = jax.random.split(key)
+    new_value, value_info = update_v(rng, value, batch, **kwargs)
 
-    return new_value, {
+    return key, new_value, {
         **value_info
     }
 

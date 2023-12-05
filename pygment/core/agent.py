@@ -126,8 +126,8 @@ class IQLAgent(BaseAgent):
         super().__init__()
 
         # Set random seed
-        rng = jax.random.PRNGKey(seed)
-        self.actor_key, self.critic_key, self.value_key = jax.random.split(rng, 3)
+        self.rng = jax.random.PRNGKey(seed)
+        self.rng, self.actor_key, self.critic_key, self.value_key, self.target_value_key = jax.random.split(self.rng, 5)
 
         # Set parameters
         self.action_dim = action_dim
@@ -155,21 +155,18 @@ class IQLAgent(BaseAgent):
                                   optim=optimiser,
                                   continual_learning=continual_learning)
 
-        self.critic = Model.create(DoubleCriticNet(hidden_dims, self.action_dim, dropout_rate=dropout_rate),
+        self.critic = Model.create(CriticNet(hidden_dims, self.action_dim, dropout_rate=dropout_rate),
                                    inputs=[self.critic_key, observations],
-                                   # optim=optax.adam(learning_rate=critic_lr),
                                    optim=optimiser,
                                    continual_learning=continual_learning)
 
         self.value = Model.create(ValueNet(hidden_dims, 1, dropout_rate=dropout_rate),
                                   inputs=[self.value_key, observations],
-                                  # optim=optax.adam(learning_rate=value_lr),
                                   optim=optimiser,
                                   continual_learning=continual_learning)
 
         self.target_value = Model.create(ValueNet(hidden_dims, 1, dropout_rate=dropout_rate),
                                          inputs=[self.value_key, observations],
-                                         # optim=optax.adam(learning_rate=value_lr),
                                          optim=optimiser,
                                          continual_learning=continual_learning)
 
@@ -211,19 +208,24 @@ class IQLAgent(BaseAgent):
         """
 
         # Create an updated copy of the required networks
-        new_actor, actor_info = _update_actor_jit(
-            self.actor, batch, **kwargs) if actor else (self.actor, {})
+        new_actor_key, new_actor, actor_info = _update_actor_jit(
+            self.actor_key, self.actor, batch, **kwargs) if actor else (self.actor_key, self.actor, {})
 
-        new_critic, critic_info = _update_critic_jit(
-            self.critic, batch, **kwargs) if critic else (self.critic, {})
+        new_critic_key, new_critic, critic_info = _update_critic_jit(
+            self.critic_key, self.critic, batch, **kwargs) if critic else (self.critic_key, self.critic, {})
 
-        new_value, value_info = _update_value_jit(
-            self.value, batch, **kwargs) if value else (self.value, {})
+        new_value_key, new_value, value_info = _update_value_jit(
+            self.value_key, self.value, batch, **kwargs) if value else (self.value_key, self.value, {})
 
         # Update the agent's networks with the updated copies
         self.actor = new_actor
         self.critic = new_critic
         self.value = new_value
+
+        # Update the random keys
+        self.actor_key = new_actor_key
+        self.critic_key = new_critic_key
+        self.value_key = new_value_key
 
         # Return the metadata
         return {**critic_info,
@@ -251,6 +253,9 @@ class IQLAgent(BaseAgent):
         new_target_params = soft_update_dict(self.value.params, self.target_value.params)
         self.target_value = self.target_value.replace(params=new_target_params)
 
+        if alpha == 1:
+            self.target_value_key = self.value_key
+
     def sample_action(self, state, key=jax.random.PRNGKey(123)):
         """
         Chooses an action based on the current state.
@@ -271,6 +276,13 @@ class IQLAgent(BaseAgent):
         log_probs = nn.log_softmax(logits, axis=-1)
         action = jax.random.categorical(key, logits, axis=-1)
         return action, log_probs
+
+    def refresh_keys(self):
+        """
+        Refreshes the keys for the agent.
+        """
+
+        self.rng, self.actor_key, self.critic_key, self.value_key, self.target_value_key = jax.random.split(self.rng, 5)
 
 
 class PPOAgent(BaseAgent):

@@ -1,16 +1,18 @@
 from typing import Tuple
 
 from jax import Array
+from jax.random import PRNGKey
 
 from core.common import Batch, InfoDict, Params
 from core.agent import Model
 from update.loss import ppo_loss, iql_loss, clone_behaviour
 
 
-def update_policy(actor: Model, batch: Batch, **kwargs) -> Tuple[Model, InfoDict]:
+def update_policy(rng: PRNGKey, actor: Model, batch: Batch, **kwargs) -> Tuple[Model, InfoDict]:
     """
     Update the policy using the advantage-filtered logprobs
 
+    :param rng: the random number generator
     :param actor: The actor model
     :param batch: a Batch object of samples
     :return: a tuple containing the new model parameters, plus metadata
@@ -32,7 +34,7 @@ def update_policy(actor: Model, batch: Batch, **kwargs) -> Tuple[Model, InfoDict
 
         # Generate the logits for the actions
         layer_outputs, logits = actor.apply({'params': actor_params},
-                                            states)
+                                            states, rngs={'dropout': rng})
 
         # Convert this to advantage-filtered logprobs - instead of overall mean, we take the 'mean' of the valid actions
         """
