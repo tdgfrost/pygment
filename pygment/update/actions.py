@@ -1,4 +1,4 @@
-from update.critic import update_q, update_v
+from update.critic import update_q, update_v, update_uncertainty
 from update.actor import update_policy
 from core.common import Batch
 
@@ -64,5 +64,17 @@ def _update_value_jit(
 
     return new_value, {
         **value_info
+    }
+
+
+@jit
+def _update_uncertainty_jit(
+    uncertainty: Model, batch: Batch, loss_value
+) -> tuple[Model, dict[Any, Any]]:
+
+    new_uncertainty, uncertainty_info = update_uncertainty(uncertainty, batch, loss_value)
+
+    return new_uncertainty, {
+        **uncertainty_info
     }
 

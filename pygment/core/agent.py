@@ -1,6 +1,7 @@
 from core.net import Model, ValueNet, ActorNet, DoubleCriticNet, CriticNet
 from core.common import Batch, InfoDict
-from update.actions import _update_jit, _update_value_jit, _update_critic_jit, _update_actor_jit
+from update.actions import (_update_jit, _update_value_jit, _update_critic_jit, _update_actor_jit,
+                            _update_uncertainty_jit)
 
 import os
 import datetime as dt
@@ -158,15 +159,24 @@ class IQLAgent(BaseAgent):
 
         self.critic = Model.create(DoubleCriticNet(hidden_dims, self.action_dim),
                                    inputs=[self.critic_key, observations],
-                                   # optim=optax.adam(learning_rate=critic_lr),
                                    optim=optimiser,
                                    continual_learning=continual_learning)
+
+        self.critic_uncertainty = Model.create(CriticNet(hidden_dims, self.action_dim),
+                                               inputs=[self.critic_key, observations],
+                                               optim=optimiser,
+                                               continual_learning=continual_learning)
 
         self.value = Model.create(ValueNet(hidden_dims, 1),
                                   inputs=[self.value_key, observations],
                                   # optim=optax.adam(learning_rate=value_lr),
                                   optim=optimiser,
                                   continual_learning=continual_learning)
+
+        self.value_uncertainty = Model.create(ValueNet(hidden_dims, 1),
+                                              inputs=[self.value_key, observations],
+                                              optim=optimiser,
+                                              continual_learning=continual_learning)
 
         self.target_value = Model.create(ValueNet(hidden_dims, 1),
                                          inputs=[self.value_key, observations],
@@ -176,7 +186,8 @@ class IQLAgent(BaseAgent):
 
         self.sync_target(alpha=1.0)
 
-        self.networks = [self.actor, self.critic, self.value, self.target_value]
+        self.networks = [self.actor, self.critic, self.critic_uncertainty, self.value, self.value_uncertainty,
+                         self.target_value]
 
     def update(self, batch: Batch, **kwargs) -> InfoDict:
         """
@@ -218,17 +229,27 @@ class IQLAgent(BaseAgent):
         new_critic, critic_info = _update_critic_jit(
             self.critic, batch, **kwargs) if critic else (self.critic, {})
 
+        new_critic_uncertainty, critic_uncertainty_info = _update_uncertainty_jit(
+            self.critic_uncertainty, batch, critic_info['all_critic_loss']) if critic else (self.critic_uncertainty, {})
+
         new_value, value_info = _update_value_jit(
             self.value, batch, **kwargs) if value else (self.value, {})
+
+        new_value_uncertainty, value_uncertainty_info = _update_uncertainty_jit(
+            self.value_uncertainty, batch, value_info['all_value_loss']) if value else (self.value_uncertainty, {})
 
         # Update the agent's networks with the updated copies
         self.actor = new_actor
         self.critic = new_critic
+        self.critic_uncertainty = new_critic_uncertainty
         self.value = new_value
+        self.value_uncertainty = new_value_uncertainty
 
         # Return the metadata
         return {**critic_info,
+                **critic_uncertainty_info,
                 **value_info,
+                **value_uncertainty_info,
                 **actor_info,
                 }
 

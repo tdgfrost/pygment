@@ -5,6 +5,7 @@ import jax.numpy as jnp
 from stable_baselines3.common.env_util import make_vec_env
 import wandb
 from math import ceil
+import jax
 
 # Set jax to CPU
 # jax.config.update('jax_platform_name', 'cpu')
@@ -163,7 +164,9 @@ if __name__ == "__main__":
             # Keep track of the best loss values
             wandb.define_metric('actor_loss', summary='min')
             wandb.define_metric('critic_loss', summary='min')
+            wandb.define_metric('critic_uncertainty_loss', summary='min')
             wandb.define_metric('value_loss', summary='min')
+            wandb.define_metric('value_uncertainty_loss', summary='min')
 
         for epoch in range(config['epochs']):
             if epoch > 0 and epoch % 100 == 0:
@@ -196,6 +199,9 @@ if __name__ == "__main__":
                                                   critic_loss_fn={'mse': 0},
                                                   critic=True)
 
+            critic_loss_info['critic_uncertainty_loss'] = critic_loss_info['uncertainty_loss']
+            del critic_loss_info['uncertainty_loss']
+
             # Perform the update step for the value network
             discounted_rewards_for_value = jnp.minimum(*agent.critic(batch.states)[1])
             discounted_rewards_for_value = filter_to_action(discounted_rewards_for_value, batch.actions)
@@ -208,6 +214,9 @@ if __name__ == "__main__":
                                                  expectile=config['expectile'],
                                                  value=True)
 
+            value_loss_info['value_uncertainty_loss'] = value_loss_info['uncertainty_loss']
+            del value_loss_info['uncertainty_loss']
+
             value_loss_info.update(critic_loss_info)
 
             # Do a partial sync with the target network
@@ -219,7 +228,9 @@ if __name__ == "__main__":
                 logged_results = {'training_step': total_training_steps,
                                   'gradient_step': epoch,
                                   'value_loss': value_loss_info['value_loss'],
+                                  'value_uncertainty_loss': value_loss_info['value_uncertainty_loss'],
                                   'critic_loss': value_loss_info['critic_loss'],
+                                  'critic_uncertainty_loss': value_loss_info['critic_uncertainty_loss'],
                                   }
 
                 wandb.log(logged_results)
@@ -228,7 +239,9 @@ if __name__ == "__main__":
                 # Save each model
                 agent.target_value.save(os.path.join(model_dir, 'model_checkpoints/target_value'))
                 agent.critic.save(os.path.join(model_dir, 'model_checkpoints/critic'))
+                agent.critic_uncertainty.save(os.path.join(model_dir, 'model_checkpoints/critic_uncertainty'))
                 agent.value.save(os.path.join(model_dir, 'model_checkpoints/value'))
+                agent.value_uncertainty.save(os.path.join(model_dir, 'model_checkpoints/value_uncertainty'))
 
         # And train the actor
         total_training_steps = jnp.array(0)
