@@ -155,7 +155,7 @@ class IQLAgent(BaseAgent):
                                   optim=optimiser,
                                   continual_learning=continual_learning)
 
-        self.critic = Model.create(CriticNet(hidden_dims, self.action_dim, dropout_rate=dropout_rate),
+        self.critic = Model.create(DoubleCriticNet(hidden_dims, self.action_dim, dropout_rate=dropout_rate),
                                    inputs=[self.critic_key, observations],
                                    optim=optimiser,
                                    continual_learning=continual_learning)

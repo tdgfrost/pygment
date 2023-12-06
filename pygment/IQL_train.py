@@ -8,9 +8,9 @@ from math import ceil
 import jax
 
 # Set jax to CPU
-# jax.config.update('jax_platform_name', 'cpu')
+jax.config.update('jax_platform_name', 'cpu')
 # jax.config.update("jax_debug_nans", True)
-# jax.config.update('jax_disable_jit', True)
+jax.config.update('jax_disable_jit', True)
 
 # Define config file - could change to FLAGS at some point
 config = {'seed': 123,
@@ -56,7 +56,7 @@ if __name__ == "__main__":
     config['alpha_soft_update'] = args.soft_update
 
     # Set whether to train and/or evaluate
-    logging_bool = True
+    logging_bool = False
     evaluate_bool = False
 
     if logging_bool:
@@ -185,12 +185,17 @@ if __name__ == "__main__":
             gammas = np.power(gammas, np.array(batch.intervals))
 
             # Learn the Q values
-            agent.refresh_keys()
+            next_state_values = []
+            for _ in range(100):
+                agent.refresh_keys()
+                next_state_values += [np.expand_dims(
+                    np.array(agent.target_value(batch.next_states,
+                                                rngs={'dropout': agent.target_value_key})[1]), 0)]
 
-            next_state_values = np.array(agent.target_value(batch.next_states,
-                                                            rngs={'dropout': agent.target_value_key})[1])
+            next_state_values = np.concatenate(next_state_values, axis=0)
+
             discounted_rewards_for_critic = (np.array(batch.rewards)
-                                             + gammas * next_state_values * (1 - np.array(batch.dones)))
+                                             + gammas * next_state_values.mean(0) * (1 - np.array(batch.dones)))
 
             batch = alter_batch(batch, discounted_rewards=jnp.array(discounted_rewards_for_critic), next_states=None,
                                 dones=None, intervals=None, rewards=None)
@@ -201,10 +206,17 @@ if __name__ == "__main__":
                                                   critic=True)
 
             # Learn the expectile V(s) values
-            agent.refresh_keys()
+            q1_s = []
+            q2_s = []
+            for _ in range(100):
+                agent.refresh_keys()
+                q1, q2 = agent.critic(batch.states,
+                                      rngs={'dropout': agent.critic_key})[1]
+                q1_s += [np.expand_dims(np.array(q1), 0)]
+                q2_s += [np.expand_dims(np.array(q2), 0)]
 
-            discounted_rewards_for_value = agent.critic(batch.states,
-                                                        rngs={'dropout': agent.critic_key})[1]
+            discounted_rewards_for_value = np.minimum(np.concatenate(q1_s, axis=0).mean(0),
+                                                      np.concatenate(q2_s, axis=0).mean(0))
             discounted_rewards_for_value = filter_to_action(discounted_rewards_for_value, batch.actions)
 
             batch = alter_batch(batch, discounted_rewards=jnp.array(discounted_rewards_for_value))
@@ -250,43 +262,56 @@ if __name__ == "__main__":
 
         def iter_through_data(input_data, current_agent):
             current_sample_values = []
-            current_critic_values = []
+            current_critic_values_1 = []
+            current_critic_values_2 = []
             for i in range(ceil(input_data.states.shape[0] / step_size)):
                 current_agent.refresh_keys()
                 idx = slice(i * step_size, (i + 1) * step_size, 1)
                 state_value_iter = current_agent.target_value(input_data.states[idx],
                                                               rngs={'dropout': current_agent.target_value_key})[1]
 
-                critic_value_iter = current_agent.critic(input_data.states[idx],
-                                                         rngs={'dropout': current_agent.critic_key})[1]
-                critic_value_iter = filter_to_action(critic_value_iter, input_data.actions[idx])
+                critic_value_iter_1, critic_value_iter_2 = current_agent.critic(input_data.states[idx],
+                                                                                rngs={'dropout':
+                                                                                          current_agent.critic_key})[1]
+                critic_value_iter_1 = filter_to_action(critic_value_iter_1, input_data.actions[idx])
+                critic_value_iter_2 = filter_to_action(critic_value_iter_2, input_data.actions[idx])
 
                 current_sample_values += [state_value_iter]
-                current_critic_values += [critic_value_iter]
+                current_critic_values_1 += [critic_value_iter_1]
+                current_critic_values_2 += [critic_value_iter_2]
 
             current_sample_values = np.concatenate(current_sample_values).reshape(chunk_shape)
-            current_critic_values = np.concatenate(current_critic_values).reshape(chunk_shape)
+            current_critic_values_1 = np.concatenate(current_critic_values_1).reshape(chunk_shape)
+            current_critic_values_2 = np.concatenate(current_critic_values_2).reshape(chunk_shape)
 
-            return current_agent, current_sample_values, current_critic_values
+            return current_agent, current_sample_values, (current_critic_values_1, current_critic_values_2)
 
-        agent, state_values, critic_values = iter_through_data(data, agent)
+        agent, state_values, (critic_values_1, critic_values_2) = iter_through_data(data, agent)
 
         for _ in range(15):
             progress_bar(_, 15)
 
-            agent, sample_state_values, sample_critic_values = iter_through_data(data, agent)
+            agent, sample_state_values, (sample_critic_values_1, sample_critic_values_2) = iter_through_data(data,
+                                                                                                             agent)
 
             state_values = np.concatenate((state_values, sample_state_values))
-            critic_values = np.concatenate((critic_values, sample_critic_values))
+            critic_values_1 = np.concatenate((critic_values_1, sample_critic_values_1))
+            critic_values_2 = np.concatenate((critic_values_2, sample_critic_values_2))
+
+        q1_mu = np.mean(critic_values_1, axis=0)
+        q1_std = np.std(critic_values_1, axis=0)
+        q2_mu = np.mean(critic_values_2, axis=0)
+        q2_std = np.std(critic_values_2, axis=0)
+        q_bool = np.where(q1_mu < q2_mu)
 
         state_values_mean = np.mean(state_values, axis=0)
         state_values_std = np.std(state_values, axis=0)
-        critic_values_mean = np.mean(critic_values, axis=0)
-        critic_values_std = np.std(critic_values, axis=0)
+        critic_values_mean, critic_values_std = np.where(q_bool, q1_mu, q2_mu), np.where(q_bool, q1_std, q2_std)
 
         advantages = critic_values_mean - state_values_mean
-        advantages_std = np.sqrt(state_values_std ** 2 + critic_values_std ** 2)
+
         """
+        advantages_std = np.sqrt(state_values_std ** 2 + critic_values_std ** 2)
         cdf = 1 - norm.cdf(0, advantages, advantages_std)
         if 'gaussian_confidence' in config.keys() and config['gaussian_confidence'] is not None:
             filter_point = config['gaussian_confidence']
