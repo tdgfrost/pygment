@@ -5,11 +5,12 @@ import jax.numpy as jnp
 from stable_baselines3.common.env_util import make_vec_env
 import wandb
 from math import ceil
+import jax
 
 # Set jax to CPU
-# jax.config.update('jax_platform_name', 'cpu')
+jax.config.update('jax_platform_name', 'cpu')
 # jax.config.update("jax_debug_nans", True)
-# jax.config.update('jax_disable_jit', True)
+jax.config.update('jax_disable_jit', True)
 
 # Define config file - could change to FLAGS at some point
 config = {'seed': 123,
@@ -39,7 +40,7 @@ config = {'seed': 123,
 if __name__ == "__main__":
     from core.agent import IQLAgent
     from core.common import (load_data, progress_bar, alter_batch, Batch, filter_to_action,
-                             calc_traj_discounted_rewards, move_to_gpu, filter_dataset)
+                             calc_traj_discounted_rewards, move_to_gpu, filter_dataset, split_output)
     from core.evaluate import evaluate_envs, run_and_animate
     from core.envs import make_variable_env
     import argparse
@@ -56,7 +57,7 @@ if __name__ == "__main__":
     config['alpha_soft_update'] = args.soft_update
 
     # Set whether to train and/or evaluate
-    logging_bool = True
+    logging_bool = False
     evaluate_bool = False
 
     if logging_bool:
@@ -184,27 +185,27 @@ if __name__ == "__main__":
             gammas = np.ones(shape=len(batch.rewards)) * config['gamma']
             gammas = np.power(gammas, np.array(batch.intervals))
 
-            next_state_values = np.array(agent.target_value(batch.next_states)[1])
+            next_state_values_mu, _ = split_output(np.array(agent.target_value(batch.next_states)[1]))
             discounted_rewards_for_critic = (np.array(batch.rewards)
-                                             + gammas * next_state_values * (1 - np.array(batch.dones)))
+                                             + gammas * next_state_values_mu * (1 - np.array(batch.dones)))
 
             batch = alter_batch(batch, discounted_rewards=jnp.array(discounted_rewards_for_critic), next_states=None,
                                 dones=None, intervals=None, rewards=None)
 
             # Perform the update step for critic networks
             critic_loss_info = agent.update_async(batch,
-                                                  critic_loss_fn={'mse': 0},
+                                                  critic_loss_fn={'gaussian_mse': 0},
                                                   critic=True)
 
             # Perform the update step for the value network
-            discounted_rewards_for_value = jnp.minimum(*agent.critic(batch.states)[1])
+            discounted_rewards_for_value, _ = split_output(jnp.minimum(*agent.critic(batch.states)[1]))
             discounted_rewards_for_value = filter_to_action(discounted_rewards_for_value, batch.actions)
 
             batch = alter_batch(batch, discounted_rewards=jnp.array(discounted_rewards_for_value))
 
             # Perform the update step for interval value and critic networks
             value_loss_info = agent.update_async(batch,
-                                                 value_loss_fn={'expectile': 0},
+                                                 value_loss_fn={'gaussian_expectile': 0},
                                                  expectile=config['expectile'],
                                                  value=True)
 
