@@ -130,3 +130,19 @@ def ppo_loss(logits, batch, clip_ratio=0.2, **kwargs):
 
     # Return the loss term
     return loss
+
+
+def gaussian_mse_loss(pred, batch, **kwargs):
+    pred_mu, pred_std = pred
+    eps = 1e-8 if 'eps' not in kwargs.keys() else kwargs['eps']
+    return 0.5 * (jnp.log(jnp.maximum(pred_std ** 2, eps))
+                  + (pred_mu - batch.discounted_rewards) ** 2 / jnp.maximum(pred_std ** 2, eps))
+
+
+def gaussian_expectile_loss(pred, batch, expectile=0.5, **kwargs):
+    pred_mu, pred_std = pred
+    eps = 1e-8 if 'eps' not in kwargs.keys() else kwargs['eps']
+    diff = pred_mu - batch.discounted_rewards
+    weight = jnp.where(diff > 0, (1 - expectile), expectile)
+    return 0.5 * (jnp.log(jnp.maximum(pred_std ** 2, eps))
+                  + weight * (pred_mu - batch.discounted_rewards) ** 2 / jnp.maximum(pred_std ** 2, eps))

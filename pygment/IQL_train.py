@@ -197,7 +197,7 @@ if __name__ == "__main__":
 
             # Perform the update step for critic networks
             critic_loss_info = agent.update_async(batch,
-                                                  critic_loss_fn={'mse': 0},
+                                                  critic_loss_fn={'gaussian_mse': 0},
                                                   critic=True)
 
             # Learn the expectile V(s) values
@@ -211,7 +211,7 @@ if __name__ == "__main__":
 
             # Perform the update step for interval value and critic networks
             value_loss_info = agent.update_async(batch,
-                                                 value_loss_fn={'expectile': 0},
+                                                 value_loss_fn={'gaussian_expectile': 0},
                                                  expectile=config['expectile'],
                                                  value=True)
 
