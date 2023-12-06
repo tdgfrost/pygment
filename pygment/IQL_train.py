@@ -39,7 +39,8 @@ config = {'seed': 123,
 if __name__ == "__main__":
     from core.agent import IQLAgent
     from core.common import (load_data, progress_bar, alter_batch, Batch, filter_to_action,
-                             calc_traj_discounted_rewards, move_to_gpu, filter_dataset)
+                             calc_traj_discounted_rewards, move_to_gpu, filter_dataset, montecarlodropout_value,
+                             montecarlodropout_critic)
     from core.evaluate import evaluate_envs, run_and_animate
     from core.envs import make_variable_env
     import argparse
@@ -185,17 +186,13 @@ if __name__ == "__main__":
             gammas = np.power(gammas, np.array(batch.intervals))
 
             # Learn the Q values
-            next_state_values = []
-            for _ in range(100):
-                agent.refresh_keys()
-                next_state_values += [np.expand_dims(
-                    np.array(agent.target_value(batch.next_states,
-                                                rngs={'dropout': agent.target_value_key})[1]), 0)]
 
-            next_state_values = np.concatenate(next_state_values, axis=0)
+            agent.refresh_keys()
+            next_state_values, _ = montecarlodropout_value(agent.target_value, batch.next_states,
+                                                           agent.target_value_key)
 
             discounted_rewards_for_critic = (np.array(batch.rewards)
-                                             + gammas * next_state_values.mean(0) * (1 - np.array(batch.dones)))
+                                             + gammas * next_state_values * (1 - np.array(batch.dones)))
 
             batch = alter_batch(batch, discounted_rewards=jnp.array(discounted_rewards_for_critic), next_states=None,
                                 dones=None, intervals=None, rewards=None)
@@ -206,18 +203,9 @@ if __name__ == "__main__":
                                                   critic=True)
 
             # Learn the expectile V(s) values
-            q1_s = []
-            q2_s = []
-            for _ in range(100):
-                agent.refresh_keys()
-                q1, q2 = agent.critic(batch.states,
-                                      rngs={'dropout': agent.critic_key})[1]
-                q1_s += [np.expand_dims(np.array(q1), 0)]
-                q2_s += [np.expand_dims(np.array(q2), 0)]
-
-            discounted_rewards_for_value = np.minimum(np.concatenate(q1_s, axis=0).mean(0),
-                                                      np.concatenate(q2_s, axis=0).mean(0))
-            discounted_rewards_for_value = filter_to_action(discounted_rewards_for_value, batch.actions)
+            agent.refresh_keys()
+            discounted_rewards_for_value, _ = montecarlodropout_critic(agent.critic, batch.states,
+                                                                       agent.critic_key, batch.actions)
 
             batch = alter_batch(batch, discounted_rewards=jnp.array(discounted_rewards_for_value))
 
