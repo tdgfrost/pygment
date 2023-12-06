@@ -187,13 +187,14 @@ if __name__ == "__main__":
 
             next_state_values_mu, next_state_values_std = split_output(np.array(agent.target_value(batch.next_states)[1]))
             # Try to sample from the distribution as part of the Bellman backup
+            """
             sampled_next_state_values = np.random.normal(next_state_values_mu, next_state_values_std)
             discounted_rewards_for_critic = (np.array(batch.rewards)
                                              + gammas * sampled_next_state_values * (1 - np.array(batch.dones)))
             """
             discounted_rewards_for_critic = (np.array(batch.rewards)
                                              + gammas * next_state_values_mu * (1 - np.array(batch.dones)))
-            """
+
             batch = alter_batch(batch, discounted_rewards=jnp.array(discounted_rewards_for_critic), next_states=None,
                                 dones=None, intervals=None, rewards=None)
 
@@ -248,12 +249,12 @@ if __name__ == "__main__":
         for i in range(ceil(data.states.shape[0] / step_size)):
             progress_bar(i, ceil(data.states.shape[0] / step_size))
             idx = slice(i * step_size, (i + 1) * step_size, 1)
-            state_values = agent.target_value(data.states[idx])[1]
+            state_values_mu, _ = agent.target_value(data.states[idx])[1]
 
-            critic_values = jnp.minimum(*agent.critic(data.states[idx])[1])
-            critic_values = filter_to_action(critic_values, data.actions[idx])
+            critic_values_mu, _ = split_output(jnp.minimum(*agent.critic(data.states[idx])[1]))
+            critic_values_mu = filter_to_action(critic_values_mu, data.actions[idx])
 
-            advantages += [critic_values - state_values]
+            advantages += [critic_values_mu - state_values_mu]
 
         advantages = np.concatenate(advantages)
 
