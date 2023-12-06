@@ -66,7 +66,8 @@ def update_q(rng: PRNGKey, critic: Model, batch: Batch, **kwargs) -> Tuple[Model
 
     def critic_loss_fn(critic_params: Params) -> tuple[Array, dict[str, Array]]:
         # Generate Q values from each of the two critic networks
-        (layer_outputs1, layer_outputs2), (q1, q2) = critic.apply({'params': critic_params}, states, rngs={'dropout': rng})
+        layer_outputs, (q1, q2) = critic.apply({'params': critic_params}, states,
+                                               rngs={'dropout': rng})
 
         # Select the sampled actions
         """
@@ -87,7 +88,7 @@ def update_q(rng: PRNGKey, critic: Model, batch: Batch, **kwargs) -> Tuple[Model
         # Return the loss value, plus metadata
         return critic_loss, {
             'critic_loss': critic_loss,
-            'layer_outputs': (layer_outputs1, layer_outputs2),
+            'layer_outputs': layer_outputs,
         }
 
     # Calculate the updated model parameters using the loss function
