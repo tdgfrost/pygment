@@ -8,7 +8,7 @@ from math import ceil
 import jax
 
 # Set jax to CPU
-# jax.config.update('jax_platform_name', 'cpu')
+jax.config.update('jax_platform_name', 'cpu')
 # jax.config.update("jax_debug_nans", True)
 # jax.config.update('jax_disable_jit', True)
 
@@ -39,8 +39,7 @@ config = {'seed': 123,
 if __name__ == "__main__":
     from core.agent import IQLAgent
     from core.common import (load_data, progress_bar, alter_batch, Batch, filter_to_action,
-                             calc_traj_discounted_rewards, move_to_gpu, filter_dataset, montecarlodropout_value,
-                             montecarlodropout_critic)
+                             calc_traj_discounted_rewards, move_to_gpu, filter_dataset)
     from core.evaluate import evaluate_envs, run_and_animate
     from core.envs import make_variable_env
     import argparse
@@ -57,7 +56,7 @@ if __name__ == "__main__":
     config['alpha_soft_update'] = args.soft_update
 
     # Set whether to train and/or evaluate
-    logging_bool = True
+    logging_bool = False
     evaluate_bool = False
 
     if logging_bool:
@@ -186,13 +185,12 @@ if __name__ == "__main__":
             gammas = np.power(gammas, np.array(batch.intervals))
 
             # Learn the Q values
-
             agent.refresh_keys()
-            next_state_values, _ = montecarlodropout_value(agent.target_value, batch.next_states,
-                                                           agent.target_value_key)
+            next_state_values = agent.target_value(jnp.tile(batch.next_states, (20, 1, 1)),
+                                                   rngs={'dropout': agent.target_value_key})[1]
 
             discounted_rewards_for_critic = (np.array(batch.rewards)
-                                             + gammas * next_state_values * (1 - np.array(batch.dones)))
+                                             + gammas * next_state_values.mean(0) * (1 - np.array(batch.dones)))
 
             batch = alter_batch(batch, discounted_rewards=jnp.array(discounted_rewards_for_critic), next_states=None,
                                 dones=None, intervals=None, rewards=None)
@@ -204,10 +202,12 @@ if __name__ == "__main__":
 
             # Learn the expectile V(s) values
             agent.refresh_keys()
-            discounted_rewards_for_value, _ = montecarlodropout_critic(agent.critic, batch.states,
-                                                                       agent.critic_key, batch.actions)
+            q1, q2 = agent.critic(jnp.tile(batch.states, (20, 1, 1)),
+                                  rngs={'dropout': agent.critic_key})[1]
+            discounted_rewards_for_value = jnp.minimum(q1.mean(0), q2.mean(0))
+            discounted_rewards_for_value = filter_to_action(discounted_rewards_for_value, batch.actions)
 
-            batch = alter_batch(batch, discounted_rewards=jnp.array(discounted_rewards_for_value))
+            batch = alter_batch(batch, discounted_rewards=discounted_rewards_for_value)
 
             # Perform the update step for interval value and critic networks
             value_loss_info = agent.update_async(batch,

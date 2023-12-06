@@ -320,35 +320,3 @@ def filter_dataset(batch: Batch, boolean_identity, target_keys: list):
 
     return Batch(**filtered_batch)
 
-
-@jax.jit
-def montecarlodropout_value(network, states, random_key, actions=None):
-    sampled_values = []
-    for _ in range(100):
-        random_key, rng = jax.random.split(random_key)
-        sampled_values += [jnp.expand_dims(
-            network(states, rngs={'dropout': rng})[1], 0)]
-    sampled_values = jnp.concatenate(sampled_values)
-
-    return jnp.mean(sampled_values, 0), jnp.std(sampled_values, 0)
-
-
-@jax.jit
-def montecarlodropout_critic(network, states, random_key, actions=None):
-    sampled_values = []
-    for _ in range(20):
-        random_key, rng = jax.random.split(random_key)
-        pred = network(states, rngs={'dropout': rng})[1]
-        pred_1, pred_2 = pred
-        pred_1 = jnp.expand_dims(jnp.expand_dims(filter_to_action(pred_1, actions), 0), 0)
-        pred_2 = jnp.expand_dims(jnp.expand_dims(filter_to_action(pred_2, actions), 0), 0)
-        pred = jnp.concatenate((pred_1, pred_2), axis=1)
-        sampled_values += [pred]
-
-    sampled_values = jnp.concatenate(sampled_values, axis=0)
-    q1, q2 = sampled_values[:, 0, :], sampled_values[:, 1, :]
-    q_bool = q1 < q2
-    q1_mu, q1_std = jnp.mean(q1, 0), jnp.std(q1, 0)
-    q2_mu, q2_std = jnp.mean(q2, 0), jnp.std(q2, 0)
-    return jnp.where(q_bool, q1_mu, q2_mu), jnp.where(q_bool, q1_std, q2_std)
-
