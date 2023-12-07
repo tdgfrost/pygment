@@ -17,7 +17,8 @@ config = {'seed': 123,
           'epochs': 100000,
           'env_id': 'LunarLander-v2',
           'early_stopping': jnp.array(1000),
-          'batch_size': 10000,
+          'batch_size': 1024,
+          'monte_carlo_sample_size': 20,
           'step_delay': 11,
           'sync_steps': 20,
           'expectile': 0.5,
@@ -186,7 +187,8 @@ if __name__ == "__main__":
 
             # Learn the Q values
             agent.refresh_keys()
-            next_state_values = agent.target_value(jnp.tile(batch.next_states, (20, 1, 1)),
+            next_state_values = agent.target_value(jnp.tile(batch.next_states, (config['monte_carlo_sample_size'],
+                                                                                1, 1)),
                                                    rngs={'dropout': agent.target_value_key})[1]
 
             discounted_rewards_for_critic = (np.array(batch.rewards)
@@ -202,7 +204,7 @@ if __name__ == "__main__":
 
             # Learn the expectile V(s) values
             agent.refresh_keys()
-            q1, q2 = agent.critic(jnp.tile(batch.states, (20, 1, 1)),
+            q1, q2 = agent.critic(jnp.tile(batch.states, (config['monte_carlo_sample_size'], 1, 1)),
                                   rngs={'dropout': agent.critic_key})[1]
             discounted_rewards_for_value = jnp.minimum(q1.mean(0), q2.mean(0))
             discounted_rewards_for_value = filter_to_action(discounted_rewards_for_value, batch.actions)
@@ -245,10 +247,9 @@ if __name__ == "__main__":
         print('\n\n', '=' * 50, '\n', ' ' * 3, '\U0001F9D9' * 3, ' ' * 1, f'Calculating uncertainty',
               ' ' * 2, '\U0001F9D9' * 3, '\n', '=' * 50, '\n')
 
-        mc_sample_size = 20
-        step_size = int(5e5) // mc_sample_size
+        step_size = int(5e5) // config['monte_carlo_sample_size']
 
-        def iter_through_data(input_states, actions, current_agent):
+        def iter_through_data(input_states, actions, current_agent, mc_sample_size=config['monte_carlo_sample_size']):
             current_sample_values = []
             current_critic_values_1 = []
             current_critic_values_2 = []
@@ -263,9 +264,9 @@ if __name__ == "__main__":
                                                                                 rngs={'dropout':
                                                                                           current_agent.critic_key})[1]
                 critic_value_iter_1 = filter_to_action(critic_value_iter_1.reshape(-1, current_agent.action_dim),
-                                                       actions[idx].reshape(-1)).reshape(step_size, -1)
+                                                       actions[idx].reshape(-1)).reshape(-1, mc_sample_size)
                 critic_value_iter_2 = filter_to_action(critic_value_iter_2.reshape(-1, current_agent.action_dim),
-                                                       actions[idx].reshape(-1)).reshape(step_size, -1)
+                                                       actions[idx].reshape(-1)).reshape(-1, mc_sample_size)
 
                 current_sample_values += [state_value_iter]
                 current_critic_values_1 += [critic_value_iter_1]
@@ -277,11 +278,12 @@ if __name__ == "__main__":
 
             return current_agent, current_sample_values, (current_critic_values_1, current_critic_values_2)
 
-        agent, state_values, (critic_values_1, critic_values_2) = iter_through_data(jnp.tile(jnp.expand_dims(data.states, 1),
-                                                                                             (1, mc_sample_size, 1)),
-                                                                                    jnp.tile(jnp.expand_dims(data.actions, 1),
-                                                                                             (1, mc_sample_size)),
-                                                                                    agent)
+        agent, state_values, (critic_values_1, critic_values_2) = iter_through_data(
+            jnp.tile(jnp.expand_dims(data.states, 1),
+                     (1, config['monte_carlo_sample_size'], 1)),
+            jnp.tile(jnp.expand_dims(data.actions, 1),
+                     (1, config['monte_carlo_sample_size'])),
+            agent)
 
         q1_mu = np.mean(critic_values_1, axis=-1)
         q1_std = np.std(critic_values_1, axis=-1)
