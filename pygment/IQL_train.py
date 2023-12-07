@@ -8,7 +8,7 @@ from math import ceil
 import jax
 
 # Set jax to CPU
-jax.config.update('jax_platform_name', 'cpu')
+# jax.config.update('jax_platform_name', 'cpu')
 # jax.config.update("jax_debug_nans", True)
 # jax.config.update('jax_disable_jit', True)
 
@@ -56,7 +56,7 @@ if __name__ == "__main__":
     config['alpha_soft_update'] = args.soft_update
 
     # Set whether to train and/or evaluate
-    logging_bool = False
+    logging_bool = True
     evaluate_bool = False
 
     if logging_bool:
@@ -245,55 +245,52 @@ if __name__ == "__main__":
         print('\n\n', '=' * 50, '\n', ' ' * 3, '\U0001F9D9' * 3, ' ' * 1, f'Calculating uncertainty',
               ' ' * 2, '\U0001F9D9' * 3, '\n', '=' * 50, '\n')
 
-        step_size = int(5e5)
-        chunk_shape = (1, len(data.actions))
+        mc_sample_size = 20
+        step_size = int(5e5) // mc_sample_size
 
-        def iter_through_data(input_data, current_agent):
+        def iter_through_data(input_states, actions, current_agent):
             current_sample_values = []
             current_critic_values_1 = []
             current_critic_values_2 = []
-            for i in range(ceil(input_data.states.shape[0] / step_size)):
+            for i in range(ceil(input_states.shape[0] / step_size)):
+                progress_bar(i, ceil(input_states.shape[0] / step_size))
                 current_agent.refresh_keys()
                 idx = slice(i * step_size, (i + 1) * step_size, 1)
-                state_value_iter = current_agent.target_value(input_data.states[idx],
+                state_value_iter = current_agent.target_value(input_states[idx],
                                                               rngs={'dropout': current_agent.target_value_key})[1]
 
-                critic_value_iter_1, critic_value_iter_2 = current_agent.critic(input_data.states[idx],
+                critic_value_iter_1, critic_value_iter_2 = current_agent.critic(input_states[idx],
                                                                                 rngs={'dropout':
                                                                                           current_agent.critic_key})[1]
-                critic_value_iter_1 = filter_to_action(critic_value_iter_1, input_data.actions[idx])
-                critic_value_iter_2 = filter_to_action(critic_value_iter_2, input_data.actions[idx])
+                critic_value_iter_1 = filter_to_action(critic_value_iter_1.reshape(-1, current_agent.action_dim),
+                                                       actions[idx].reshape(-1)).reshape(step_size, -1)
+                critic_value_iter_2 = filter_to_action(critic_value_iter_2.reshape(-1, current_agent.action_dim),
+                                                       actions[idx].reshape(-1)).reshape(step_size, -1)
 
                 current_sample_values += [state_value_iter]
                 current_critic_values_1 += [critic_value_iter_1]
                 current_critic_values_2 += [critic_value_iter_2]
 
-            current_sample_values = np.concatenate(current_sample_values).reshape(chunk_shape)
-            current_critic_values_1 = np.concatenate(current_critic_values_1).reshape(chunk_shape)
-            current_critic_values_2 = np.concatenate(current_critic_values_2).reshape(chunk_shape)
+            current_sample_values = np.concatenate(current_sample_values)
+            current_critic_values_1 = np.concatenate(current_critic_values_1)
+            current_critic_values_2 = np.concatenate(current_critic_values_2)
 
             return current_agent, current_sample_values, (current_critic_values_1, current_critic_values_2)
 
-        agent, state_values, (critic_values_1, critic_values_2) = iter_through_data(data, agent)
+        agent, state_values, (critic_values_1, critic_values_2) = iter_through_data(jnp.tile(jnp.expand_dims(data.states, 1),
+                                                                                             (1, mc_sample_size, 1)),
+                                                                                    jnp.tile(jnp.expand_dims(data.actions, 1),
+                                                                                             (1, mc_sample_size)),
+                                                                                    agent)
 
-        for _ in range(15):
-            progress_bar(_, 15)
+        q1_mu = np.mean(critic_values_1, axis=-1)
+        q1_std = np.std(critic_values_1, axis=-1)
+        q2_mu = np.mean(critic_values_2, axis=-1)
+        q2_std = np.std(critic_values_2, axis=-1)
+        q_bool = q1_mu < q2_mu
 
-            agent, sample_state_values, (sample_critic_values_1, sample_critic_values_2) = iter_through_data(data,
-                                                                                                             agent)
-
-            state_values = np.concatenate((state_values, sample_state_values))
-            critic_values_1 = np.concatenate((critic_values_1, sample_critic_values_1))
-            critic_values_2 = np.concatenate((critic_values_2, sample_critic_values_2))
-
-        q1_mu = np.mean(critic_values_1, axis=0)
-        q1_std = np.std(critic_values_1, axis=0)
-        q2_mu = np.mean(critic_values_2, axis=0)
-        q2_std = np.std(critic_values_2, axis=0)
-        q_bool = np.where(q1_mu < q2_mu)
-
-        state_values_mean = np.mean(state_values, axis=0)
-        state_values_std = np.std(state_values, axis=0)
+        state_values_mean = np.mean(state_values, axis=-1)
+        state_values_std = np.std(state_values, axis=-1)
         critic_values_mean, critic_values_std = np.where(q_bool, q1_mu, q2_mu), np.where(q_bool, q1_std, q2_std)
 
         advantages = critic_values_mean - state_values_mean
