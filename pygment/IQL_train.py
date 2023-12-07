@@ -8,17 +8,18 @@ from math import ceil
 import jax
 
 # Set jax to CPU
-# jax.config.update('jax_platform_name', 'cpu')
+jax.config.update('jax_platform_name', 'cpu')
 # jax.config.update("jax_debug_nans", True)
 # jax.config.update('jax_disable_jit', True)
 
 # Define config file - could change to FLAGS at some point
 config = {'seed': 123,
-          'epochs': 100000,
+          'epochs': 10000,
           'env_id': 'LunarLander-v2',
           'early_stopping': jnp.array(1000),
           'batch_size': 1024,
           'monte_carlo_sample_size': 20,
+          'temperature': 1,
           'step_delay': 11,
           'sync_steps': 20,
           'expectile': 0.5,
@@ -30,7 +31,7 @@ config = {'seed': 123,
           'gamma': 0.99,
           'lr': 0.001,
           'dropout_rate': 0.1,
-          'alpha_soft_update': 1,
+          'alpha_soft_update': 0.1,
           'hidden_dims': (256, 256, 256),
           'clipping': 1,
           'top_bar_coord': 1.2,  # 0.9,
@@ -193,6 +194,10 @@ if __name__ == "__main__":
 
             discounted_rewards_for_critic = (np.array(batch.rewards)
                                              + gammas * next_state_values.mean(0) * (1 - np.array(batch.dones)))
+
+            # UWAC - add variance-based weighting
+            weighting = config['temperature'] / jnp.var(next_state_values, 0)
+            discounted_rewards_for_critic *= weighting
 
             batch = alter_batch(batch, discounted_rewards=jnp.array(discounted_rewards_for_critic), next_states=None,
                                 dones=None, intervals=None, rewards=None)
