@@ -308,9 +308,9 @@ if __name__ == "__main__":
 
         q_bool = q1_mu < q2_mu
 
-        critic_values_mean, critic_values_std = np.where(q_bool, q1_mu, q2_mu), np.where(q_bool, q1_var, q2_var)
+        critic_values_mu, critic_values_std = np.where(q_bool, q1_mu, q2_mu), np.where(q_bool, q1_var, q2_var)
 
-        advantages = critic_values_mean - state_values_mu
+        advantages = critic_values_mu - state_values_mu
 
         """
         advantages_std = np.sqrt(state_values_std ** 2 + critic_values_std ** 2)
