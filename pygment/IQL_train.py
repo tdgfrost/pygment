@@ -8,13 +8,13 @@ from math import ceil
 import jax
 
 # Set jax to CPU
-# jax.config.update('jax_platform_name', 'cpu')
+jax.config.update('jax_platform_name', 'cpu')
 # jax.config.update("jax_debug_nans", True)
 # jax.config.update('jax_disable_jit', True)
 
 # Define config file - could change to FLAGS at some point
 config = {'seed': 123,
-          'epochs': 100000,
+          'epochs': 5,
           'env_id': 'LunarLander-v2',
           'early_stopping': jnp.array(1000),
           'batch_size': 1024,
@@ -58,7 +58,7 @@ if __name__ == "__main__":
     config['alpha_soft_update'] = args.soft_update
 
     # Set whether to train and/or evaluate
-    logging_bool = True
+    logging_bool = False
     evaluate_bool = False
 
     if logging_bool:
@@ -252,65 +252,55 @@ if __name__ == "__main__":
         print('\n\n', '=' * 50, '\n', ' ' * 3, '\U0001F9D9' * 3, ' ' * 1, f'Calculating uncertainty',
               ' ' * 2, '\U0001F9D9' * 3, '\n', '=' * 50, '\n')
 
-        step_size = int(5e5) // config['monte_carlo_sample_size']
+        mc_sample_size = config['monte_carlo_sample_size']
+        step_size = int(5e5) // mc_sample_size
 
-        def iter_through_data(input_states, actions, current_agent, mc_sample_size=config['monte_carlo_sample_size']):
-            def reduce(x):
-                return np.array([jnp.mean(x, -1), jnp.var(x, -1)]).T
+        def expand(x):
+            if len(x.shape) == 2:
+                return jnp.tile(jnp.expand_dims(x, 1), (1, mc_sample_size, 1))
+            return jnp.tile(jnp.expand_dims(x, 1), (1, mc_sample_size))
 
-            def reduce_critic(actions, q_tuple):
-                q_s = []
-                for q in q_tuple:
-                    q_s += [reduce(filter_to_action(q.reshape(-1, current_agent.action_dim),
-                                                    actions).reshape(-1, mc_sample_size))]
-                return q_s[0], q_s[1]
+        def reduce(x):
+            return np.array([jnp.mean(x.reshape(-1, mc_sample_size), -1),
+                             jnp.var(x.reshape(-1, mc_sample_size), -1)]).T
 
-            current_sample_values = []
-            current_critic_values_1 = []
-            current_critic_values_2 = []
+        def reduce_critic(actions, q_tuple):
+            q_s = []
+            for q in q_tuple:
+                q_s += [reduce(filter_to_action(q.reshape(-1, agent.action_dim),
+                                                actions.reshape(-1)))]
+            return q_s[0], q_s[1]
 
-            for i in range(ceil(input_states.shape[0] / step_size)):
-                progress_bar(i, ceil(input_states.shape[0] / step_size))
-                current_agent.refresh_keys()
-                idx = slice(i * step_size, (i + 1) * step_size, 1)
+        state_values = []
+        q1 = []
+        q2 = []
 
-                current_sample_values += [reduce(
-                    current_agent.target_value(input_states[idx],
-                                               rngs={'dropout': current_agent.target_value_key}
-                                               )[1].reshape(-1, mc_sample_size))]
-                (critic_value_iter_1,
-                 critic_value_iter_2) = reduce_critic(actions[idx].reshape(-1),
-                                                      current_agent.critic(input_states[idx],
-                                                                           rngs={'dropout':
-                                                                                     current_agent.critic_key})[1])
+        for i in range(ceil(data.states.shape[0] / step_size)):
+            progress_bar(i, ceil(data.states.shape[0] / step_size))
+            agent.refresh_keys()
+            idx = slice(i * step_size, (i + 1) * step_size, 1)
 
-                current_critic_values_1 += [critic_value_iter_1]
-                current_critic_values_2 += [critic_value_iter_2]
+            state_values += [reduce(
+                agent.target_value(expand(data.states[idx]),
+                                   rngs={'dropout': agent.target_value_key})[1])]
 
-            current_sample_values = np.concatenate(current_sample_values)
-            current_critic_values_1 = np.concatenate(current_critic_values_1)
-            current_critic_values_2 = np.concatenate(current_critic_values_2)
+            (critic_value_iter_1,
+             critic_value_iter_2) = reduce_critic(expand(data.actions[idx]),
+                                                  agent.critic(expand(data.states[idx]),
+                                                               rngs={'dropout': agent.critic_key})[1])
 
-            return (current_agent,
-                    (current_sample_values[:, 0], current_sample_values[:, 1]),
-                    (current_critic_values_1[:, 0], current_critic_values_1[:, 1]),
-                    (current_critic_values_2[:, 0], current_critic_values_2[:, 1]))
+            q1 += [critic_value_iter_1]
+            q2 += [critic_value_iter_2]
 
-        (agent,
-         (state_values_mu, state_values_var),
-         (q1_mu, q1_var),
-         (q2_mu, q2_var)) = iter_through_data(
-            jnp.tile(jnp.expand_dims(data.states, 1),
-                     (1, config['monte_carlo_sample_size'], 1)),
-            jnp.tile(jnp.expand_dims(data.actions, 1),
-                     (1, config['monte_carlo_sample_size'])),
-            agent)
+        state_values = np.concatenate(state_values)[:, 0]  # [:, 0] is the mean, [:, 1] is the variance
+        q1 = np.concatenate(q1)[:, 0]
+        q2 = np.concatenate(q2)[:, 0]
 
-        q_bool = q1_mu < q2_mu
+        q_bool = q1 < q2
 
-        critic_values_mu, critic_values_std = np.where(q_bool, q1_mu, q2_mu), np.where(q_bool, q1_var, q2_var)
+        critic_values = np.where(q_bool, q1, q2)
 
-        advantages = critic_values_mu - state_values_mu
+        advantages = critic_values - state_values
 
         """
         advantages_std = np.sqrt(state_values_std ** 2 + critic_values_std ** 2)
