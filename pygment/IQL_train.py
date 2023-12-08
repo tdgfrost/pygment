@@ -196,7 +196,7 @@ if __name__ == "__main__":
                                              + gammas * next_state_values.mean(0) * (1 - np.array(batch.dones)))
 
             # UWAC - add variance-based weighting
-            weighting = config['temperature'] / jnp.var(next_state_values, 0)
+            weighting = jnp.clip(config['temperature'] / jnp.var(next_state_values, 0), 0, 1.5)
             discounted_rewards_for_critic *= weighting
 
             batch = alter_batch(batch, discounted_rewards=jnp.array(discounted_rewards_for_critic), next_states=None,
