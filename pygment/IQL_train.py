@@ -271,6 +271,8 @@ if __name__ == "__main__":
         data = filter_dataset(data, advantages > filter_point,
                               target_keys=['states', 'actions'])
 
+        del advantages
+
         data = alter_batch(data, discounted_rewards=None, next_states=None, dones=None, intervals=None,
                            rewards=None, len_actions=None, next_len_actions=None)
 
