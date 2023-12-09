@@ -2,7 +2,7 @@ from jax import Array
 
 from core.agent import Model
 from core.common import Params, InfoDict, Batch, filter_to_action
-from update.loss import mse_loss, expectile_loss
+from update.loss import mse_loss, expectile_loss, mixed_loss
 
 from typing import Tuple
 
@@ -17,7 +17,8 @@ def update_v(value: Model, batch: Batch, **kwargs) -> Tuple[Model, InfoDict]:
     """
 
     loss_fn = {'mse': mse_loss,
-               'expectile': expectile_loss}
+               'expectile': expectile_loss,
+               'mixed': mixed_loss}
 
     # Unpack the actions, states, and discounted rewards from the batch of samples
     states = batch.states

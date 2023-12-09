@@ -1,7 +1,7 @@
 import jax
 import jax.numpy as jnp
 import flax.linen as nn
-from core.common import filter_to_action
+from core.common import filter_to_action, alter_batch
 
 
 def convert_logits_to_action_logprobs(logits, actions, **kwargs):
@@ -52,6 +52,17 @@ def expectile_loss(pred, batch, expectile=0.8, **kwargs):
 
 def mse_loss(pred, batch, **kwargs):
     return (pred - batch.discounted_rewards) ** 2
+
+
+def mixed_loss(pred, batch, lambda_weight=0.5, **kwargs):
+    batch_mse = alter_batch(batch, discounted_rewards=batch.discounted_rewards['mse'])
+    batch_expectile = alter_batch(batch, discounted_rewards=batch.discounted_rewards['expectile'])
+
+    loss_mse = mse_loss(pred, batch_mse, **kwargs)
+    loss_expectile = expectile_loss(pred, batch_expectile, **kwargs)
+
+    loss = lambda_weight * loss_mse + (1 - lambda_weight) * loss_expectile
+    return loss
 
 
 def iql_loss(logits, batch, **kwargs):

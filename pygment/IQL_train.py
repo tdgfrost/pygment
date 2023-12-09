@@ -5,6 +5,7 @@ import jax.numpy as jnp
 from stable_baselines3.common.env_util import make_vec_env
 import wandb
 from math import ceil
+import jax
 
 # Set jax to CPU
 # jax.config.update('jax_platform_name', 'cpu')
@@ -23,13 +24,13 @@ config = {'seed': 123,
           'baseline_reward': 45,
           'n_episodes': 10000,
           'interval_probability': 0.25,
-          'top_actions_quantile': 0.5,
           'filter_point': 0,
           'gamma': 0.99,
           'actor_lr': 0.001,
           'value_lr': 0.001,
           'critic_lr': 0.001,
-          'alpha_soft_update': 1,
+          'alpha_soft_update': 0.1,
+          'lambda_weight': 0.5,
           'hidden_dims': (256, 256),
           'clipping': 1,
           'top_bar_coord': 1.2,  # 0.9,
@@ -164,7 +165,6 @@ if __name__ == "__main__":
             wandb.define_metric('actor_loss', summary='min')
             wandb.define_metric('critic_loss', summary='min')
             wandb.define_metric('value_loss', summary='min')
-            wandb.define_metric('expectile_loss', summary='min')
 
         for epoch in range(config['epochs']):
             if epoch > 0 and epoch % 100 == 0:
@@ -181,40 +181,38 @@ if __name__ == "__main__":
                                 states=batch.states + noise,
                                 next_states=batch.next_states + noise)
             """
-            # Use TD learning for the value and critic networks
+            # Use TD learning for the critic network
             gammas = np.ones(shape=len(batch.rewards)) * config['gamma']
             gammas = np.power(gammas, np.array(batch.intervals))
 
             next_state_values = np.array(agent.target_value(batch.next_states)[1])
-            discounted_rewards_for_critic = (np.array(batch.rewards)
-                                             + gammas * next_state_values * (1 - np.array(batch.dones)))
+            discounted_rewards_for_critic = jnp.array(np.array(batch.rewards)
+                                                      + gammas * next_state_values * (1 - np.array(batch.dones)))
 
-            batch = alter_batch(batch, discounted_rewards=jnp.array(discounted_rewards_for_critic), next_states=None,
+            batch = alter_batch(batch, discounted_rewards=discounted_rewards_for_critic, next_states=None,
                                 dones=None, intervals=None, rewards=None)
 
             # Perform the update step for critic networks
             loss_info = agent.update_async(batch,
-                                           value_loss_fn={'mse': 0},
                                            critic_loss_fn={'mse': 0},
-                                           value=True,
                                            critic=True)
 
-            # Perform the update step for the expectile value network
+            # Perform the update step for the value network
             discounted_rewards_for_value = jnp.minimum(*agent.critic(batch.states)[1])
             discounted_rewards_for_value = filter_to_action(discounted_rewards_for_value, batch.actions)
+            discounted_rewards_for_value = {'expectile': discounted_rewards_for_value,
+                                            'mse': discounted_rewards_for_critic}
 
-            batch = alter_batch(batch, discounted_rewards=jnp.array(discounted_rewards_for_value))
+            batch = alter_batch(batch, discounted_rewards=discounted_rewards_for_value)
 
             # Perform the update step for interval value and critic networks
-            expectile_loss_info = agent.update_async(batch,
-                                                     value_loss_fn={'expectile': 0},
-                                                     expectile=config['expectile'],
-                                                     expectile_value=True)
+            value_loss_info = agent.update_async(batch,
+                                                 value_loss_fn={'mixed': 0},
+                                                 expectile=config['expectile'],
+                                                 lambda_weight=config['lambda_weight'],
+                                                 value=True)
 
-            expectile_loss_info['expectile_loss'] = expectile_loss_info['value_loss']
-            del expectile_loss_info['value_loss']
-
-            loss_info.update(expectile_loss_info)
+            loss_info.update(value_loss_info)
 
             # Do a partial sync with the target network
             agent.sync_target(config['alpha_soft_update'])
@@ -226,7 +224,6 @@ if __name__ == "__main__":
                                   'gradient_step': epoch,
                                   'value_loss': loss_info['value_loss'],
                                   'critic_loss': loss_info['critic_loss'],
-                                  'expectile_loss': loss_info['expectile_loss'],
                                   }
 
                 wandb.log(logged_results)
@@ -250,7 +247,8 @@ if __name__ == "__main__":
         for i in range(ceil(data.states.shape[0] / step_size)):
             progress_bar(i, ceil(data.states.shape[0] / step_size))
             idx = slice(i * step_size, (i + 1) * step_size, 1)
-            state_values = agent.expectile_value(data.states[idx])[1]
+            # state_values = agent.expectile_value(data.states[idx])[1]
+            state_values = agent.target_value(data.states[idx])[1]
 
             critic_values = jnp.minimum(*agent.critic(data.states[idx])[1])
             critic_values = filter_to_action(critic_values, data.actions[idx])
